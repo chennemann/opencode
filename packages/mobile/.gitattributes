@@ -93,9 +93,9 @@
 # Exclude files from exporting
 #
 
-.gitattributes export-ignore
-.gitignore     export-ignore
-.gitkeep       export-ignore
+.gitattributes export-ignore eol=lf
+.gitignore     export-ignore eol=lf
+.gitkeep       export-ignore eol=lf
 
 # Java sources
 *.java          text eol=lf diff=java
