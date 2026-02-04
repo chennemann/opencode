@@ -111,11 +111,5 @@ Changes:
 - Bullet list of what changed
 ```
 
-Create exactly one commit using **JJ**:
-
-```bash
-jj commit -m "<formatted commit message>"
-```
-
 Once all is done, **stop immediately**.
 Do **not** suggest next steps, and do **not** continue with any additional work.

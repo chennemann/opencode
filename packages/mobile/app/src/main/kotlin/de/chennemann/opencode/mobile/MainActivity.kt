@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -63,7 +64,20 @@ class MainActivity : ComponentActivity() {
                                     verticalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
                                     Text("OpenCode Android")
-                                    when (val status = state) {
+                                    TextField(
+                                        value = state.url,
+                                        onValueChange = model::updateUrl,
+                                        label = { Text("Server URL") },
+                                        singleLine = true,
+                                    )
+                                    if (state.discovered != null) {
+                                        Button(onClick = dropUnlessResumed {
+                                            model.useDiscovered()
+                                        }) {
+                                            Text("Use discovered: ${state.discovered}")
+                                        }
+                                    }
+                                    when (val status = state.status) {
                                         ServerState.Idle -> Text("Waiting for server check...")
                                         ServerState.Loading -> Text("Checking server...")
                                         is ServerState.Connected -> {
@@ -76,7 +90,7 @@ class MainActivity : ComponentActivity() {
                                     Button(onClick = dropUnlessResumed {
                                         model.refresh()
                                     }) {
-                                        Text("Retry connection")
+                                        Text("Connect")
                                     }
                                     Button(onClick = dropUnlessResumed {
                                         backStack.add(DetailRoute("123"))

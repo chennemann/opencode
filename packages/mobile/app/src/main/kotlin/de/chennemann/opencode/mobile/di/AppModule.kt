@@ -1,15 +1,15 @@
 package de.chennemann.opencode.mobile.di
 
-import de.chennemann.opencode.mobile.api.apis.DefaultApi
 import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
 import de.chennemann.opencode.mobile.home.HomeViewModel
+import de.chennemann.opencode.mobile.data.MdnsService
+import de.chennemann.opencode.mobile.db.AppDatabase
 import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.serialization.json.Json
+import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import org.koin.androidx.viewmodel.dsl.viewModel
 import org.koin.dsl.module
-
-private const val ApiUrl = "http://opencode.local:4000"
 
 val appModule = module {
     single {
@@ -19,12 +19,16 @@ val appModule = module {
     }
     single { OkHttp.create() }
     single {
-        DefaultApi(
-            baseUrl = ApiUrl,
-            httpClientEngine = get(),
+        AppDatabase(
+            AndroidSqliteDriver(
+                AppDatabase.Schema,
+                get(),
+                "app.db",
+            )
         )
     }
+    single { MdnsService(get()) }
     single { ServerService(get(), get()) }
-    single { ServerRepository(get()) }
+    single { ServerRepository(get(), get(), get()) }
     viewModel { HomeViewModel(get()) }
 }
