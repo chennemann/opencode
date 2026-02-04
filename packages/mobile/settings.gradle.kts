@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "mobile"
 include(":app")
+include(":api")
