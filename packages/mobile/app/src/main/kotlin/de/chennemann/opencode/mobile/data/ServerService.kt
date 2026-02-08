@@ -1,16 +1,47 @@
 package de.chennemann.opencode.mobile.data
 
 import de.chennemann.opencode.mobile.api.apis.DefaultApi
+import de.chennemann.opencode.mobile.api.models.SessionCreateRequest
 import io.ktor.client.engine.HttpClientEngine
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
+import io.ktor.utils.io.readUTF8Line
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 data class Health(
     val healthy: Boolean,
     val version: String,
+)
+
+data class ProjectInfo(
+    val id: String,
+    val worktree: String,
+    val name: String,
+)
+
+data class SessionInfo(
+    val id: String,
+    val title: String,
+    val version: String,
+    val directory: String,
+)
+
+data class SessionMessageInfo(
+    val id: String,
+    val role: String,
+    val text: String,
+)
+
+data class GlobalStreamEvent(
+    val directory: String,
+    val type: String,
+    val properties: JsonObject,
 )
 
 class ServerService(
@@ -44,5 +75,135 @@ class ServerService(
             healthy = healthy,
             version = version,
         )
+    }
+
+    suspend fun projects(baseUrl: String): List<ProjectInfo> {
+        val res = client(baseUrl).projectList(null)
+        if (!res.success) {
+            throw IllegalStateException("Server returned ${res.status}")
+        }
+        return json
+            .parseToJsonElement(res.response.bodyAsText())
+            .jsonArray
+            .mapNotNull {
+                val obj = it.jsonObject
+                val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val worktree = obj["worktree"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: worktree
+                ProjectInfo(
+                    id = id,
+                    worktree = worktree,
+                    name = name,
+                )
+            }
+    }
+
+    suspend fun sessions(baseUrl: String, worktree: String): List<SessionInfo> {
+        val res = client(baseUrl).sessionList(worktree, true, null, null, null)
+        if (!res.success) {
+            throw IllegalStateException("Server returned ${res.status}")
+        }
+        return json
+            .parseToJsonElement(res.response.bodyAsText())
+            .jsonArray
+            .mapNotNull {
+                val obj = it.jsonObject
+                val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val title = obj["title"]?.jsonPrimitive?.contentOrNull ?: "Session"
+                val version = obj["version"]?.jsonPrimitive?.contentOrNull ?: "unknown"
+                val directory = obj["directory"]?.jsonPrimitive?.contentOrNull ?: ""
+                SessionInfo(
+                    id = id,
+                    title = title,
+                    version = version,
+                    directory = directory,
+                )
+            }
+    }
+
+    suspend fun createSession(baseUrl: String, worktree: String, title: String): SessionInfo {
+        val res = client(baseUrl).sessionCreate(
+            worktree,
+            SessionCreateRequest(title = title),
+        )
+        if (!res.success) {
+            throw IllegalStateException("Server returned ${res.status}")
+        }
+        val obj = json.parseToJsonElement(res.response.bodyAsText()).jsonObject
+        val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: throw IllegalStateException("Invalid session payload")
+        val value = obj["title"]?.jsonPrimitive?.contentOrNull ?: "Session"
+        val version = obj["version"]?.jsonPrimitive?.contentOrNull ?: "unknown"
+        val directory = obj["directory"]?.jsonPrimitive?.contentOrNull ?: ""
+        return SessionInfo(
+            id = id,
+            title = value,
+            version = version,
+            directory = directory,
+        )
+    }
+
+    suspend fun sessionMessages(baseUrl: String, sessionId: String, directory: String): List<SessionMessageInfo> {
+        val res = client(baseUrl).sessionMessages(sessionId, directory, null)
+        if (!res.success) {
+            throw IllegalStateException("Server returned ${res.status}")
+        }
+        return json
+            .parseToJsonElement(res.response.bodyAsText())
+            .jsonArray
+            .mapNotNull {
+                val row = it.jsonObject
+                val info = row["info"]?.jsonObject ?: return@mapNotNull null
+                val id = info["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val role = info["role"]?.jsonPrimitive?.contentOrNull ?: "assistant"
+                val parts = row["parts"]?.jsonArray ?: return@mapNotNull null
+                val text = parts
+                    .mapNotNull {
+                        val obj = it.jsonObject
+                        val type = obj["type"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                        if (type != "text") return@mapNotNull null
+                        obj["text"]?.jsonPrimitive?.contentOrNull
+                    }
+                    .filter { it.isNotBlank() }
+                    .joinToString("\n")
+                val value = if (text.isBlank()) {
+                    val tags = parts
+                        .mapNotNull { it.jsonObject["type"]?.jsonPrimitive?.contentOrNull }
+                        .distinct()
+                        .joinToString(", ")
+                    if (tags.isBlank()) "(empty)" else "[$tags]"
+                } else {
+                    text
+                }
+                SessionMessageInfo(
+                    id = id,
+                    role = role,
+                    text = value,
+                )
+            }
+    }
+
+    suspend fun streamEvents(baseUrl: String, onEvent: suspend (GlobalStreamEvent) -> Unit) {
+        val res = client(baseUrl).globalEvent()
+        if (!res.success) {
+            throw IllegalStateException("Server returned ${res.status}")
+        }
+        val channel = res.response.bodyAsChannel()
+        while (!channel.isClosedForRead) {
+            val line = channel.readUTF8Line() ?: break
+            if (!line.startsWith("data:")) continue
+            val data = line.removePrefix("data:").trim()
+            if (data.isBlank()) continue
+            val root = json.parseToJsonElement(data).jsonObject
+            val payload = root["payload"]?.jsonObject ?: continue
+            val type = payload["type"]?.jsonPrimitive?.contentOrNull ?: continue
+            val properties = payload["properties"]?.jsonObject ?: JsonObject(emptyMap())
+            onEvent(
+                GlobalStreamEvent(
+                    directory = root["directory"]?.jsonPrimitive?.contentOrNull ?: "global",
+                    type = type,
+                    properties = properties,
+                )
+            )
+        }
     }
 }
