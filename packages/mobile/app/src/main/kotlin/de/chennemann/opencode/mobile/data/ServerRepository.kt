@@ -81,6 +81,10 @@ class ServerRepository(
         service.streamEvents(url.value, onEvent)
     }
 
+    suspend fun sendMessage(sessionId: String, directory: String, text: String) {
+        service.sendMessage(url.value, sessionId, directory, text)
+    }
+
     private suspend fun load() {
         val value = db.appDatabaseQueries.selectSetting(UrlKey).executeAsOneOrNull()
         if (value == null) return
