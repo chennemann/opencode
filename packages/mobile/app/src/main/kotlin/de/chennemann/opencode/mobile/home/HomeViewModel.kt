@@ -58,6 +58,10 @@ class HomeViewModel(
         service.send(text)
     }
 
+    fun loadMoreMessages() {
+        service.loadMoreMessages()
+    }
+
     override fun onCleared() {
         service.stop()
         super.onCleared()

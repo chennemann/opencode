@@ -116,6 +116,23 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier.weight(1f),
                                         state = list,
                                     ) {
+                                        if (state.canLoadMoreMessages || state.loadingMoreMessages) {
+                                            item("load-more") {
+                                                Button(
+                                                    onClick = dropUnlessResumed {
+                                                        model.loadMoreMessages()
+                                                    },
+                                                    enabled = !state.loadingMoreMessages,
+                                                ) {
+                                                    val label = if (state.loadingMoreMessages) {
+                                                        "Loading older messages..."
+                                                    } else {
+                                                        "Load older messages"
+                                                    }
+                                                    Text(label)
+                                                }
+                                            }
+                                        }
                                         items(state.focusedMessages, key = { it.id }) { message ->
                                             val user = message.role == "user"
                                             val label = if (user) "User" else "Server"
