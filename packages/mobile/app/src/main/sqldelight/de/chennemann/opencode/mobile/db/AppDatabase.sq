@@ -8,6 +8,29 @@ CREATE TABLE settings (
   value TEXT NOT NULL
 );
 
+CREATE TABLE session_cache (
+  server_url TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  project_id TEXT,
+  directory TEXT NOT NULL,
+  title TEXT NOT NULL,
+  version TEXT NOT NULL,
+  last_opened_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (server_url, session_id)
+);
+
+CREATE TABLE message_cache (
+  server_url TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  text TEXT NOT NULL,
+  sort_key TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (server_url, session_id, message_id)
+);
+
 selectSetting:
 SELECT value FROM settings WHERE key = ?;
 
@@ -15,3 +38,57 @@ upsertSetting:
 INSERT INTO settings(key, value)
 VALUES (?, ?)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+
+upsertSessionCache:
+INSERT INTO session_cache(
+  server_url,
+  session_id,
+  project_id,
+  directory,
+  title,
+  version,
+  last_opened_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(server_url, session_id) DO UPDATE SET
+  project_id = excluded.project_id,
+  directory = excluded.directory,
+  title = excluded.title,
+  version = excluded.version,
+  last_opened_at = excluded.last_opened_at,
+  updated_at = excluded.updated_at;
+
+selectRecentSessionCache:
+SELECT server_url, session_id, project_id, directory, title, version, last_opened_at, updated_at
+FROM session_cache
+ORDER BY last_opened_at DESC
+LIMIT 1;
+
+selectSessionCache:
+SELECT server_url, session_id, project_id, directory, title, version, last_opened_at, updated_at
+FROM session_cache
+WHERE server_url = ? AND session_id = ?;
+
+listMessageCache:
+SELECT server_url, session_id, message_id, role, text, sort_key, updated_at
+FROM message_cache
+WHERE server_url = ? AND session_id = ?
+ORDER BY sort_key ASC;
+
+upsertMessageCache:
+INSERT INTO message_cache(
+  server_url,
+  session_id,
+  message_id,
+  role,
+  text,
+  sort_key,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(server_url, session_id, message_id) DO UPDATE SET
+  role = excluded.role,
+  text = excluded.text,
+  sort_key = excluded.sort_key,
+  updated_at = excluded.updated_at;

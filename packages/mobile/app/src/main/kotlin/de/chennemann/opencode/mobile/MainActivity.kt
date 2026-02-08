@@ -4,53 +4,54 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
-import de.chennemann.opencode.mobile.ui.theme.MobileTheme
 import de.chennemann.opencode.mobile.home.HomeViewModel
-import de.chennemann.opencode.mobile.home.ServerState
+import de.chennemann.opencode.mobile.ui.theme.MobileTheme
 import kotlinx.serialization.Serializable
 import org.koin.androidx.compose.koinViewModel
 
 @Serializable
-private data object HomeRoute : NavKey
+private data object ConversationRoute : NavKey
 
 @Serializable
-private data class SessionRoute(val id: String, val title: String, val directory: String) : NavKey
+private data object ManageRoute : NavKey
 
 class MainActivity : ComponentActivity() {
     private val requestInternet = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -69,14 +70,76 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             MobileTheme {
-                val backStack = rememberNavBackStack(HomeRoute)
+                val backStack = rememberNavBackStack(ConversationRoute)
 
                 NavDisplay(
                     backStack = backStack,
                     onBack = { backStack.removeLastOrNull() },
                     entryProvider = { key ->
                         when (key) {
-                            is HomeRoute -> NavEntry(key) {
+                            is ConversationRoute -> NavEntry(key) {
+                                val model: HomeViewModel = koinViewModel()
+                                val state by model.state.collectAsStateWithLifecycle()
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(24.dp),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                    ) {
+                                        SelectionContainer {
+                                            Text(state.focusedSession?.title ?: "No session selected")
+                                        }
+                                        IconButton(onClick = dropUnlessResumed {
+                                            model.openManagement()
+                                            backStack.add(ManageRoute)
+                                        }) {
+                                            Text("⚙")
+                                        }
+                                    }
+                                    if (state.loadingMessages) {
+                                        SelectionContainer { Text("Loading messages...") }
+                                    }
+                                    LazyColumn(
+                                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        items(state.focusedMessages, key = { it.id }) { message ->
+                                            val user = message.role == "user"
+                                            val label = if (user) "User" else "Server"
+                                            val color = if (user) {
+                                                MaterialTheme.colorScheme.primaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.secondaryContainer
+                                            }
+                                            Card(
+                                                colors = CardDefaults.cardColors(
+                                                    containerColor = color,
+                                                ),
+                                            ) {
+                                                Column(
+                                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                    modifier = Modifier.padding(12.dp),
+                                                ) {
+                                                    Text(label)
+                                                    SelectionContainer {
+                                                        Text(message.text)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    state.message?.let {
+                                        SelectionContainer { Text(it) }
+                                    }
+                                }
+                            }
+
+                            is ManageRoute -> NavEntry(key) {
                                 val model: HomeViewModel = koinViewModel()
                                 val state by model.state.collectAsStateWithLifecycle()
                                 var field by remember { mutableStateOf(TextFieldValue(state.url)) }
@@ -84,19 +147,14 @@ class MainActivity : ComponentActivity() {
                                     if (state.url == field.text) return@LaunchedEffect
                                     field = TextFieldValue(state.url)
                                 }
-                                LaunchedEffect(state.opened?.id) {
-                                    val opened = state.opened ?: return@LaunchedEffect
-                                    backStack.add(SessionRoute(opened.id, opened.title, opened.directory))
-                                    model.consumeOpened()
-                                }
                                 Column(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .verticalScroll(rememberScrollState())
                                         .padding(24.dp),
-                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                    verticalArrangement = Arrangement.spacedBy(16.dp),
                                 ) {
-                                    Text("OpenCode Android")
+                                    Text("Manage Sessions")
                                     TextField(
                                         value = field,
                                         onValueChange = {
@@ -112,16 +170,6 @@ class MainActivity : ComponentActivity() {
                                         }) {
                                             Text("Use discovered: ${state.discovered}")
                                         }
-                                    }
-                                    when (val status = state.status) {
-                                        ServerState.Idle -> SelectionContainer { Text("Waiting for server check...") }
-                                        ServerState.Loading -> SelectionContainer { Text("Checking server...") }
-                                        is ServerState.Connected -> {
-                                            SelectionContainer { Text("Connected to OpenCode") }
-                                            SelectionContainer { Text("Server version: ${status.version}") }
-                                        }
-
-                                        is ServerState.Failed -> SelectionContainer { Text("Connection failed: ${status.reason}") }
                                     }
                                     Button(onClick = dropUnlessResumed {
                                         model.refresh()
@@ -150,6 +198,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                         Button(onClick = dropUnlessResumed {
                                             model.createSession()
+                                            backStack.removeLastOrNull()
                                         }) {
                                             Text(if (state.loadingSessions) "Creating session..." else "New session")
                                         }
@@ -158,14 +207,8 @@ class MainActivity : ComponentActivity() {
                                         Text("Sessions")
                                         state.sessions.forEach { session ->
                                             Button(onClick = dropUnlessResumed {
-                                                model.openSession(session.id)
-                                                backStack.add(
-                                                    SessionRoute(
-                                                        id = session.id,
-                                                        title = session.title,
-                                                        directory = session.directory,
-                                                    )
-                                                )
+                                                model.openSession(session)
+                                                backStack.removeLastOrNull()
                                             }) {
                                                 Text("${session.title} (${session.version})")
                                             }
@@ -173,73 +216,8 @@ class MainActivity : ComponentActivity() {
                                     } else if (state.selectedProject != null && !state.loadingSessions) {
                                         SelectionContainer { Text("No sessions found for selected project") }
                                     }
-                                    state.message?.let {
-                                        SelectionContainer {
-                                            Text(it)
-                                        }
-                                    }
                                     Button(onClick = dropUnlessResumed {
-                                        model.createSession()
-                                    }) {
-                                        Text("Quick new session")
-                                    }
-                                }
-                            }
-
-                            is SessionRoute -> NavEntry(key) {
-                                val model: HomeViewModel = koinViewModel()
-                                val state by model.state.collectAsStateWithLifecycle()
-                                LaunchedEffect(key.id, key.directory) {
-                                    model.loadMessages(key.id, key.directory)
-                                    model.startMessageStream(key.id, key.directory)
-                                }
-                                DisposableEffect(key.id, key.directory) {
-                                    onDispose {
-                                        model.stopMessageStream()
-                                    }
-                                }
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(24.dp),
-                                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    Text("Session")
-                                    SelectionContainer { Text("Title: ${key.title}") }
-                                    SelectionContainer { Text("ID: ${key.id}") }
-                                    if (state.loadingMessages) {
-                                        SelectionContainer { Text("Loading messages...") }
-                                    }
-                                    LazyColumn(
-                                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        items(state.messages, key = { it.id }) { message ->
-                                            val user = message.role == "user"
-                                            val label = if (user) "User" else "Server"
-                                            val color = if (user) {
-                                                MaterialTheme.colorScheme.primaryContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.secondaryContainer
-                                            }
-                                            Card(
-                                                colors = CardDefaults.cardColors(
-                                                    containerColor = color,
-                                                ),
-                                            ) {
-                                                Column(
-                                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                                    modifier = Modifier.padding(12.dp),
-                                                ) {
-                                                    Text(label)
-                                                    SelectionContainer {
-                                                        Text(message.text)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Button(onClick = dropUnlessResumed {
+                                        model.closeManagement()
                                         backStack.removeLastOrNull()
                                     }) {
                                         Text("Back")
@@ -249,7 +227,7 @@ class MainActivity : ComponentActivity() {
 
                             else -> error("Unknown route: $key")
                         }
-                    }
+                    },
                 )
             }
         }
