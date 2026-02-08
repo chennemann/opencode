@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -80,6 +81,12 @@ class MainActivity : ComponentActivity() {
                             is ConversationRoute -> NavEntry(key) {
                                 val model: HomeViewModel = koinViewModel()
                                 val state by model.state.collectAsStateWithLifecycle()
+                                val list = rememberLazyListState()
+                                LaunchedEffect(state.focusedSession?.id, state.focusedMessages.size) {
+                                    val index = state.focusedMessages.lastIndex
+                                    if (index < 0) return@LaunchedEffect
+                                    list.scrollToItem(index)
+                                }
 
                                 Column(
                                     modifier = Modifier
@@ -107,6 +114,7 @@ class MainActivity : ComponentActivity() {
                                     LazyColumn(
                                         verticalArrangement = Arrangement.spacedBy(12.dp),
                                         modifier = Modifier.weight(1f),
+                                        state = list,
                                     ) {
                                         items(state.focusedMessages, key = { it.id }) { message ->
                                             val user = message.role == "user"

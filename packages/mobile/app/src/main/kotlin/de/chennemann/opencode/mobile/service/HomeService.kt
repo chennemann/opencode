@@ -1,5 +1,7 @@
 package de.chennemann.opencode.mobile.service
 
+import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.coroutines.mapToList
 import de.chennemann.opencode.mobile.data.GlobalStreamEvent
 import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.db.AppDatabase
@@ -10,6 +12,7 @@ import de.chennemann.opencode.mobile.home.ServerState
 import de.chennemann.opencode.mobile.home.SessionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,18 +23,12 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.util.concurrent.atomic.AtomicLong
 
 class HomeService(
     private val repo: ServerRepository,
     private val db: AppDatabase,
 ) {
-    private data class Runtime(
-        val session: SessionState,
-        val project: String?,
-        val role: LinkedHashMap<String, String>,
-        val part: LinkedHashMap<String, LinkedHashMap<String, String>>,
-    )
-
     private data class LocalState(
         val projects: List<ProjectState> = emptyList(),
         val selectedProject: String? = null,
@@ -67,11 +64,20 @@ class HomeService(
         )
     )
 
-    private val active = linkedMapOf<String, Runtime>()
+    private val active = linkedMapOf<String, SessionState>()
+    private val sessionProject = linkedMapOf<String, String?>()
+    private val part = linkedMapOf<String, LinkedHashMap<String, String>>()
+    private val role = linkedMapOf<String, String>()
+    private val sort = linkedMapOf<String, String>()
+    private val pending = linkedMapOf<String, MutableList<MessageState>>()
+    private val seq = AtomicLong(System.currentTimeMillis() * 1000)
     private var manual = false
     private var stream: Job? = null
+    private var observe: Job? = null
+    private val sync = linkedMapOf<String, Job>()
     private var scope: CoroutineScope? = null
     private var started = false
+    private var focusedKey: String? = null
 
     val state: StateFlow<HomeState> = output.asStateFlow()
 
@@ -215,72 +221,75 @@ class HomeService(
         if (value.isBlank()) return
         val scope = scope ?: return
         val focused = local.value.focusedSession ?: return
-        val server = repo.endpoint.value
-        val runtime = active[key(server, focused.id)] ?: return
+        val key = focusedKey ?: keyForSession(focused.id) ?: key(repo.endpoint.value, focused.id)
+        if (active[key] == null) {
+            active[key] = focused
+            focusedKey = key
+        }
+        val server = key.substringBefore("::")
         val id = "local-${System.currentTimeMillis()}"
-        runtime.role[id] = "user"
-        runtime.part[id] = linkedMapOf("seed" to value)
-        persistMessage(key(server, focused.id), focused.id, id, "user", value)
-        local.value = local.value.copy(focusedMessages = render(runtime))
+        pending.getOrPut(key) { mutableListOf() }.add(
+            MessageState(
+                id = id,
+                role = "user",
+                text = value,
+            )
+        )
+        local.value = local.value.copy(
+            focusedMessages = local.value.focusedMessages + MessageState(
+                id = id,
+                role = "user",
+                text = value,
+            )
+        )
         scope.launch {
             val result = runCatching {
                 repo.sendMessage(focused.id, focused.directory, value)
             }
+            result.onSuccess {
+                scheduleSync(focused.id)
+            }
             result.onFailure {
+                pending[key]?.removeAll { it.id == id }
+                if (focusedKey == key) observeFocused()
                 local.value = local.value.copy(message = it.message ?: "Failed to send message")
             }
         }
     }
 
     fun focusSession(sessionId: String) {
-        val runtime = active.values.find { it.session.id == sessionId } ?: return
+        val entry = active.entries.find { it.value.id == sessionId } ?: return
+        focusedKey = entry.key
         local.value = local.value.copy(
-            focusedSession = runtime.session,
-            focusedMessages = render(runtime),
+            focusedSession = entry.value,
         )
+        observeFocused()
     }
 
     private fun focusSession(session: SessionState, project: String?) {
-        val scope = scope ?: return
-        val server = repo.endpoint.value
+        val server = if (manual) input.value else repo.endpoint.value
         val key = key(server, session.id)
-        val runtime = Runtime(
-            session = session,
-            project = project,
-            role = linkedMapOf(),
-            part = linkedMapOf(),
-        )
-        active[key] = runtime
+        active[key] = session
+        sessionProject[key] = project
+        focusedKey = key
         local.value = local.value.copy(
             focusedSession = session,
-            focusedMessages = emptyList(),
-            activeSessions = active.values.map { it.session }.sortedByDescending { it.id },
+            activeSessions = active.values.sortedByDescending { it.id },
             managementOpen = false,
         )
         val now = System.currentTimeMillis()
         db.appDatabaseQueries.upsertSessionCache(
             server,
             session.id,
-            project,
+            sessionProject[key],
             session.directory,
             session.title,
             session.version,
             now,
             now,
         )
-        scope.launch {
-            val cached = db.appDatabaseQueries.listMessageCache(server, session.id) { _, _, messageId, role, text, _, _ ->
-                MessageState(
-                    id = messageId,
-                    role = role,
-                    text = text,
-                )
-            }.executeAsList()
-            if (local.value.focusedSession?.id == session.id && cached.isNotEmpty()) {
-                local.value = local.value.copy(focusedMessages = cached)
-            }
-            hydrateRemote(session)
-        }
+        observeFocused()
+        hydrateRemote(session)
     }
 
     private fun hydrateRemote(session: SessionState) {
@@ -290,25 +299,23 @@ class HomeService(
             val result = runCatching { repo.messages(session.id, session.directory) }
             local.value = local.value.copy(loadingMessages = false)
             result.onSuccess { list ->
-                val server = repo.endpoint.value
-                val runtime = active[key(server, session.id)] ?: return@onSuccess
-                runtime.role.clear()
-                runtime.part.clear()
+                val key = keyForSession(session.id) ?: return@onSuccess
                 list.forEach {
-                    runtime.role[it.id] = it.role
-                    runtime.part[it.id] = linkedMapOf("seed" to it.text)
+                    val message = messageKey(key, it.id)
+                    role[message] = it.role
+                    if (sort[message] == null) {
+                        sort[message] = sequence()
+                    }
                     db.appDatabaseQueries.upsertMessageCache(
-                        server,
+                        key.substringBefore("::"),
                         session.id,
                         it.id,
                         it.role,
                         it.text,
-                        it.id,
+                        sort[message] ?: sequence(),
                         System.currentTimeMillis(),
                     )
                 }
-                if (local.value.focusedSession?.id != session.id) return@onSuccess
-                local.value = local.value.copy(focusedMessages = render(runtime))
             }
             result.onFailure {
                 local.value = local.value.copy(message = it.message ?: "Failed to load messages")
@@ -388,56 +395,69 @@ class HomeService(
             val info = event.properties["info"]?.jsonObject ?: return
             val sessionId = info["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
             val id = info["id"]?.jsonPrimitive?.contentOrNull ?: return
-            val role = info["role"]?.jsonPrimitive?.contentOrNull ?: "assistant"
-            active.forEach { (key, runtime) ->
-                if (runtime.session.id != sessionId) return@forEach
-                if (event.directory != runtime.session.directory && event.directory != "global") return@forEach
-                runtime.role[id] = role
-                if (runtime.part[id] == null) {
-                    runtime.part[id] = linkedMapOf()
-                }
-                val text = renderMessage(runtime, id)
-                persistMessage(key, sessionId, id, role, text)
-                if (local.value.focusedSession?.id == sessionId) {
-                    local.value = local.value.copy(focusedMessages = render(runtime))
+            val messageRole = info["role"]?.jsonPrimitive?.contentOrNull ?: "assistant"
+            val key = keyForSession(sessionId) ?: return
+            val message = messageKey(key, id)
+            if (messageRole == "user") {
+                pending[key]?.let {
+                    if (it.isNotEmpty()) it.removeAt(0)
                 }
             }
+            role[message] = messageRole
+            if (sort[message] == null) {
+                sort[message] = sequence()
+            }
+            persistMessage(
+                key,
+                sessionId,
+                id,
+                messageRole,
+                renderMessage(message),
+                sort[message] ?: sequence(),
+            )
+            scheduleSync(sessionId)
             return
         }
         if (event.type != "message.part.updated") return
-        val part = event.properties["part"]?.jsonObject ?: return
-        val sessionId = part["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
-        val messageId = part["messageID"]?.jsonPrimitive?.contentOrNull ?: return
-        val partId = part["id"]?.jsonPrimitive?.contentOrNull ?: return
-        val type = part["type"]?.jsonPrimitive?.contentOrNull ?: return
+        val payload = event.properties["part"]?.jsonObject ?: return
+        val sessionId = payload["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
+        val messageId = payload["messageID"]?.jsonPrimitive?.contentOrNull ?: return
+        val partId = payload["id"]?.jsonPrimitive?.contentOrNull ?: return
+        val type = payload["type"]?.jsonPrimitive?.contentOrNull ?: return
         if (type != "text") return
-        val text = part["text"]?.jsonPrimitive?.contentOrNull ?: ""
-        active.forEach { (key, runtime) ->
-            if (runtime.session.id != sessionId) return@forEach
-            if (event.directory != runtime.session.directory && event.directory != "global") return@forEach
-            val parts = runtime.part.getOrPut(messageId) { linkedMapOf() }
-            parts[partId] = text
-            val value = renderMessage(runtime, messageId)
-            persistMessage(key, sessionId, messageId, runtime.role[messageId] ?: "assistant", value)
-            if (local.value.focusedSession?.id != sessionId) return@forEach
-            local.value = local.value.copy(focusedMessages = render(runtime))
+        val text = payload["text"]?.jsonPrimitive?.contentOrNull ?: ""
+        val key = keyForSession(sessionId) ?: return
+        val message = messageKey(key, messageId)
+        val parts = part.getOrPut(message) { linkedMapOf() }
+        parts[partId] = text
+        if (sort[message] == null) {
+            sort[message] = sequence()
+        }
+        persistMessage(
+            key,
+            sessionId,
+            messageId,
+            role[message] ?: "assistant",
+            renderMessage(message),
+            sort[message] ?: sequence(),
+        )
+        scheduleSync(sessionId)
+    }
+
+    private fun scheduleSync(sessionId: String) {
+        val scope = scope ?: return
+        sync[sessionId]?.cancel()
+        sync[sessionId] = scope.launch {
+            repeat(6) {
+                delay(if (it == 0) 300 else 900)
+                val entry = active.values.find { value -> value.id == sessionId } ?: return@launch
+                hydrateRemote(entry)
+            }
         }
     }
 
-    private fun render(runtime: Runtime): List<MessageState> {
-        return runtime.part
-            .map { entry ->
-                MessageState(
-                    id = entry.key,
-                    role = runtime.role[entry.key] ?: "assistant",
-                    text = renderMessage(runtime, entry.key),
-                )
-            }
-            .sortedBy { it.id }
-    }
-
-    private fun renderMessage(runtime: Runtime, messageId: String): String {
-        val text = runtime.part[messageId]
+    private fun renderMessage(message: String): String {
+        val text = part[message]
             ?.values
             ?.filter { it.isNotBlank() }
             ?.joinToString("\n")
@@ -445,7 +465,7 @@ class HomeService(
         return text
     }
 
-    private fun persistMessage(key: String, sessionId: String, messageId: String, role: String, text: String) {
+    private fun persistMessage(key: String, sessionId: String, messageId: String, role: String, text: String, sort: String) {
         val server = key.substringBefore("::")
         db.appDatabaseQueries.upsertMessageCache(
             server,
@@ -453,9 +473,45 @@ class HomeService(
             messageId,
             role,
             text,
-            messageId,
+            sort,
             System.currentTimeMillis(),
         )
+    }
+
+    private fun observeFocused() {
+        observe?.cancel()
+        val key = focusedKey ?: return
+        val server = key.substringBefore("::")
+        val session = key.substringAfter("::")
+        observe = (scope ?: return).launch {
+            db.appDatabaseQueries
+                .listMessageCache(server, session) { _, _, messageId, role, text, _, _ ->
+                    MessageState(
+                        id = messageId,
+                        role = role,
+                        text = text,
+                    )
+                }
+                .asFlow()
+                .mapToList(Dispatchers.IO)
+                .collect {
+                    val list = pending[key]
+                    val merged = if (list.isNullOrEmpty()) it else it + list
+                    local.value = local.value.copy(focusedMessages = merged)
+                }
+        }
+    }
+
+    private fun keyForSession(sessionId: String): String? {
+        return active.keys.find { it.endsWith("::$sessionId") }
+    }
+
+    private fun messageKey(key: String, messageId: String): String {
+        return "$key::$messageId"
+    }
+
+    private fun sequence(): String {
+        return System.currentTimeMillis().toString().padStart(20, '0')
     }
 
     private fun key(server: String, sessionId: String): String {
@@ -465,5 +521,9 @@ class HomeService(
     fun stop() {
         stream?.cancel()
         stream = null
+        observe?.cancel()
+        observe = null
+        sync.values.forEach { it.cancel() }
+        sync.clear()
     }
 }

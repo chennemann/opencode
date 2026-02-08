@@ -90,5 +90,5 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(server_url, session_id, message_id) DO UPDATE SET
   role = excluded.role,
   text = excluded.text,
-  sort_key = excluded.sort_key,
+  sort_key = message_cache.sort_key,
   updated_at = excluded.updated_at;

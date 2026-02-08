@@ -218,7 +218,7 @@ class ServerService(
     }
 
     suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String) {
-        val res = http.post("$baseUrl/session/$sessionId/message") {
+        val res = http.post("$baseUrl/session/$sessionId/prompt_async") {
             parameter("directory", directory)
             contentType(ContentType.Application.Json)
             setBody(
