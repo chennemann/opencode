@@ -20,6 +20,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -84,6 +87,8 @@ class HomeService(
     private var observe: Job? = null
     private var reconcile: Job? = null
     private val sync = linkedMapOf<String, Job>()
+    private val syncActive = linkedSetOf<String>()
+    private val syncGuard = Mutex()
     private var scope: CoroutineScope? = null
     private var started = false
     private var focusedKey: String? = null
@@ -321,7 +326,9 @@ class HomeService(
 
     private fun syncRemote(session: SessionState, loading: Boolean = false, more: Boolean = false) {
         val scope = scope ?: return
-        scope.launch {
+        scope.launch(Dispatchers.Default) {
+            if (!beginSync(session.id)) return@launch
+            try {
             if (loading) {
                 local.value = local.value.copy(loadingMessages = true, message = null)
             }
@@ -347,12 +354,22 @@ class HomeService(
                 val nextIds = next
                     .map { it.id }
                     .toHashSet()
-                val cached = db.appDatabaseQueries
-                    .listMessageCache(server, session.id) { _, _, messageId, _, _, sortKey, _ -> messageId to sortKey }
-                    .executeAsList()
-                val cachedSort = cached.associate { pair -> pair.first to (pair.second ?: pair.first) }
+                val cached = withContext(Dispatchers.IO) {
+                    db.appDatabaseQueries
+                        .listMessageCache(server, session.id) { _, _, messageId, messageRole, messageText, sortKey, _ ->
+                            MessageState(
+                                id = messageId,
+                                role = messageRole,
+                                text = messageText,
+                                sort = sortKey,
+                            )
+                        }
+                        .executeAsList()
+                }
+                val cachedMap = cached.associateBy { it.id }
                 val sticky = stickySort[key]
                 var claimed = false
+                val upserts = mutableListOf<Array<String>>()
 
                 next.forEach {
                     val id = requireNotNull(it.id)
@@ -360,7 +377,8 @@ class HomeService(
                     val messageRole = it.role ?: "assistant"
                     val messageText = it.text ?: ""
                     role[message] = messageRole
-                    val known = cachedSort[id] ?: order[message]
+                    val cachedMessage = cachedMap[id]
+                    val known = cachedMessage?.sort ?: order[message]
                     val stickySort = sticky?.remove(id)
                     val pendingSort = if (messageRole == "user") claimPendingSort(key, messageText) else null
                     val sort = when {
@@ -375,25 +393,39 @@ class HomeService(
                         }
                     }
                     order[message] = sort
-                    db.appDatabaseQueries.upsertMessageCache(
-                        server,
-                        session.id,
-                        id,
-                        messageRole,
-                        messageText,
-                        sort,
-                        now,
-                    )
+                    if (cachedMessage == null || cachedMessage.role != messageRole || cachedMessage.text != messageText || cachedMessage.sort != sort) {
+                        upserts.add(arrayOf(id, messageRole, messageText, sort))
+                    }
+                }
+
+                withContext(Dispatchers.IO) {
+                    upserts.forEach {
+                        db.appDatabaseQueries.upsertMessageCache(
+                            server,
+                            session.id,
+                            it[0],
+                            it[1],
+                            it[2],
+                            it[3],
+                            now,
+                        )
+                    }
                 }
 
                 if (complete) {
-                    cachedSort.keys.forEach { id ->
+                    val removed = mutableListOf<String>()
+                    cachedMap.keys.forEach { id ->
                         if (nextIds.contains(id)) return@forEach
                         if (keepForPass(retainPass, key, id)) return@forEach
-                        db.appDatabaseQueries.deleteMessageCache(server, session.id, id)
+                        removed.add(id)
                         role.remove(messageKey(key, id))
                         part.remove(messageKey(key, id))
                         order.remove(messageKey(key, id))
+                    }
+                    withContext(Dispatchers.IO) {
+                        removed.forEach {
+                            db.appDatabaseQueries.deleteMessageCache(server, session.id, it)
+                        }
                     }
                 }
 
@@ -407,6 +439,9 @@ class HomeService(
             }
             result.onFailure {
                 local.value = local.value.copy(message = it.message ?: "Failed to load messages")
+            }
+            } finally {
+                endSync(session.id)
             }
         }
     }
@@ -507,7 +542,7 @@ class HomeService(
         }
     }
 
-    private fun onEvent(event: GlobalStreamEvent) {
+    private suspend fun onEvent(event: GlobalStreamEvent) {
         when (event.type) {
             "server.instance.disposed", "global.disposed" -> {
                 loadProjects()
@@ -574,7 +609,9 @@ class HomeService(
                 val messageId = event.properties["messageID"]?.jsonPrimitive?.contentOrNull ?: return
                 val key = keyForSession(sessionId) ?: return
                 val server = key.substringBefore("::")
-                db.appDatabaseQueries.deleteMessageCache(server, sessionId, messageId)
+                withContext(Dispatchers.IO) {
+                    db.appDatabaseQueries.deleteMessageCache(server, sessionId, messageId)
+                }
                 role.remove(messageKey(key, messageId))
                 part.remove(messageKey(key, messageId))
                 order.remove(messageKey(key, messageId))
@@ -657,18 +694,20 @@ class HomeService(
         return text
     }
 
-    private fun persistMessage(key: String, sessionId: String, messageId: String, role: String, text: String, sort: String) {
+    private suspend fun persistMessage(key: String, sessionId: String, messageId: String, role: String, text: String, sort: String) {
         val server = key.substringBefore("::")
         order[messageKey(key, messageId)] = sort
-        db.appDatabaseQueries.upsertMessageCache(
-            server,
-            sessionId,
-            messageId,
-            role,
-            text,
-            sort,
-            System.currentTimeMillis(),
-        )
+        withContext(Dispatchers.IO) {
+            db.appDatabaseQueries.upsertMessageCache(
+                server,
+                sessionId,
+                messageId,
+                role,
+                text,
+                sort,
+                System.currentTimeMillis(),
+            )
+        }
     }
 
     private fun observeFocused() {
@@ -806,6 +845,20 @@ class HomeService(
 
     private fun key(server: String, sessionId: String): String {
         return "$server::$sessionId"
+    }
+
+    private suspend fun beginSync(sessionId: String): Boolean {
+        return syncGuard.withLock {
+            if (syncActive.contains(sessionId)) return@withLock false
+            syncActive.add(sessionId)
+            true
+        }
+    }
+
+    private suspend fun endSync(sessionId: String) {
+        syncGuard.withLock {
+            syncActive.remove(sessionId)
+        }
     }
 
     fun stop() {
