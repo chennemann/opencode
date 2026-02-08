@@ -2,17 +2,26 @@ package de.chennemann.opencode.mobile.data
 
 import de.chennemann.opencode.mobile.api.apis.DefaultApi
 import de.chennemann.opencode.mobile.api.models.SessionCreateRequest
+import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngine
+import io.ktor.client.request.parameter
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 data class Health(
     val healthy: Boolean,
@@ -48,6 +57,7 @@ class ServerService(
     private val json: Json,
     private val engine: HttpClientEngine,
 ) {
+    private val http = HttpClient(engine)
     private var url: String? = null
     private var api: DefaultApi? = null
 
@@ -204,6 +214,31 @@ class ServerService(
                     properties = properties,
                 )
             )
+        }
+    }
+
+    suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String) {
+        val res = http.post("$baseUrl/session/$sessionId/message") {
+            parameter("directory", directory)
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put(
+                        "parts",
+                        buildJsonArray {
+                            add(
+                                buildJsonObject {
+                                    put("type", "text")
+                                    put("text", text)
+                                }
+                            )
+                        }
+                    )
+                }.toString()
+            )
+        }
+        if (res.status.value !in 200..299) {
+            throw IllegalStateException("Server returned ${res.status}")
         }
     }
 }

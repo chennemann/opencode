@@ -210,6 +210,28 @@ class HomeService(
         focusSession(session, local.value.selectedProject)
     }
 
+    fun send(text: String) {
+        val value = text.trim()
+        if (value.isBlank()) return
+        val scope = scope ?: return
+        val focused = local.value.focusedSession ?: return
+        val server = repo.endpoint.value
+        val runtime = active[key(server, focused.id)] ?: return
+        val id = "local-${System.currentTimeMillis()}"
+        runtime.role[id] = "user"
+        runtime.part[id] = linkedMapOf("seed" to value)
+        persistMessage(key(server, focused.id), focused.id, id, "user", value)
+        local.value = local.value.copy(focusedMessages = render(runtime))
+        scope.launch {
+            val result = runCatching {
+                repo.sendMessage(focused.id, focused.directory, value)
+            }
+            result.onFailure {
+                local.value = local.value.copy(message = it.message ?: "Failed to send message")
+            }
+        }
+    }
+
     fun focusSession(sessionId: String) {
         val runtime = active.values.find { it.session.id == sessionId } ?: return
         local.value = local.value.copy(
