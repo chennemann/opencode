@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.util.concurrent.atomic.AtomicLong
 
 class HomeService(
     private val repo: ServerRepository,
@@ -74,7 +75,9 @@ class HomeService(
     private val pending = linkedMapOf<String, MutableList<MessageState>>()
     private val pendingPass = linkedMapOf<String, MutableMap<String, Int>>()
     private val retainPass = linkedMapOf<String, MutableMap<String, Int>>()
+    private val stickySort = linkedMapOf<String, MutableMap<String, String>>()
     private val messageLimit = linkedMapOf<String, Int>()
+    private val seq = AtomicLong(System.currentTimeMillis() * 1000)
     private var manual = false
     private var stream: Job? = null
     private var observe: Job? = null
@@ -235,11 +238,13 @@ class HomeService(
             focusedKey = key
         }
         val id = "local-${System.currentTimeMillis()}"
+        val sort = sequence()
         pending.getOrPut(key) { mutableListOf() }.add(
             MessageState(
                 id = id,
                 role = "user",
                 text = value,
+                sort = sort,
             )
         )
         pendingPass.getOrPut(key) { linkedMapOf() }[id] = OptimisticKeepPasses
@@ -248,6 +253,7 @@ class HomeService(
                 id = id,
                 role = "user",
                 text = value,
+                sort = sort,
             )
         )
         scope.launch {
@@ -340,27 +346,29 @@ class HomeService(
                 val nextIds = next
                     .map { it.id }
                     .toHashSet()
+                val cached = db.appDatabaseQueries
+                    .listMessageCache(server, session.id) { _, _, messageId, _, _, sortKey, _ -> messageId to sortKey }
+                    .executeAsList()
+                val cachedSort = cached.toMap()
+                val sticky = stickySort[key]
 
                 next.forEach {
                     val message = messageKey(key, it.id)
                     role[message] = it.role
+                    val sort = sticky?.remove(it.id) ?: cachedSort[it.id] ?: it.id
                     db.appDatabaseQueries.upsertMessageCache(
                         server,
                         session.id,
                         it.id,
                         it.role,
                         it.text,
-                        it.id,
+                        sort,
                         now,
                     )
                 }
 
-                val cached = db.appDatabaseQueries
-                    .listMessageCache(server, session.id) { _, _, messageId, _, _, _, _ -> messageId }
-                    .executeAsList()
-
                 if (complete) {
-                    cached.forEach { id ->
+                    cachedSort.keys.forEach { id ->
                         if (nextIds.contains(id)) return@forEach
                         if (keepForPass(retainPass, key, id)) return@forEach
                         db.appDatabaseQueries.deleteMessageCache(server, session.id, id)
@@ -504,14 +512,22 @@ class HomeService(
                 val sessionId = info["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
                 val id = info["id"]?.jsonPrimitive?.contentOrNull ?: return
                 val messageRole = info["role"]?.jsonPrimitive?.contentOrNull ?: "assistant"
+                val messageText = info["text"]?.jsonPrimitive?.contentOrNull?.trim()
                 val key = keyForSession(sessionId) ?: return
                 val message = messageKey(key, id)
 
                 if (messageRole == "user") {
                     pending[key]?.let {
                         if (it.isNotEmpty()) {
-                            val removed = it.removeAt(0)
+                            val index = if (messageText.isNullOrBlank()) {
+                                0
+                            } else {
+                                it.indexOfFirst { pending -> pending.text.trim() == messageText }
+                                    .let { found -> if (found >= 0) found else 0 }
+                            }
+                            val removed = it.removeAt(index)
                             pendingPass[key]?.remove(removed.id)
+                            stickySort.getOrPut(key) { linkedMapOf() }[id] = removed.sort
                         }
                     }
                 }
@@ -524,7 +540,7 @@ class HomeService(
                     id,
                     messageRole,
                     renderMessage(message),
-                    id,
+                    stickySort[key]?.remove(id) ?: id,
                 )
                 scheduleSync(sessionId)
             }
@@ -634,11 +650,12 @@ class HomeService(
         val session = key.substringAfter("::")
         observe = (scope ?: return).launch {
             db.appDatabaseQueries
-                .listMessageCache(server, session) { _, _, messageId, role, text, _, _ ->
+                .listMessageCache(server, session) { _, _, messageId, role, text, sortKey, _ ->
                     MessageState(
                         id = messageId,
                         role = role,
                         text = text,
+                        sort = sortKey,
                     )
                 }
                 .asFlow()
@@ -646,7 +663,9 @@ class HomeService(
                 .collect {
                     val list = pending[key]
                     val merged = if (list.isNullOrEmpty()) it else it + list
-                    local.value = local.value.copy(focusedMessages = merged)
+                    local.value = local.value.copy(
+                        focusedMessages = merged.sortedBy { message -> message.sort },
+                    )
                 }
         }
     }
@@ -657,6 +676,10 @@ class HomeService(
 
     private fun messageKey(key: String, messageId: String): String {
         return "$key::$messageId"
+    }
+
+    private fun sequence(): String {
+        return "z-${seq.incrementAndGet().toString().padStart(20, '0')}"
     }
 
     private fun keepForPass(map: MutableMap<String, MutableMap<String, Int>>, key: String, id: String): Boolean {
@@ -708,6 +731,7 @@ class HomeService(
         pending.remove(key)
         pendingPass.remove(key)
         retainPass.remove(key)
+        stickySort.remove(key)
         messageLimit.remove(key)
         db.appDatabaseQueries.deleteMessageCacheSession(server, sessionId)
         if (focusedKey == key) {
