@@ -136,6 +136,24 @@ class MainActivity : ComponentActivity() {
                                     state.message?.let {
                                         SelectionContainer { Text(it) }
                                     }
+                                    var draft by remember { mutableStateOf(TextFieldValue("")) }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        TextField(
+                                            value = draft,
+                                            onValueChange = { draft = it },
+                                            modifier = Modifier.weight(1f),
+                                            label = { Text("Message") },
+                                        )
+                                        IconButton(onClick = dropUnlessResumed {
+                                            model.send(draft.text)
+                                            draft = TextFieldValue("")
+                                        }) {
+                                            Text("➤")
+                                        }
+                                    }
                                 }
                             }
 

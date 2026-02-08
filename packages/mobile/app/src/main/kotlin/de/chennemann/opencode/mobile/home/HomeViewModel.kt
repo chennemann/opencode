@@ -54,6 +54,10 @@ class HomeViewModel(
         service.closeManagement()
     }
 
+    fun send(text: String) {
+        service.send(text)
+    }
+
     override fun onCleared() {
         service.stop()
         super.onCleared()
