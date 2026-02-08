@@ -4,11 +4,14 @@ import de.chennemann.opencode.mobile.api.apis.DefaultApi
 import de.chennemann.opencode.mobile.api.models.SessionCreateRequest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngine
+import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.utils.io.readUTF8Line
@@ -21,6 +24,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.math.BigDecimal
 import kotlinx.serialization.json.put
 
 data class Health(
@@ -51,6 +55,8 @@ data class GlobalStreamEvent(
     val directory: String,
     val type: String,
     val properties: JsonObject,
+    val id: String?,
+    val retry: Int?,
 )
 
 class ServerService(
@@ -152,8 +158,8 @@ class ServerService(
         )
     }
 
-    suspend fun sessionMessages(baseUrl: String, sessionId: String, directory: String): List<SessionMessageInfo> {
-        val res = client(baseUrl).sessionMessages(sessionId, directory, null)
+    suspend fun sessionMessages(baseUrl: String, sessionId: String, directory: String, limit: Int?): List<SessionMessageInfo> {
+        val res = client(baseUrl).sessionMessages(sessionId, directory, limit?.let(::BigDecimal))
         if (!res.success) {
             throw IllegalStateException("Server returned ${res.status}")
         }
@@ -192,29 +198,87 @@ class ServerService(
             }
     }
 
-    suspend fun streamEvents(baseUrl: String, onEvent: suspend (GlobalStreamEvent) -> Unit) {
-        val res = client(baseUrl).globalEvent()
-        if (!res.success) {
+    suspend fun streamEvents(baseUrl: String, lastEventId: String?, onEvent: suspend (GlobalStreamEvent) -> Unit): String? {
+        val res = http.get("$baseUrl/global/event") {
+            header(HttpHeaders.Accept, "text/event-stream")
+            if (!lastEventId.isNullOrBlank()) {
+                header("Last-Event-ID", lastEventId)
+            }
+        }
+        if (res.status.value !in 200..299) {
             throw IllegalStateException("Server returned ${res.status}")
         }
-        val channel = res.response.bodyAsChannel()
-        while (!channel.isClosedForRead) {
-            val line = channel.readUTF8Line() ?: break
-            if (!line.startsWith("data:")) continue
-            val data = line.removePrefix("data:").trim()
-            if (data.isBlank()) continue
-            val root = json.parseToJsonElement(data).jsonObject
-            val payload = root["payload"]?.jsonObject ?: continue
-            val type = payload["type"]?.jsonPrimitive?.contentOrNull ?: continue
+
+        var cursor = lastEventId
+        var eventId: String? = null
+        var eventRetry: Int? = null
+        val eventData = mutableListOf<String>()
+
+        suspend fun flush() {
+            if (eventData.isEmpty()) {
+                eventId = null
+                eventRetry = null
+                return
+            }
+
+            val root = json.parseToJsonElement(eventData.joinToString("\n")).jsonObject
+            val payload = root["payload"]?.jsonObject ?: run {
+                eventId = null
+                eventRetry = null
+                eventData.clear()
+                return
+            }
+            val type = payload["type"]?.jsonPrimitive?.contentOrNull ?: run {
+                eventId = null
+                eventRetry = null
+                eventData.clear()
+                return
+            }
             val properties = payload["properties"]?.jsonObject ?: JsonObject(emptyMap())
+            val id = eventId
+            if (!id.isNullOrBlank()) {
+                cursor = id
+            }
             onEvent(
                 GlobalStreamEvent(
                     directory = root["directory"]?.jsonPrimitive?.contentOrNull ?: "global",
                     type = type,
                     properties = properties,
+                    id = id,
+                    retry = eventRetry,
                 )
             )
+            eventId = null
+            eventRetry = null
+            eventData.clear()
         }
+
+        val channel = res.bodyAsChannel()
+        while (!channel.isClosedForRead) {
+            val line = channel.readUTF8Line() ?: break
+            if (line.isBlank()) {
+                flush()
+                continue
+            }
+            if (line.startsWith(":")) continue
+            if (line.startsWith("data:")) {
+                eventData.add(line.removePrefix("data:").trimStart())
+                continue
+            }
+            if (line.startsWith("id:")) {
+                eventId = line.removePrefix("id:").trim()
+                continue
+            }
+            if (line.startsWith("retry:")) {
+                val parsed = line.removePrefix("retry:").trim().toIntOrNull()
+                if (parsed != null) {
+                    eventRetry = parsed
+                }
+            }
+        }
+
+        flush()
+        return cursor
     }
 
     suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String) {

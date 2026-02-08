@@ -73,16 +73,29 @@ class ServerRepository(
         return service.createSession(url.value, worktree, title)
     }
 
-    suspend fun messages(sessionId: String, directory: String): List<SessionMessageInfo> {
-        return service.sessionMessages(url.value, sessionId, directory)
+    suspend fun messages(sessionId: String, directory: String, limit: Int? = MessageSyncLimit): List<SessionMessageInfo> {
+        return service.sessionMessages(url.value, sessionId, directory, limit)
     }
 
-    suspend fun streamEvents(onEvent: suspend (GlobalStreamEvent) -> Unit) {
-        service.streamEvents(url.value, onEvent)
+    suspend fun streamEvents(lastEventId: String?, onEvent: suspend (GlobalStreamEvent) -> Unit): String? {
+        return service.streamEvents(url.value, lastEventId, onEvent)
     }
 
     suspend fun sendMessage(sessionId: String, directory: String, text: String) {
         service.sendMessage(url.value, sessionId, directory, text)
+    }
+
+    suspend fun streamCursor(): String? {
+        return db.appDatabaseQueries.selectSetting(eventCursorKey(url.value)).executeAsOneOrNull()
+    }
+
+    suspend fun setStreamCursor(value: String?) {
+        val key = eventCursorKey(url.value)
+        if (value.isNullOrBlank()) {
+            db.appDatabaseQueries.deleteSetting(key)
+            return
+        }
+        db.appDatabaseQueries.upsertSetting(key, value)
     }
 
     private suspend fun load() {
@@ -108,3 +121,8 @@ private fun normalizeUrl(input: String): String? {
 
 private const val DefaultUrl = "http://opencode.local:4096"
 private const val UrlKey = "server_url"
+private const val MessageSyncLimit = 400
+
+private fun eventCursorKey(url: String): String {
+    return "event_cursor:$url"
+}

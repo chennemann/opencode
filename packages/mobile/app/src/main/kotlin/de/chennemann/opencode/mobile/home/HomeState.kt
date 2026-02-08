@@ -29,6 +29,8 @@ data class HomeState(
     val activeSessions: List<SessionState>,
     val focusedSession: SessionState?,
     val focusedMessages: List<MessageState>,
+    val canLoadMoreMessages: Boolean,
+    val loadingMoreMessages: Boolean,
     val managementOpen: Boolean,
     val loadingProjects: Boolean,
     val loadingSessions: Boolean,

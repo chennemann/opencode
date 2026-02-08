@@ -39,6 +39,9 @@ INSERT INTO settings(key, value)
 VALUES (?, ?)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 
+deleteSetting:
+DELETE FROM settings WHERE key = ?;
+
 upsertSessionCache:
 INSERT INTO session_cache(
   server_url,
@@ -90,5 +93,13 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(server_url, session_id, message_id) DO UPDATE SET
   role = excluded.role,
   text = excluded.text,
-  sort_key = message_cache.sort_key,
+  sort_key = excluded.sort_key,
   updated_at = excluded.updated_at;
+
+deleteMessageCache:
+DELETE FROM message_cache
+WHERE server_url = ? AND session_id = ? AND message_id = ?;
+
+deleteMessageCacheSession:
+DELETE FROM message_cache
+WHERE server_url = ? AND session_id = ?;
