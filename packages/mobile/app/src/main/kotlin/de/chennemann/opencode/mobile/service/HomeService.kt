@@ -23,7 +23,6 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import java.util.concurrent.atomic.AtomicLong
 
 class HomeService(
     private val repo: ServerRepository,
@@ -36,6 +35,8 @@ class HomeService(
         val activeSessions: List<SessionState> = emptyList(),
         val focusedSession: SessionState? = null,
         val focusedMessages: List<MessageState> = emptyList(),
+        val canLoadMoreMessages: Boolean = false,
+        val loadingMoreMessages: Boolean = false,
         val managementOpen: Boolean = false,
         val loadingProjects: Boolean = false,
         val loadingSessions: Boolean = false,
@@ -56,6 +57,8 @@ class HomeService(
             activeSessions = emptyList(),
             focusedSession = null,
             focusedMessages = emptyList(),
+            canLoadMoreMessages = false,
+            loadingMoreMessages = false,
             managementOpen = false,
             loadingProjects = false,
             loadingSessions = false,
@@ -68,12 +71,14 @@ class HomeService(
     private val sessionProject = linkedMapOf<String, String?>()
     private val part = linkedMapOf<String, LinkedHashMap<String, String>>()
     private val role = linkedMapOf<String, String>()
-    private val sort = linkedMapOf<String, String>()
     private val pending = linkedMapOf<String, MutableList<MessageState>>()
-    private val seq = AtomicLong(System.currentTimeMillis() * 1000)
+    private val pendingPass = linkedMapOf<String, MutableMap<String, Int>>()
+    private val retainPass = linkedMapOf<String, MutableMap<String, Int>>()
+    private val messageLimit = linkedMapOf<String, Int>()
     private var manual = false
     private var stream: Job? = null
     private var observe: Job? = null
+    private var reconcile: Job? = null
     private val sync = linkedMapOf<String, Job>()
     private var scope: CoroutineScope? = null
     private var started = false
@@ -98,6 +103,8 @@ class HomeService(
                     activeSessions = local.activeSessions,
                     focusedSession = local.focusedSession,
                     focusedMessages = local.focusedMessages,
+                    canLoadMoreMessages = local.canLoadMoreMessages,
+                    loadingMoreMessages = local.loadingMoreMessages,
                     managementOpen = local.managementOpen,
                     loadingProjects = local.loadingProjects,
                     loadingSessions = local.loadingSessions,
@@ -117,6 +124,7 @@ class HomeService(
         scope.launch {
             hydrateLast()
         }
+        reconcile(scope)
         stream(scope)
     }
 
@@ -226,7 +234,6 @@ class HomeService(
             active[key] = focused
             focusedKey = key
         }
-        val server = key.substringBefore("::")
         val id = "local-${System.currentTimeMillis()}"
         pending.getOrPut(key) { mutableListOf() }.add(
             MessageState(
@@ -235,6 +242,7 @@ class HomeService(
                 text = value,
             )
         )
+        pendingPass.getOrPut(key) { linkedMapOf() }[id] = OptimisticKeepPasses
         local.value = local.value.copy(
             focusedMessages = local.value.focusedMessages + MessageState(
                 id = id,
@@ -251,10 +259,19 @@ class HomeService(
             }
             result.onFailure {
                 pending[key]?.removeAll { it.id == id }
+                pendingPass[key]?.remove(id)
                 if (focusedKey == key) observeFocused()
                 local.value = local.value.copy(message = it.message ?: "Failed to send message")
             }
         }
+    }
+
+    fun loadMoreMessages() {
+        val focused = local.value.focusedSession ?: return
+        val key = focusedKey ?: keyForSession(focused.id) ?: return
+        val limit = messageLimit[key] ?: MessageSyncLimit
+        messageLimit[key] = limit + MessageSyncLimit
+        syncRemote(focused, more = true)
     }
 
     fun focusSession(sessionId: String) {
@@ -271,10 +288,13 @@ class HomeService(
         val key = key(server, session.id)
         active[key] = session
         sessionProject[key] = project
+        messageLimit[key] = messageLimit[key] ?: MessageSyncLimit
         focusedKey = key
         local.value = local.value.copy(
             focusedSession = session,
             activeSessions = active.values.sortedByDescending { it.id },
+            canLoadMoreMessages = false,
+            loadingMoreMessages = false,
             managementOpen = false,
         )
         val now = System.currentTimeMillis()
@@ -289,32 +309,69 @@ class HomeService(
             now,
         )
         observeFocused()
-        hydrateRemote(session)
+        syncRemote(session, true)
     }
 
-    private fun hydrateRemote(session: SessionState) {
+    private fun syncRemote(session: SessionState, loading: Boolean = false, more: Boolean = false) {
         val scope = scope ?: return
         scope.launch {
-            local.value = local.value.copy(loadingMessages = true, message = null)
-            val result = runCatching { repo.messages(session.id, session.directory) }
-            local.value = local.value.copy(loadingMessages = false)
+            if (loading) {
+                local.value = local.value.copy(loadingMessages = true, message = null)
+            }
+            if (more) {
+                local.value = local.value.copy(loadingMoreMessages = true, message = null)
+            }
+            val key = keyForSession(session.id)
+            val limit = key?.let { messageLimit[it] } ?: MessageSyncLimit
+            val result = runCatching { repo.messages(session.id, session.directory, limit) }
+            if (loading) {
+                local.value = local.value.copy(loadingMessages = false)
+            }
+            if (more) {
+                local.value = local.value.copy(loadingMoreMessages = false)
+            }
             result.onSuccess { list ->
                 val key = keyForSession(session.id) ?: return@onSuccess
-                list.forEach {
+                val server = key.substringBefore("::")
+                val now = System.currentTimeMillis()
+                val next = list
+                    .sortedBy { it.id }
+                val complete = next.size < (messageLimit[key] ?: MessageSyncLimit)
+                val nextIds = next
+                    .map { it.id }
+                    .toHashSet()
+
+                next.forEach {
                     val message = messageKey(key, it.id)
                     role[message] = it.role
-                    if (sort[message] == null) {
-                        sort[message] = sequence()
-                    }
                     db.appDatabaseQueries.upsertMessageCache(
-                        key.substringBefore("::"),
+                        server,
                         session.id,
                         it.id,
                         it.role,
                         it.text,
-                        sort[message] ?: sequence(),
-                        System.currentTimeMillis(),
+                        it.id,
+                        now,
                     )
+                }
+
+                val cached = db.appDatabaseQueries
+                    .listMessageCache(server, session.id) { _, _, messageId, _, _, _, _ -> messageId }
+                    .executeAsList()
+
+                if (complete) {
+                    cached.forEach { id ->
+                        if (nextIds.contains(id)) return@forEach
+                        if (keepForPass(retainPass, key, id)) return@forEach
+                        db.appDatabaseQueries.deleteMessageCache(server, session.id, id)
+                        role.remove(messageKey(key, id))
+                        part.remove(messageKey(key, id))
+                    }
+                }
+
+                trimPending(key)
+                if (focusedKey == key) {
+                    local.value = local.value.copy(canLoadMoreMessages = !complete)
                 }
             }
             result.onFailure {
@@ -378,70 +435,162 @@ class HomeService(
     private fun stream(scope: CoroutineScope) {
         stream?.cancel()
         stream = scope.launch {
+            var retryDelay = StreamRetryDefaultMs
+            var attempt = 0
+            var cursor = runCatching { repo.streamCursor() }.getOrNull()
             while (isActive) {
                 val result = runCatching {
-                    repo.streamEvents { event ->
+                    repo.streamEvents(cursor) { event ->
+                        if (!event.id.isNullOrBlank()) {
+                            cursor = event.id
+                            runCatching { repo.setStreamCursor(cursor) }
+                        }
+                        if (event.retry != null) {
+                            retryDelay = event.retry.coerceAtLeast(StreamRetryMinMs)
+                        }
                         onEvent(event)
                     }
                 }
-                if (result.isSuccess) return@launch
-                delay(1_000)
+                if (result.isSuccess) {
+                    attempt = 0
+                    retryDelay = StreamRetryDefaultMs
+                    continue
+                }
+                attempt += 1
+                val backoff = (retryDelay * (1 shl (attempt - 1).coerceAtMost(8)))
+                    .coerceAtMost(StreamRetryMaxMs)
+                    .coerceAtLeast(StreamRetryMinMs)
+                delay(backoff.toLong())
+            }
+        }
+    }
+
+    private fun reconcile(scope: CoroutineScope) {
+        reconcile?.cancel()
+        reconcile = scope.launch {
+            while (isActive) {
+                delay(ReconcileIntervalMs)
+                val focused = local.value.focusedSession ?: continue
+                syncRemote(focused)
             }
         }
     }
 
     private fun onEvent(event: GlobalStreamEvent) {
-        if (event.type == "message.updated") {
-            val info = event.properties["info"]?.jsonObject ?: return
-            val sessionId = info["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
-            val id = info["id"]?.jsonPrimitive?.contentOrNull ?: return
-            val messageRole = info["role"]?.jsonPrimitive?.contentOrNull ?: "assistant"
-            val key = keyForSession(sessionId) ?: return
-            val message = messageKey(key, id)
-            if (messageRole == "user") {
-                pending[key]?.let {
-                    if (it.isNotEmpty()) it.removeAt(0)
+        when (event.type) {
+            "server.instance.disposed", "global.disposed" -> {
+                loadProjects()
+                local.value.focusedSession?.let { syncRemote(it) }
+            }
+
+            "session.created", "session.updated", "session.deleted" -> {
+                val selected = local.value.selectedProject
+                if (!selected.isNullOrBlank() && event.directory == selected) {
+                    loadSessions(selected)
+                }
+                if (event.type == "session.deleted") {
+                    val sessionId = event.properties["info"]
+                        ?.jsonObject
+                        ?.get("id")
+                        ?.jsonPrimitive
+                        ?.contentOrNull
+                        ?: return
+                    removeSession(sessionId)
                 }
             }
-            role[message] = messageRole
-            if (sort[message] == null) {
-                sort[message] = sequence()
+
+            "message.updated" -> {
+                val info = event.properties["info"]?.jsonObject ?: return
+                val sessionId = info["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
+                val id = info["id"]?.jsonPrimitive?.contentOrNull ?: return
+                val messageRole = info["role"]?.jsonPrimitive?.contentOrNull ?: "assistant"
+                val key = keyForSession(sessionId) ?: return
+                val message = messageKey(key, id)
+
+                if (messageRole == "user") {
+                    pending[key]?.let {
+                        if (it.isNotEmpty()) {
+                            val removed = it.removeAt(0)
+                            pendingPass[key]?.remove(removed.id)
+                        }
+                    }
+                }
+
+                role[message] = messageRole
+                retainPass.getOrPut(key) { linkedMapOf() }[id] = ReconcileKeepPasses
+                persistMessage(
+                    key,
+                    sessionId,
+                    id,
+                    messageRole,
+                    renderMessage(message),
+                    id,
+                )
+                scheduleSync(sessionId)
             }
-            persistMessage(
-                key,
-                sessionId,
-                id,
-                messageRole,
-                renderMessage(message),
-                sort[message] ?: sequence(),
-            )
-            scheduleSync(sessionId)
-            return
+
+            "message.removed" -> {
+                val sessionId = event.properties["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
+                val messageId = event.properties["messageID"]?.jsonPrimitive?.contentOrNull ?: return
+                val key = keyForSession(sessionId) ?: return
+                val server = key.substringBefore("::")
+                db.appDatabaseQueries.deleteMessageCache(server, sessionId, messageId)
+                role.remove(messageKey(key, messageId))
+                part.remove(messageKey(key, messageId))
+            }
+
+            "message.part.updated" -> {
+                val payload = event.properties["part"]?.jsonObject ?: return
+                val sessionId = payload["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
+                val messageId = payload["messageID"]?.jsonPrimitive?.contentOrNull ?: return
+                val partId = payload["id"]?.jsonPrimitive?.contentOrNull ?: return
+                val type = payload["type"]?.jsonPrimitive?.contentOrNull ?: return
+                if (type != "text") return
+                val text = payload["text"]?.jsonPrimitive?.contentOrNull ?: ""
+                val key = keyForSession(sessionId) ?: return
+                val message = messageKey(key, messageId)
+                val parts = part.getOrPut(message) { linkedMapOf() }
+                parts[partId] = text
+                retainPass.getOrPut(key) { linkedMapOf() }[messageId] = ReconcileKeepPasses
+                persistMessage(
+                    key,
+                    sessionId,
+                    messageId,
+                    role[message] ?: "assistant",
+                    renderMessage(message),
+                    messageId,
+                )
+                scheduleSync(sessionId)
+            }
+
+            "message.part.removed" -> {
+                val messageId = event.properties["messageID"]?.jsonPrimitive?.contentOrNull ?: return
+                val partId = event.properties["partID"]?.jsonPrimitive?.contentOrNull ?: return
+                val entry = active.entries.find { messageKey(it.key, messageId).let(part::containsKey) } ?: return
+                val key = entry.key
+                val message = messageKey(key, messageId)
+                val parts = part[message] ?: return
+                parts.remove(partId)
+                if (parts.isEmpty()) {
+                    part.remove(message)
+                }
+                val sessionId = key.substringAfter("::")
+                persistMessage(
+                    key,
+                    sessionId,
+                    messageId,
+                    role[message] ?: "assistant",
+                    renderMessage(message),
+                    messageId,
+                )
+                scheduleSync(sessionId)
+            }
+
+            "session.status" -> {
+                val sessionId = event.properties["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
+                scheduleSync(sessionId)
+            }
         }
-        if (event.type != "message.part.updated") return
-        val payload = event.properties["part"]?.jsonObject ?: return
-        val sessionId = payload["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
-        val messageId = payload["messageID"]?.jsonPrimitive?.contentOrNull ?: return
-        val partId = payload["id"]?.jsonPrimitive?.contentOrNull ?: return
-        val type = payload["type"]?.jsonPrimitive?.contentOrNull ?: return
-        if (type != "text") return
-        val text = payload["text"]?.jsonPrimitive?.contentOrNull ?: ""
-        val key = keyForSession(sessionId) ?: return
-        val message = messageKey(key, messageId)
-        val parts = part.getOrPut(message) { linkedMapOf() }
-        parts[partId] = text
-        if (sort[message] == null) {
-            sort[message] = sequence()
-        }
-        persistMessage(
-            key,
-            sessionId,
-            messageId,
-            role[message] ?: "assistant",
-            renderMessage(message),
-            sort[message] ?: sequence(),
-        )
-        scheduleSync(sessionId)
     }
 
     private fun scheduleSync(sessionId: String) {
@@ -451,7 +600,7 @@ class HomeService(
             repeat(6) {
                 delay(if (it == 0) 300 else 900)
                 val entry = active.values.find { value -> value.id == sessionId } ?: return@launch
-                hydrateRemote(entry)
+                syncRemote(entry)
             }
         }
     }
@@ -510,8 +659,69 @@ class HomeService(
         return "$key::$messageId"
     }
 
-    private fun sequence(): String {
-        return System.currentTimeMillis().toString().padStart(20, '0')
+    private fun keepForPass(map: MutableMap<String, MutableMap<String, Int>>, key: String, id: String): Boolean {
+        val passes = map[key] ?: return false
+        val value = passes[id] ?: return false
+        if (value <= 0) {
+            passes.remove(id)
+            if (passes.isEmpty()) map.remove(key)
+            return false
+        }
+        passes[id] = value - 1
+        if (passes[id] == 0) {
+            passes.remove(id)
+        }
+        if (passes.isEmpty()) {
+            map.remove(key)
+        }
+        return true
+    }
+
+    private fun trimPending(key: String) {
+        val list = pending[key] ?: return
+        if (list.isEmpty()) return
+
+        val filtered = list.filter { keepForPass(pendingPass, key, it.id) }
+        if (filtered.isEmpty()) {
+            pending.remove(key)
+            pendingPass.remove(key)
+            if (focusedKey == key) {
+                observeFocused()
+            }
+            return
+        }
+
+        if (filtered.size != list.size) {
+            pending[key] = filtered.toMutableList()
+            if (focusedKey == key) {
+                observeFocused()
+            }
+        }
+    }
+
+    private fun removeSession(sessionId: String) {
+        val entry = active.entries.find { it.value.id == sessionId } ?: return
+        val key = entry.key
+        val server = key.substringBefore("::")
+        active.remove(key)
+        sessionProject.remove(key)
+        pending.remove(key)
+        pendingPass.remove(key)
+        retainPass.remove(key)
+        messageLimit.remove(key)
+        db.appDatabaseQueries.deleteMessageCacheSession(server, sessionId)
+        if (focusedKey == key) {
+            focusedKey = active.keys.firstOrNull()
+            local.value = local.value.copy(
+                focusedSession = focusedKey?.let(active::get),
+                activeSessions = active.values.sortedByDescending { it.id },
+                canLoadMoreMessages = false,
+                loadingMoreMessages = false,
+            )
+            observeFocused()
+            return
+        }
+        local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
     }
 
     private fun key(server: String, sessionId: String): String {
@@ -521,9 +731,19 @@ class HomeService(
     fun stop() {
         stream?.cancel()
         stream = null
+        reconcile?.cancel()
+        reconcile = null
         observe?.cancel()
         observe = null
         sync.values.forEach { it.cancel() }
         sync.clear()
     }
 }
+
+private const val StreamRetryDefaultMs = 3000
+private const val StreamRetryMinMs = 1000
+private const val StreamRetryMaxMs = 30000
+private const val MessageSyncLimit = 400
+private const val ReconcileIntervalMs = 10000L
+private const val ReconcileKeepPasses = 1
+private const val OptimisticKeepPasses = 1
