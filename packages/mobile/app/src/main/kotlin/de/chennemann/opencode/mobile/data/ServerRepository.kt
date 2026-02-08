@@ -61,6 +61,26 @@ class ServerRepository(
         )
     }
 
+    suspend fun projects(): List<ProjectInfo> {
+        return service.projects(url.value)
+    }
+
+    suspend fun sessions(worktree: String): List<SessionInfo> {
+        return service.sessions(url.value, worktree)
+    }
+
+    suspend fun createSession(worktree: String, title: String): SessionInfo {
+        return service.createSession(url.value, worktree, title)
+    }
+
+    suspend fun messages(sessionId: String, directory: String): List<SessionMessageInfo> {
+        return service.sessionMessages(url.value, sessionId, directory)
+    }
+
+    suspend fun streamEvents(onEvent: suspend (GlobalStreamEvent) -> Unit) {
+        service.streamEvents(url.value, onEvent)
+    }
+
     private suspend fun load() {
         val value = db.appDatabaseQueries.selectSetting(UrlKey).executeAsOneOrNull()
         if (value == null) return
