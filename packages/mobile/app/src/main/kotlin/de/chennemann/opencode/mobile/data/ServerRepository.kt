@@ -1,8 +1,10 @@
 package de.chennemann.opencode.mobile.data
 
+import android.util.Log
 import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.home.ServerState
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,26 +26,37 @@ class ServerRepository(
     fun start(scope: CoroutineScope) {
         scope.launch {
             load()
+            refresh()
+            while (true) {
+                delay(10_000)
+                refresh(false)
+            }
         }
         scope.launch {
             mdns.discover().collect { entry ->
-                discovered.value = entry.url
+                discovered.value = normalizeUrl(entry.url) ?: entry.url
             }
         }
     }
 
     suspend fun setUrl(next: String) {
-        val value = next.trim()
-        if (value.isBlank()) return
+        val value = normalizeUrl(next) ?: return
         url.value = value
         db.appDatabaseQueries.upsertSetting(UrlKey, value)
     }
 
-    suspend fun refresh() {
-        state.value = ServerState.Loading
-        val result = runCatching { service.health(url.value) }
+    suspend fun refresh(loading: Boolean = true) {
+        val endpoint = url.value
+        if (loading) state.value = ServerState.Loading
+        val result = runCatching { service.health(endpoint) }
+        result.exceptionOrNull()?.let {
+            Log.e("ServerRepository", "health failed for $endpoint", it)
+        }
         state.value = result.fold(
-            onSuccess = { ServerState.Connected(it.version) },
+            onSuccess = {
+                if (it.healthy) ServerState.Connected(it.version)
+                else ServerState.Failed("Server is unhealthy")
+            },
             onFailure = { ServerState.Failed(it.message ?: "Connection failed") },
         )
     }
@@ -51,10 +64,23 @@ class ServerRepository(
     private suspend fun load() {
         val value = db.appDatabaseQueries.selectSetting(UrlKey).executeAsOneOrNull()
         if (value == null) return
-        if (value.isBlank()) return
-        url.value = value
+        val normalized = normalizeUrl(value) ?: return
+        url.value = normalized
+        if (normalized == value) return
+        db.appDatabaseQueries.upsertSetting(UrlKey, normalized)
     }
 }
 
-private const val DefaultUrl = "http://opencode.local:4000"
+private fun normalizeUrl(input: String): String? {
+    val trimmed = input.trim()
+    if (trimmed.isBlank()) return null
+    val withProtocol = if (trimmed.startsWith("http://", true) || trimmed.startsWith("https://", true)) {
+        trimmed
+    } else {
+        "http://$trimmed"
+    }
+    return withProtocol.replace(Regex("/+$"), "")
+}
+
+private const val DefaultUrl = "http://opencode.local:4096"
 private const val UrlKey = "server_url"

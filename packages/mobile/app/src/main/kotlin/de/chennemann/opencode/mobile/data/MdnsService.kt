@@ -13,7 +13,14 @@ data class MdnsEntry(
     val host: String,
     val port: Int,
 ) {
-    val url: String = "http://$host:$port"
+    val url: String = "http://${host(host)}:$port"
+
+    private fun host(value: String): String {
+        if (!value.contains(':')) return value
+        val clean = value.substringBefore('%')
+        if (clean.startsWith("[") && clean.endsWith("]")) return clean
+        return "[$clean]"
+    }
 }
 
 class MdnsService(
@@ -54,8 +61,11 @@ class MdnsService(
                         override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
 
                         override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                            val host = serviceInfo.host?.hostAddress
+                            val host = serviceInfo.host?.hostAddress?.let {
+                                if (it.contains('.')) it else null
+                            }
                                 ?: serviceInfo.host?.hostName
+                                ?: serviceInfo.host?.hostAddress?.substringBefore('%')
                                 ?: return
                             trySend(
                                 MdnsEntry(

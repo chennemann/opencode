@@ -13,7 +13,7 @@ import kotlinx.coroutines.launch
 class HomeViewModel(
     private val repo: ServerRepository,
 ) : ViewModel() {
-    private val input = MutableStateFlow(DefaultUrl)
+    private val input = MutableStateFlow(repo.endpoint.value)
     private var manual = false
 
     val state: StateFlow<HomeState> = combine(
@@ -30,7 +30,7 @@ class HomeViewModel(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
         HomeState(
-            url = DefaultUrl,
+            url = repo.endpoint.value,
             discovered = null,
             status = ServerState.Idle,
         )
@@ -44,7 +44,6 @@ class HomeViewModel(
                 input.value = url
             }
         }
-        refresh()
     }
 
     fun updateUrl(value: String) {
@@ -65,5 +64,3 @@ class HomeViewModel(
         }
     }
 }
-
-private const val DefaultUrl = "http://opencode.local:4000"
