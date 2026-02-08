@@ -17,6 +17,7 @@ data class MessageState(
     val id: String,
     val role: String,
     val text: String,
+    val sort: String,
 )
 
 data class HomeState(
