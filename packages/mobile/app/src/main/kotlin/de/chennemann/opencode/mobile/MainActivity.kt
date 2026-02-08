@@ -1,7 +1,10 @@
 package de.chennemann.opencode.mobile
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
@@ -14,7 +17,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -36,8 +44,13 @@ private data object HomeRoute : NavKey
 private data class DetailRoute(val id: String) : NavKey
 
 class MainActivity : ComponentActivity() {
+    private val requestInternet = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (checkSelfPermission(Manifest.permission.INTERNET) != PackageManager.PERMISSION_GRANTED) {
+            requestInternet.launch(Manifest.permission.INTERNET)
+        }
         enableEdgeToEdge()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).run {
@@ -57,6 +70,11 @@ class MainActivity : ComponentActivity() {
                             is HomeRoute -> NavEntry(key) {
                                 val model: HomeViewModel = koinViewModel()
                                 val state by model.state.collectAsStateWithLifecycle()
+                                var field by remember { mutableStateOf(TextFieldValue(state.url)) }
+                                LaunchedEffect(state.url) {
+                                    if (state.url == field.text) return@LaunchedEffect
+                                    field = TextFieldValue(state.url)
+                                }
                                 Column(
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -65,8 +83,11 @@ class MainActivity : ComponentActivity() {
                                 ) {
                                     Text("OpenCode Android")
                                     TextField(
-                                        value = state.url,
-                                        onValueChange = model::updateUrl,
+                                        value = field,
+                                        onValueChange = {
+                                            field = it
+                                            model.updateUrl(it.text)
+                                        },
                                         label = { Text("Server URL") },
                                         singleLine = true,
                                     )
