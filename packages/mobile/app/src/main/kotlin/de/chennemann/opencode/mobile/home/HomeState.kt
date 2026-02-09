@@ -20,6 +20,18 @@ data class MessageState(
     val sort: String,
 )
 
+data class DebugState(
+    val sseSeen: Int = 0,
+    val sseApplied: Int = 0,
+    val sseDropped: Int = 0,
+    val sseConnected: Int = 0,
+    val sseErrors: Int = 0,
+    val syncRuns: Int = 0,
+    val syncFails: Int = 0,
+    val lastDrop: String? = null,
+    val lastStreamError: String? = null,
+)
+
 data class HomeState(
     val url: String,
     val discovered: String?,
@@ -35,6 +47,6 @@ data class HomeState(
     val managementOpen: Boolean,
     val loadingProjects: Boolean,
     val loadingSessions: Boolean,
-    val loadingMessages: Boolean,
     val message: String?,
+    val debug: DebugState,
 )
