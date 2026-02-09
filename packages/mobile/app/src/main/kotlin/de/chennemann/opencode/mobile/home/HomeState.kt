@@ -21,6 +21,7 @@ data class MessageState(
 )
 
 data class DebugState(
+    val sseRaw: Int = 0,
     val sseSeen: Int = 0,
     val sseApplied: Int = 0,
     val sseDropped: Int = 0,

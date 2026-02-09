@@ -8,17 +8,20 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Alignment
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -30,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.TextFieldValue
@@ -45,6 +49,7 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import de.chennemann.opencode.mobile.home.HomeViewModel
 import de.chennemann.opencode.mobile.ui.theme.MobileTheme
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import org.koin.androidx.compose.koinViewModel
 
@@ -82,6 +87,33 @@ class MainActivity : ComponentActivity() {
                                 val model: HomeViewModel = koinViewModel()
                                 val state by model.state.collectAsStateWithLifecycle()
                                 val list = rememberLazyListState()
+                                val scope = rememberCoroutineScope()
+                                val offset = if (state.canLoadMoreMessages || state.loadingMoreMessages) 1 else 0
+                                val isTool = { text: String, role: String ->
+                                    role != "user" && text.startsWith("[") && text.endsWith("]")
+                                }
+                                val current = {
+                                    (list.firstVisibleItemIndex - offset)
+                                        .coerceIn(-1, state.focusedMessages.lastIndex)
+                                }
+                                val previous = {
+                                    (current() - 1 downTo 0)
+                                        .firstOrNull { index ->
+                                            !isTool(
+                                                state.focusedMessages[index].text,
+                                                state.focusedMessages[index].role,
+                                            )
+                                        }
+                                }
+                                val next = {
+                                    (current() + 1..state.focusedMessages.lastIndex)
+                                        .firstOrNull { index ->
+                                            !isTool(
+                                                state.focusedMessages[index].text,
+                                                state.focusedMessages[index].role,
+                                            )
+                                        }
+                                }
                                 LaunchedEffect(state.focusedSession?.id, state.focusedMessages.size) {
                                     val index = state.focusedMessages.lastIndex
                                     if (index < 0) return@LaunchedEffect
@@ -108,52 +140,89 @@ class MainActivity : ComponentActivity() {
                                             Text("⚙")
                                         }
                                     }
-                                    LazyColumn(
-                                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                                        modifier = Modifier.weight(1f),
-                                        state = list,
-                                    ) {
-                                        if (state.canLoadMoreMessages || state.loadingMoreMessages) {
-                                            item("load-more") {
-                                                Button(
-                                                    onClick = dropUnlessResumed {
-                                                        model.loadMoreMessages()
-                                                    },
-                                                    enabled = !state.loadingMoreMessages,
-                                                ) {
-                                                    val label = if (state.loadingMoreMessages) {
-                                                        "Loading older messages..."
-                                                    } else {
-                                                        "Load older messages"
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        LazyColumn(
+                                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                                            modifier = Modifier.fillMaxSize(),
+                                            state = list,
+                                        ) {
+                                            if (state.canLoadMoreMessages || state.loadingMoreMessages) {
+                                                item("load-more") {
+                                                    Button(
+                                                        onClick = dropUnlessResumed {
+                                                            model.loadMoreMessages()
+                                                        },
+                                                        enabled = !state.loadingMoreMessages,
+                                                    ) {
+                                                        val label = if (state.loadingMoreMessages) {
+                                                            "Loading older messages..."
+                                                        } else {
+                                                            "Load older messages"
+                                                        }
+                                                        Text(label)
                                                     }
-                                                    Text(label)
+                                                }
+                                            }
+                                            items(state.focusedMessages, key = { it.id }) { message ->
+                                                val user = message.role == "user"
+                                                if (user) {
+                                                    Card(
+                                                        colors = CardDefaults.cardColors(
+                                                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                        ),
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                    ) {
+                                                        SelectionContainer {
+                                                            Text(
+                                                                message.text,
+                                                                modifier = Modifier.padding(12.dp),
+                                                            )
+                                                        }
+                                                    }
+                                                    return@items
+                                                }
+
+                                                SelectionContainer {
+                                                    Text(
+                                                        message.text,
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                    )
                                                 }
                                             }
                                         }
-                                        items(state.focusedMessages, key = { it.id }) { message ->
-                                            val user = message.role == "user"
-                                            if (user) {
-                                                Card(
-                                                    colors = CardDefaults.cardColors(
-                                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                                    ),
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                ) {
-                                                    SelectionContainer {
-                                                        Text(
-                                                            message.text,
-                                                            modifier = Modifier.padding(12.dp),
-                                                        )
-                                                    }
-                                                }
-                                                return@items
-                                            }
 
-                                            SelectionContainer {
-                                                Text(
-                                                    message.text,
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                )
+                                        Row(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(bottom = 8.dp),
+                                        ) {
+                                            Column(
+                                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                            ) {
+                                                Button(
+                                                    onClick = {
+                                                        val target = previous() ?: return@Button
+                                                        scope.launch {
+                                                            list.scrollToItem(target + offset)
+                                                        }
+                                                    },
+                                                    enabled = previous() != null,
+                                                    shape = CircleShape,
+                                                ) {
+                                                    Text("⌃")
+                                                }
+                                                Button(
+                                                    onClick = {
+                                                        val target = next() ?: return@Button
+                                                        scope.launch {
+                                                            list.scrollToItem(target + offset)
+                                                        }
+                                                    },
+                                                    enabled = next() != null,
+                                                    shape = CircleShape,
+                                                ) {
+                                                    Text("⌄")
+                                                }
                                             }
                                         }
                                     }
@@ -162,7 +231,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     SelectionContainer {
                                         Text(
-                                            "SSE seen=${state.debug.sseSeen} applied=${state.debug.sseApplied} dropped=${state.debug.sseDropped} connected=${state.debug.sseConnected} errors=${state.debug.sseErrors} sync=${state.debug.syncRuns}/${state.debug.syncFails}",
+                                            "SSE raw=${state.debug.sseRaw} seen=${state.debug.sseSeen} applied=${state.debug.sseApplied} dropped=${state.debug.sseDropped} connected=${state.debug.sseConnected} errors=${state.debug.sseErrors} sync=${state.debug.syncRuns}/${state.debug.syncFails}",
                                         )
                                     }
                                     state.debug.lastDrop?.let {
