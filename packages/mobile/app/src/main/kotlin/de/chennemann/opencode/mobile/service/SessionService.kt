@@ -4,6 +4,7 @@ import android.util.Log
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import de.chennemann.opencode.mobile.data.GlobalStreamEvent
+import de.chennemann.opencode.mobile.data.NetworkService
 import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.home.HomeState
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -30,9 +32,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.util.concurrent.atomic.AtomicLong
 
-class HomeService(
+class SessionService(
     private val repo: ServerRepository,
     private val db: AppDatabase,
+    private val network: NetworkService,
 ) {
     private data class LocalState(
         val projects: List<ProjectState> = emptyList(),
@@ -567,7 +570,14 @@ class HomeService(
                 Log.w(LogTag, "sse stream error attempt=${attempt + 1} reason=$reason")
                 pushSseLog("error attempt=${attempt + 1} reason=$reason")
                 attempt += 1
-                pushSseLog("restart stream in ${StreamRestartDelayMs}ms")
+                val seen = network.changed.value
+                if (!network.online.value) {
+                    pushSseLog("offline; waiting for network change")
+                } else {
+                    pushSseLog("waiting for network change before reconnect")
+                }
+                network.changed.first { it > seen }
+                pushSseLog("network changed; retrying stream")
                 delay(StreamRestartDelayMs)
             }
         }
@@ -1145,6 +1155,6 @@ private const val MessageSyncLimit = 400
 private const val ReconcileIntervalMs = 10000L
 private const val ReconcileKeepPasses = 1
 private const val OptimisticKeepPasses = 1
-private const val LogTag = "HomeService"
+private const val LogTag = "SessionService"
 private const val SseLogLimit = 300
 private const val SessionResolveCooldownMs = 5000L
