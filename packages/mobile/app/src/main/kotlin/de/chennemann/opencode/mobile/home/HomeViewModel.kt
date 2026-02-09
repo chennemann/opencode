@@ -2,11 +2,11 @@ package de.chennemann.opencode.mobile.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import de.chennemann.opencode.mobile.service.HomeService
+import de.chennemann.opencode.mobile.service.SessionService
 import kotlinx.coroutines.flow.StateFlow
 
 class HomeViewModel(
-    private val service: HomeService,
+    private val service: SessionService,
 ) : ViewModel() {
     val state: StateFlow<HomeState> = service.state
 

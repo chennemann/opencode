@@ -50,6 +50,7 @@ import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import de.chennemann.opencode.mobile.home.ServerState
 import de.chennemann.opencode.mobile.home.HomeViewModel
 import de.chennemann.opencode.mobile.icons.ChevronDown
 import de.chennemann.opencode.mobile.icons.ChevronUp
@@ -256,6 +257,7 @@ class MainActivity : ComponentActivity() {
                                         SelectionContainer { Text("Last stream error: $it") }
                                     }
                                     var draft by remember { mutableStateOf(TextFieldValue("")) }
+                                    val connected = state.status is ServerState.Connected
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -267,17 +269,28 @@ class MainActivity : ComponentActivity() {
                                             modifier = Modifier.weight(1f),
                                             label = { Text("Message") },
                                         )
-                                        IconButton(
-                                            onClick = dropUnlessResumed {
-                                                model.send(draft.text)
-                                                draft = TextFieldValue("")
-                                            },
-                                            colors = IconButtonDefaults.iconButtonColors(
-                                                contentColor = MaterialTheme.colorScheme.primary,
-                                            ),
-                                            modifier = Modifier.align(Alignment.Bottom),
-                                        ) {
-                                            Icon(Icons.Send, "")
+                                        if (connected) {
+                                            IconButton(
+                                                onClick = dropUnlessResumed {
+                                                    model.send(draft.text)
+                                                    draft = TextFieldValue("")
+                                                },
+                                                colors = IconButtonDefaults.iconButtonColors(
+                                                    contentColor = MaterialTheme.colorScheme.primary,
+                                                ),
+                                                modifier = Modifier.align(Alignment.Bottom),
+                                            ) {
+                                                Icon(Icons.Send, "")
+                                            }
+                                        } else {
+                                            Button(
+                                                onClick = dropUnlessResumed {
+                                                    model.refresh()
+                                                },
+                                                modifier = Modifier.align(Alignment.Bottom),
+                                            ) {
+                                                Text("Reload")
+                                            }
                                         }
                                     }
                                 }

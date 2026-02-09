@@ -4,16 +4,18 @@ import android.util.Log
 import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.home.ServerState
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 class ServerRepository(
     private val db: AppDatabase,
     private val mdns: MdnsService,
     private val service: ServerService,
+    private val network: NetworkService,
 ) {
     private val state = MutableStateFlow<ServerState>(ServerState.Idle)
     private val url = MutableStateFlow(DefaultUrl)
@@ -27,8 +29,9 @@ class ServerRepository(
         scope.launch {
             load()
             refresh()
-            while (true) {
-                delay(10_000)
+        }
+        scope.launch {
+            network.changed.drop(1).collect {
                 refresh(false)
             }
         }
