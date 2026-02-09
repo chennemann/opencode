@@ -1,5 +1,6 @@
 package de.chennemann.opencode.mobile.service
 
+import android.util.Log
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import de.chennemann.opencode.mobile.data.GlobalStreamEvent
@@ -10,6 +11,7 @@ import de.chennemann.opencode.mobile.home.MessageState
 import de.chennemann.opencode.mobile.home.ProjectState
 import de.chennemann.opencode.mobile.home.ServerState
 import de.chennemann.opencode.mobile.home.SessionState
+import de.chennemann.opencode.mobile.home.DebugState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
@@ -44,12 +46,12 @@ class HomeService(
         val managementOpen: Boolean = false,
         val loadingProjects: Boolean = false,
         val loadingSessions: Boolean = false,
-        val loadingMessages: Boolean = false,
         val message: String? = null,
     )
 
     private val input = MutableStateFlow(repo.endpoint.value)
     private val local = MutableStateFlow(LocalState())
+    private val debug = MutableStateFlow(DebugState())
     private val output = MutableStateFlow(
         HomeState(
             url = repo.endpoint.value,
@@ -66,8 +68,8 @@ class HomeService(
             managementOpen = false,
             loadingProjects = false,
             loadingSessions = false,
-            loadingMessages = false,
             message = null,
+            debug = DebugState(),
         )
     )
 
@@ -89,6 +91,13 @@ class HomeService(
     private val sync = linkedMapOf<String, Job>()
     private val syncActive = linkedSetOf<String>()
     private val syncGuard = Mutex()
+    private var sseSeen = 0
+    private var sseApplied = 0
+    private var sseDropped = 0
+    private var sseConnected = 0
+    private var sseErrors = 0
+    private var syncRuns = 0
+    private var syncFails = 0
     private var scope: CoroutineScope? = null
     private var started = false
     private var focusedKey: String? = null
@@ -101,7 +110,7 @@ class HomeService(
         this.scope = scope
         repo.start(scope)
         scope.launch {
-            combine(input, repo.found, repo.status, local) { url, discovered, status, local ->
+            combine(input, repo.found, repo.status, local, debug) { url, discovered, status, local, debug ->
                 HomeState(
                     url = url,
                     discovered = discovered,
@@ -117,8 +126,8 @@ class HomeService(
                     managementOpen = local.managementOpen,
                     loadingProjects = local.loadingProjects,
                     loadingSessions = local.loadingSessions,
-                    loadingMessages = local.loadingMessages,
                     message = local.message,
+                    debug = debug,
                 )
             }.collect {
                 output.value = it
@@ -321,26 +330,24 @@ class HomeService(
             now,
         )
         observeFocused()
-        syncRemote(session, true)
+        syncRemote(session)
     }
 
-    private fun syncRemote(session: SessionState, loading: Boolean = false, more: Boolean = false) {
+    private fun syncRemote(session: SessionState, more: Boolean = false) {
+        if (repo.status.value !is ServerState.Connected) return
         val scope = scope ?: return
         scope.launch(Dispatchers.Default) {
             if (!beginSync(session.id)) return@launch
             try {
-            if (loading) {
-                local.value = local.value.copy(loadingMessages = true, message = null)
-            }
+            val started = System.currentTimeMillis()
+            syncRuns += 1
+            debug.value = debug.value.copy(syncRuns = syncRuns)
             if (more) {
                 local.value = local.value.copy(loadingMoreMessages = true, message = null)
             }
             val key = keyForSession(session.id)
             val limit = key?.let { messageLimit[it] } ?: MessageSyncLimit
             val result = runCatching { repo.messages(session.id, session.directory, limit) }
-            if (loading) {
-                local.value = local.value.copy(loadingMessages = false)
-            }
             if (more) {
                 local.value = local.value.copy(loadingMoreMessages = false)
             }
@@ -436,8 +443,14 @@ class HomeService(
                     }
                     local.value = local.value.copy(canLoadMoreMessages = !complete)
                 }
+                if (syncRuns % 10 == 0) {
+                    Log.d(LogTag, "sync ok session=${session.id} messages=${next.size} dt=${System.currentTimeMillis() - started}ms")
+                }
             }
             result.onFailure {
+                syncFails += 1
+                debug.value = debug.value.copy(syncFails = syncFails)
+                Log.w(LogTag, "sync failed session=${session.id} reason=${it.message}")
                 local.value = local.value.copy(message = it.message ?: "Failed to load messages")
             }
             } finally {
@@ -505,8 +518,13 @@ class HomeService(
             var attempt = 0
             var cursor = runCatching { repo.streamCursor() }.getOrNull()
             while (isActive) {
+                val endpoint = repo.endpoint.value
+                Log.d(LogTag, "sse connect attempt=${attempt + 1} endpoint=$endpoint cursor=$cursor")
                 val result = runCatching {
+                    sseConnected += 1
+                    debug.value = debug.value.copy(sseConnected = sseConnected, lastStreamError = null)
                     repo.streamEvents(cursor) { event ->
+                        Log.d(LogTag, "sse event type=${event.type} dir=${event.directory} id=${event.id}")
                         if (!event.id.isNullOrBlank()) {
                             cursor = event.id
                             runCatching { repo.setStreamCursor(cursor) }
@@ -518,10 +536,15 @@ class HomeService(
                     }
                 }
                 if (result.isSuccess) {
+                    Log.d(LogTag, "sse stream ended normally reconnecting")
                     attempt = 0
                     retryDelay = StreamRetryDefaultMs
                     continue
                 }
+                sseErrors += 1
+                val reason = result.exceptionOrNull()?.message ?: "unknown stream error"
+                debug.value = debug.value.copy(sseErrors = sseErrors, lastStreamError = reason)
+                Log.w(LogTag, "sse stream error attempt=${attempt + 1} reason=$reason")
                 attempt += 1
                 val backoff = (retryDelay * (1 shl (attempt - 1).coerceAtMost(8)))
                     .coerceAtMost(StreamRetryMaxMs)
@@ -543,13 +566,17 @@ class HomeService(
     }
 
     private suspend fun onEvent(event: GlobalStreamEvent) {
+        sseSeen += 1
+        debug.value = debug.value.copy(sseSeen = sseSeen)
         when (event.type) {
             "server.instance.disposed", "global.disposed" -> {
+                markSseApplied(event.type, null)
                 loadProjects()
                 local.value.focusedSession?.let { syncRemote(it) }
             }
 
             "session.created", "session.updated", "session.deleted" -> {
+                markSseApplied(event.type, null)
                 val selected = local.value.selectedProject
                 if (!selected.isNullOrBlank() && event.directory == selected) {
                     loadSessions(selected)
@@ -566,12 +593,24 @@ class HomeService(
             }
 
             "message.updated" -> {
-                val info = event.properties["info"]?.jsonObject ?: return
-                val sessionId = info["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
-                val id = info["id"]?.jsonPrimitive?.contentOrNull ?: return
+                val info = event.properties["info"]?.jsonObject ?: event.properties
+                val sessionId = info["sessionID"]?.jsonPrimitive?.contentOrNull
+                if (sessionId.isNullOrBlank()) {
+                    markSseDropped(event.type, "missing sessionID")
+                    return
+                }
+                val id = info["id"]?.jsonPrimitive?.contentOrNull
+                if (id.isNullOrBlank()) {
+                    markSseDropped(event.type, "missing message id")
+                    return
+                }
                 val messageRole = info["role"]?.jsonPrimitive?.contentOrNull ?: "assistant"
                 val messageText = info["text"]?.jsonPrimitive?.contentOrNull?.trim()
-                val key = keyForSession(sessionId) ?: return
+                val key = keyForSession(sessionId)
+                if (key == null) {
+                    markSseDropped(event.type, "session not focused/active id=$sessionId")
+                    return
+                }
                 val message = messageKey(key, id)
 
                 if (messageRole == "user") {
@@ -598,16 +637,29 @@ class HomeService(
                     sessionId,
                     id,
                     messageRole,
-                    renderMessage(message),
+                    if (!messageText.isNullOrBlank()) messageText else renderMessage(message),
                     sort,
                 )
+                markSseApplied(event.type, sessionId)
                 scheduleSync(sessionId)
             }
 
             "message.removed" -> {
-                val sessionId = event.properties["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
-                val messageId = event.properties["messageID"]?.jsonPrimitive?.contentOrNull ?: return
-                val key = keyForSession(sessionId) ?: return
+                val sessionId = event.properties["sessionID"]?.jsonPrimitive?.contentOrNull
+                if (sessionId.isNullOrBlank()) {
+                    markSseDropped(event.type, "missing sessionID")
+                    return
+                }
+                val messageId = event.properties["messageID"]?.jsonPrimitive?.contentOrNull
+                if (messageId.isNullOrBlank()) {
+                    markSseDropped(event.type, "missing messageID")
+                    return
+                }
+                val key = keyForSession(sessionId)
+                if (key == null) {
+                    markSseDropped(event.type, "session not focused/active id=$sessionId")
+                    return
+                }
                 val server = key.substringBefore("::")
                 withContext(Dispatchers.IO) {
                     db.appDatabaseQueries.deleteMessageCache(server, sessionId, messageId)
@@ -615,17 +667,50 @@ class HomeService(
                 role.remove(messageKey(key, messageId))
                 part.remove(messageKey(key, messageId))
                 order.remove(messageKey(key, messageId))
+                markSseApplied(event.type, sessionId)
             }
 
             "message.part.updated" -> {
-                val payload = event.properties["part"]?.jsonObject ?: return
-                val sessionId = payload["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
-                val messageId = payload["messageID"]?.jsonPrimitive?.contentOrNull ?: return
-                val partId = payload["id"]?.jsonPrimitive?.contentOrNull ?: return
-                val type = payload["type"]?.jsonPrimitive?.contentOrNull ?: return
-                if (type != "text") return
-                val text = payload["text"]?.jsonPrimitive?.contentOrNull ?: ""
-                val key = keyForSession(sessionId) ?: return
+                val payload = event.properties["part"]?.jsonObject ?: event.properties
+                val sessionId = payload["sessionID"]?.jsonPrimitive?.contentOrNull
+                if (sessionId.isNullOrBlank()) {
+                    markSseDropped(event.type, "missing sessionID")
+                    return
+                }
+                val messageId = payload["messageID"]?.jsonPrimitive?.contentOrNull
+                if (messageId.isNullOrBlank()) {
+                    markSseDropped(event.type, "missing messageID")
+                    return
+                }
+                val partId = payload["id"]?.jsonPrimitive?.contentOrNull
+                if (partId.isNullOrBlank()) {
+                    markSseDropped(event.type, "missing part id")
+                    return
+                }
+                val type = payload["type"]?.jsonPrimitive?.contentOrNull
+                val text = when (type) {
+                    "text" -> payload["text"]?.jsonPrimitive?.contentOrNull ?: ""
+                    "tool" -> {
+                        val tool = payload["tool"]?.jsonPrimitive?.contentOrNull ?: "tool"
+                        val status = payload["state"]
+                            ?.jsonObject
+                            ?.get("status")
+                            ?.jsonPrimitive
+                            ?.contentOrNull
+                            ?: "running"
+                        "[$tool: $status]"
+                    }
+                    null -> {
+                        markSseDropped(event.type, "missing part type")
+                        return
+                    }
+                    else -> "[$type]"
+                }
+                val key = keyForSession(sessionId)
+                if (key == null) {
+                    markSseDropped(event.type, "session not focused/active id=$sessionId")
+                    return
+                }
                 val message = messageKey(key, messageId)
                 val parts = part.getOrPut(message) { linkedMapOf() }
                 parts[partId] = text
@@ -639,13 +724,26 @@ class HomeService(
                     renderMessage(message),
                     sort,
                 )
+                markSseApplied(event.type, sessionId)
                 scheduleSync(sessionId)
             }
 
             "message.part.removed" -> {
-                val messageId = event.properties["messageID"]?.jsonPrimitive?.contentOrNull ?: return
-                val partId = event.properties["partID"]?.jsonPrimitive?.contentOrNull ?: return
-                val entry = active.entries.find { messageKey(it.key, messageId).let(part::containsKey) } ?: return
+                val messageId = event.properties["messageID"]?.jsonPrimitive?.contentOrNull
+                if (messageId.isNullOrBlank()) {
+                    markSseDropped(event.type, "missing messageID")
+                    return
+                }
+                val partId = event.properties["partID"]?.jsonPrimitive?.contentOrNull
+                if (partId.isNullOrBlank()) {
+                    markSseDropped(event.type, "missing partID")
+                    return
+                }
+                val entry = active.entries.find { messageKey(it.key, messageId).let(part::containsKey) }
+                if (entry == null) {
+                    markSseDropped(event.type, "message not in active cache")
+                    return
+                }
                 val key = entry.key
                 val message = messageKey(key, messageId)
                 val parts = part[message] ?: return
@@ -663,13 +761,21 @@ class HomeService(
                     renderMessage(message),
                     sort,
                 )
+                markSseApplied(event.type, sessionId)
                 scheduleSync(sessionId)
             }
 
             "session.status" -> {
-                val sessionId = event.properties["sessionID"]?.jsonPrimitive?.contentOrNull ?: return
+                val sessionId = event.properties["sessionID"]?.jsonPrimitive?.contentOrNull
+                if (sessionId.isNullOrBlank()) {
+                    markSseDropped(event.type, "missing sessionID")
+                    return
+                }
+                markSseApplied(event.type, sessionId)
                 scheduleSync(sessionId)
             }
+
+            else -> markSseDropped(event.type, "unhandled event")
         }
     }
 
@@ -861,6 +967,23 @@ class HomeService(
         }
     }
 
+    private fun markSseApplied(type: String, sessionId: String?) {
+        sseApplied += 1
+        debug.value = debug.value.copy(sseApplied = sseApplied)
+        if (sseApplied % 5 == 0) {
+            Log.d(
+                LogTag,
+                "sse applied=$sseApplied dropped=$sseDropped seen=$sseSeen connected=$sseConnected errors=$sseErrors last=$type session=$sessionId",
+            )
+        }
+    }
+
+    private fun markSseDropped(type: String, reason: String) {
+        sseDropped += 1
+        debug.value = debug.value.copy(sseDropped = sseDropped, lastDrop = "$type: $reason")
+        Log.w(LogTag, "sse drop type=$type reason=$reason seen=$sseSeen applied=$sseApplied dropped=$sseDropped")
+    }
+
     fun stop() {
         stream?.cancel()
         stream = null
@@ -880,3 +1003,4 @@ private const val MessageSyncLimit = 400
 private const val ReconcileIntervalMs = 10000L
 private const val ReconcileKeepPasses = 1
 private const val OptimisticKeepPasses = 1
+private const val LogTag = "HomeService"

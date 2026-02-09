@@ -11,6 +11,7 @@ import kotlinx.serialization.json.Json
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import org.koin.androidx.viewmodel.dsl.viewModel
 import org.koin.dsl.module
+import java.util.concurrent.TimeUnit
 
 val appModule = module {
     single {
@@ -18,7 +19,15 @@ val appModule = module {
             ignoreUnknownKeys = true
         }
     }
-    single { OkHttp.create() }
+    single {
+        OkHttp.create {
+            config {
+                connectTimeout(5, TimeUnit.SECONDS)
+                readTimeout(75, TimeUnit.SECONDS)
+                writeTimeout(30, TimeUnit.SECONDS)
+            }
+        }
+    }
     single {
         AppDatabase(
             AndroidSqliteDriver(
