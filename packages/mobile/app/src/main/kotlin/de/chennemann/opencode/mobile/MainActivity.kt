@@ -91,7 +91,7 @@ class MainActivity : ComponentActivity() {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .padding(24.dp),
+                                        .padding(horizontal = 16.dp, vertical = 24.dp),
                                     verticalArrangement = Arrangement.spacedBy(16.dp),
                                 ) {
                                     Row(
@@ -132,26 +132,28 @@ class MainActivity : ComponentActivity() {
                                         }
                                         items(state.focusedMessages, key = { it.id }) { message ->
                                             val user = message.role == "user"
-                                            val label = if (user) "User" else "Server"
-                                            val color = if (user) {
-                                                MaterialTheme.colorScheme.primaryContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.secondaryContainer
-                                            }
-                                            Card(
-                                                colors = CardDefaults.cardColors(
-                                                    containerColor = color,
-                                                ),
-                                            ) {
-                                                Column(
-                                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                                    modifier = Modifier.padding(12.dp),
+                                            if (user) {
+                                                Card(
+                                                    colors = CardDefaults.cardColors(
+                                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                    ),
+                                                    modifier = Modifier.fillMaxWidth(),
                                                 ) {
-                                                    Text(label)
                                                     SelectionContainer {
-                                                        Text(message.text)
+                                                        Text(
+                                                            message.text,
+                                                            modifier = Modifier.padding(12.dp),
+                                                        )
                                                     }
                                                 }
+                                                return@items
+                                            }
+
+                                            SelectionContainer {
+                                                Text(
+                                                    message.text,
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                )
                                             }
                                         }
                                     }
