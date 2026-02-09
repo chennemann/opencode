@@ -4,17 +4,18 @@ import de.chennemann.opencode.mobile.api.apis.DefaultApi
 import de.chennemann.opencode.mobile.api.models.SessionCreateRequest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngine
+import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.plugins.sse.sse
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
-import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
-import io.ktor.utils.io.readAvailable
+import kotlinx.coroutines.flow.collect
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -26,6 +27,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.math.BigDecimal
 import kotlinx.serialization.json.put
+import kotlin.time.Duration.Companion.milliseconds
 
 data class Health(
     val healthy: Boolean,
@@ -63,7 +65,14 @@ class ServerService(
     private val json: Json,
     private val engine: HttpClientEngine,
 ) {
-    private val http = HttpClient(engine)
+    private val http = HttpClient(engine) {
+        install(SSE) {
+            maxReconnectionAttempts = Int.MAX_VALUE
+            reconnectionTime = 3_000.milliseconds
+            showCommentEvents()
+            showRetryEvents()
+        }
+    }
     private var url: String? = null
     private var api: DefaultApi? = null
 
@@ -201,90 +210,40 @@ class ServerService(
     suspend fun streamEvents(
         baseUrl: String,
         lastEventId: String?,
-        onRawEvent: suspend () -> Unit,
+        onRawEvent: suspend (String) -> Unit,
         onEvent: suspend (GlobalStreamEvent) -> Unit,
     ): String? {
-        val res = http.get("$baseUrl/global/event") {
-            header(HttpHeaders.Accept, "text/event-stream")
-            header(HttpHeaders.CacheControl, "no-cache")
-            if (!lastEventId.isNullOrBlank()) {
-                header("Last-Event-ID", lastEventId)
-            }
-        }
-        if (res.status.value !in 200..299) {
-            throw IllegalStateException("Server returned ${res.status}")
-        }
-
         var cursor = lastEventId
-        val bytes = ByteArray(8192)
-        var buffer = ""
-
-        suspend fun flush(chunk: String) {
-            if (chunk.isBlank()) return
-            onRawEvent()
-
-            val lines = chunk.split("\n")
-            val data = mutableListOf<String>()
-            var id: String? = null
-            var retry: Int? = null
-
-            lines.forEach { line ->
-                if (line.startsWith(":")) return@forEach
-                if (line.startsWith("data:")) {
-                    data.add(line.removePrefix("data:").trimStart())
-                    return@forEach
-                }
-                if (line.startsWith("id:")) {
-                    id = line.removePrefix("id:").trim()
-                    return@forEach
-                }
-                if (line.startsWith("retry:")) {
-                    retry = line.removePrefix("retry:").trim().toIntOrNull()
-                }
+        http.sse("$baseUrl/global/event", request = {
+            header(HttpHeaders.CacheControl, "no-cache")
+            if (!cursor.isNullOrBlank()) {
+                header("Last-Event-ID", cursor)
             }
-
-            if (data.isEmpty()) return
-
-            val parsed = runCatching { json.parseToJsonElement(data.joinToString("\n")).jsonObject }
-            val root = parsed.getOrNull() ?: return
-            val payload = root["payload"]?.jsonObject ?: return
-            val type = payload["type"]?.jsonPrimitive?.contentOrNull ?: return
-            val properties = payload["properties"]?.jsonObject ?: JsonObject(emptyMap())
-
-            if (!id.isNullOrBlank()) {
-                cursor = id
-            }
-
-            onEvent(
-                GlobalStreamEvent(
-                    directory = root["directory"]?.jsonPrimitive?.contentOrNull ?: "global",
-                    type = type,
-                    properties = properties,
-                    id = id,
-                    retry = retry,
+        }) {
+            incoming.collect { event ->
+                onRawEvent(
+                    "id=${event.id} event=${event.event} retry=${event.retry} comments=${event.comments} data=${event.data}",
                 )
-            )
-        }
 
-        val channel = res.bodyAsChannel()
-        while (!channel.isClosedForRead) {
-            val read = channel.readAvailable(bytes, 0, bytes.size)
-            if (read <= 0) continue
+                if (!event.id.isNullOrBlank()) {
+                    cursor = event.id
+                }
 
-            buffer += bytes.decodeToString(endIndex = read)
-            buffer = buffer.replace("\r\n", "\n").replace("\r", "\n")
-
-            while (true) {
-                val split = buffer.indexOf("\n\n")
-                if (split < 0) break
-                val chunk = buffer.substring(0, split)
-                buffer = buffer.substring(split + 2)
-                flush(chunk)
+                val body = event.data ?: return@collect
+                val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return@collect
+                val payload = root["payload"]?.jsonObject ?: return@collect
+                val type = payload["type"]?.jsonPrimitive?.contentOrNull ?: event.event ?: return@collect
+                val properties = payload["properties"]?.jsonObject ?: JsonObject(emptyMap())
+                onEvent(
+                    GlobalStreamEvent(
+                        directory = root["directory"]?.jsonPrimitive?.contentOrNull ?: "global",
+                        type = type,
+                        properties = properties,
+                        id = event.id,
+                        retry = event.retry?.toInt(),
+                    )
+                )
             }
-        }
-
-        if (buffer.isNotBlank()) {
-            flush(buffer)
         }
 
         return cursor

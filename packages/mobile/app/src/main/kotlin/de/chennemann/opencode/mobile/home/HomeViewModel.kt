@@ -62,6 +62,10 @@ class HomeViewModel(
         service.loadMoreMessages()
     }
 
+    fun clearDebug() {
+        service.clearDebug()
+    }
+
     override fun onCleared() {
         service.stop()
         super.onCleared()

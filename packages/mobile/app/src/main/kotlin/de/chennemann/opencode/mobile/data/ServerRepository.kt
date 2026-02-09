@@ -77,7 +77,7 @@ class ServerRepository(
         return service.sessionMessages(url.value, sessionId, directory, limit)
     }
 
-    suspend fun streamEvents(lastEventId: String?, onRawEvent: suspend () -> Unit, onEvent: suspend (GlobalStreamEvent) -> Unit): String? {
+    suspend fun streamEvents(lastEventId: String?, onRawEvent: suspend (String) -> Unit, onEvent: suspend (GlobalStreamEvent) -> Unit): String? {
         return service.streamEvents(url.value, lastEventId, onRawEvent, onEvent)
     }
 
