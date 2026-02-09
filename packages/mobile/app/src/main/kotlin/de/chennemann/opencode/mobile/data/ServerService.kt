@@ -220,6 +220,9 @@ class ServerService(
         var buffer = ""
 
         suspend fun flush(chunk: String) {
+            if (chunk.isBlank()) return
+            onRawEvent()
+
             val lines = chunk.split("\n")
             val data = mutableListOf<String>()
             var id: String? = null
@@ -241,7 +244,6 @@ class ServerService(
             }
 
             if (data.isEmpty()) return
-            onRawEvent()
 
             val parsed = runCatching { json.parseToJsonElement(data.joinToString("\n")).jsonObject }
             val root = parsed.getOrNull() ?: return

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -25,8 +24,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -48,6 +51,11 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import de.chennemann.opencode.mobile.home.HomeViewModel
+import de.chennemann.opencode.mobile.icons.ChevronDown
+import de.chennemann.opencode.mobile.icons.ChevronUp
+import de.chennemann.opencode.mobile.icons.Icons
+import de.chennemann.opencode.mobile.icons.Send
+import de.chennemann.opencode.mobile.icons.Settings
 import de.chennemann.opencode.mobile.ui.theme.MobileTheme
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -129,15 +137,26 @@ class MainActivity : ComponentActivity() {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         SelectionContainer {
-                                            Text(state.focusedSession?.title ?: "No session selected")
+                                            Text(
+                                                state.focusedSession?.title ?: "No session selected",
+                                                modifier = Modifier.weight(1f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
                                         }
-                                        IconButton(onClick = dropUnlessResumed {
-                                            model.openManagement()
-                                            backStack.add(ManageRoute)
-                                        }) {
-                                            Text("⚙")
+                                        IconButton(
+                                            onClick = dropUnlessResumed {
+                                                model.openManagement()
+                                                backStack.add(ManageRoute)
+                                            },
+                                            colors = IconButtonDefaults.iconButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.primary,
+                                            ),
+                                        ) {
+                                            Icon(Icons.Settings, "")
                                         }
                                     }
                                     Box(modifier = Modifier.weight(1f)) {
@@ -199,29 +218,25 @@ class MainActivity : ComponentActivity() {
                                             Column(
                                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                             ) {
-                                                Button(
+                                                SmallFloatingActionButton(
                                                     onClick = {
-                                                        val target = previous() ?: return@Button
+                                                        val target = previous() ?: return@SmallFloatingActionButton
                                                         scope.launch {
                                                             list.scrollToItem(target + offset)
                                                         }
                                                     },
-                                                    enabled = previous() != null,
-                                                    shape = CircleShape,
                                                 ) {
-                                                    Text("⌃")
+                                                    Icon(Icons.ChevronUp, "Previous message")
                                                 }
-                                                Button(
+                                                SmallFloatingActionButton(
                                                     onClick = {
-                                                        val target = next() ?: return@Button
+                                                        val target = next() ?: return@SmallFloatingActionButton
                                                         scope.launch {
                                                             list.scrollToItem(target + offset)
                                                         }
                                                     },
-                                                    enabled = next() != null,
-                                                    shape = CircleShape,
                                                 ) {
-                                                    Text("⌄")
+                                                    Icon(Icons.ChevronDown, "Next message")
                                                 }
                                             }
                                         }
@@ -244,6 +259,7 @@ class MainActivity : ComponentActivity() {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.Bottom,
                                     ) {
                                         TextField(
                                             value = draft,
@@ -251,11 +267,17 @@ class MainActivity : ComponentActivity() {
                                             modifier = Modifier.weight(1f),
                                             label = { Text("Message") },
                                         )
-                                        IconButton(onClick = dropUnlessResumed {
-                                            model.send(draft.text)
-                                            draft = TextFieldValue("")
-                                        }) {
-                                            Text("➤")
+                                        IconButton(
+                                            onClick = dropUnlessResumed {
+                                                model.send(draft.text)
+                                                draft = TextFieldValue("")
+                                            },
+                                            colors = IconButtonDefaults.iconButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.primary,
+                                            ),
+                                            modifier = Modifier.align(Alignment.Bottom),
+                                        ) {
+                                            Icon(Icons.Send, "")
                                         }
                                     }
                                 }
