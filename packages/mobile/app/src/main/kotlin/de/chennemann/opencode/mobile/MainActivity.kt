@@ -7,13 +7,20 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -37,6 +44,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -52,12 +60,16 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import de.chennemann.opencode.mobile.home.ServerState
 import de.chennemann.opencode.mobile.home.HomeViewModel
+import de.chennemann.opencode.mobile.icons.Adb
 import de.chennemann.opencode.mobile.icons.ChevronDown
 import de.chennemann.opencode.mobile.icons.ChevronUp
 import de.chennemann.opencode.mobile.icons.Icons
 import de.chennemann.opencode.mobile.icons.Send
 import de.chennemann.opencode.mobile.icons.Settings
 import de.chennemann.opencode.mobile.ui.theme.MobileTheme
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import org.koin.androidx.compose.koinViewModel
@@ -96,7 +108,9 @@ class MainActivity : ComponentActivity() {
                                 val model: HomeViewModel = koinViewModel()
                                 val state by model.state.collectAsStateWithLifecycle()
                                 val list = rememberLazyListState()
+                                val dragging by list.interactionSource.collectIsDraggedAsState()
                                 val scope = rememberCoroutineScope()
+                                var follow by remember(state.focusedSession?.id) { mutableStateOf(true) }
                                 val offset = if (state.canLoadMoreMessages || state.loadingMoreMessages) 1 else 0
                                 val isTool = { text: String, role: String ->
                                     role != "user" && text.startsWith("[") && text.endsWith("]")
@@ -123,10 +137,29 @@ class MainActivity : ComponentActivity() {
                                             )
                                         }
                                 }
-                                LaunchedEffect(state.focusedSession?.id, state.focusedMessages.size) {
-                                    val index = state.focusedMessages.lastIndex
-                                    if (index < 0) return@LaunchedEffect
-                                    list.scrollToItem(index)
+                                LaunchedEffect(list) {
+                                    snapshotFlow { list.isScrollInProgress }
+                                        .map { !it }
+                                        .filter { it }
+                                        .distinctUntilChanged()
+                                        .collect {
+                                            follow = !list.canScrollForward
+                                        }
+                                }
+                                LaunchedEffect(dragging) {
+                                    if (dragging) follow = false
+                                }
+                                LaunchedEffect(
+                                    state.focusedSession?.id,
+                                    state.focusedMessages.size,
+                                    state.focusedMessages.lastOrNull()?.text?.length,
+                                    follow,
+                                    offset,
+                                ) {
+                                    if (!follow) return@LaunchedEffect
+                                    val count = state.focusedMessages.size + offset
+                                    if (count <= 0) return@LaunchedEffect
+                                    list.scrollToItem(count - 1)
                                 }
 
                                 Column(
@@ -135,29 +168,72 @@ class MainActivity : ComponentActivity() {
                                         .padding(horizontal = 16.dp, vertical = 24.dp),
                                     verticalArrangement = Arrangement.spacedBy(16.dp),
                                 ) {
+                                    var debugOpen by remember { mutableStateOf(false) }
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        SelectionContainer {
+                                        SelectionContainer(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 state.focusedSession?.title ?: "No session selected",
-                                                modifier = Modifier.weight(1f),
-                                                maxLines = 1,
+                                                maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis,
                                             )
                                         }
-                                        IconButton(
-                                            onClick = dropUnlessResumed {
-                                                model.openManagement()
-                                                backStack.add(ManageRoute)
-                                            },
-                                            colors = IconButtonDefaults.iconButtonColors(
-                                                contentColor = MaterialTheme.colorScheme.primary,
+                                        Row(
+                                            modifier = Modifier.width(96.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                        ) {
+                                            IconButton(
+                                                onClick = { debugOpen = !debugOpen },
+                                                colors = IconButtonDefaults.iconButtonColors(
+                                                    contentColor = MaterialTheme.colorScheme.primary,
+                                                ),
+                                            ) {
+                                                val label = if (debugOpen) "Hide debug panel" else "Show debug panel"
+                                                Icon(Icons.Adb, label)
+                                            }
+                                            IconButton(
+                                                onClick = dropUnlessResumed {
+                                                    model.openManagement()
+                                                    backStack.add(ManageRoute)
+                                                },
+                                                colors = IconButtonDefaults.iconButtonColors(
+                                                    contentColor = MaterialTheme.colorScheme.primary,
+                                                ),
+                                            ) {
+                                                Icon(Icons.Settings, "Open settings")
+                                            }
+                                        }
+                                    }
+                                    AnimatedVisibility(
+                                        visible = debugOpen,
+                                        enter = slideInVertically(initialOffsetY = { -it / 2 }) + fadeIn(),
+                                        exit = slideOutVertically(targetOffsetY = { -it / 2 }) + fadeOut(),
+                                    ) {
+                                        Card(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                                             ),
                                         ) {
-                                            Icon(Icons.Settings, "")
+                                            Column(
+                                                modifier = Modifier.padding(12.dp),
+                                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                                            ) {
+                                                SelectionContainer {
+                                                    Text(
+                                                        "SSE raw=${state.debug.sseRaw} seen=${state.debug.sseSeen} applied=${state.debug.sseApplied} dropped=${state.debug.sseDropped} connected=${state.debug.sseConnected} errors=${state.debug.sseErrors} sync=${state.debug.syncRuns}/${state.debug.syncFails}",
+                                                    )
+                                                }
+                                                state.debug.lastDrop?.let {
+                                                    SelectionContainer { Text("Last drop: $it") }
+                                                }
+                                                state.debug.lastStreamError?.let {
+                                                    SelectionContainer { Text("Last stream error: $it") }
+                                                }
+                                            }
                                         }
                                     }
                                     Box(modifier = Modifier.weight(1f)) {
@@ -231,9 +307,17 @@ class MainActivity : ComponentActivity() {
                                                 }
                                                 SmallFloatingActionButton(
                                                     onClick = {
-                                                        val target = next() ?: return@SmallFloatingActionButton
                                                         scope.launch {
-                                                            list.scrollToItem(target + offset)
+                                                            val target = next()
+                                                            if (target != null) {
+                                                                follow = false
+                                                                list.scrollToItem(target + offset)
+                                                                return@launch
+                                                            }
+                                                            val count = state.focusedMessages.size + offset
+                                                            if (count <= 0) return@launch
+                                                            follow = true
+                                                            list.scrollToItem(count - 1)
                                                         }
                                                     },
                                                 ) {
@@ -244,17 +328,6 @@ class MainActivity : ComponentActivity() {
                                     }
                                     state.message?.let {
                                         SelectionContainer { Text(it) }
-                                    }
-                                    SelectionContainer {
-                                        Text(
-                                            "SSE raw=${state.debug.sseRaw} seen=${state.debug.sseSeen} applied=${state.debug.sseApplied} dropped=${state.debug.sseDropped} connected=${state.debug.sseConnected} errors=${state.debug.sseErrors} sync=${state.debug.syncRuns}/${state.debug.syncFails}",
-                                        )
-                                    }
-                                    state.debug.lastDrop?.let {
-                                        SelectionContainer { Text("Last drop: $it") }
-                                    }
-                                    state.debug.lastStreamError?.let {
-                                        SelectionContainer { Text("Last stream error: $it") }
                                     }
                                     var draft by remember { mutableStateOf(TextFieldValue("")) }
                                     val connected = state.status is ServerState.Connected
