@@ -198,7 +198,12 @@ class ServerService(
             }
     }
 
-    suspend fun streamEvents(baseUrl: String, lastEventId: String?, onEvent: suspend (GlobalStreamEvent) -> Unit): String? {
+    suspend fun streamEvents(
+        baseUrl: String,
+        lastEventId: String?,
+        onRawEvent: suspend () -> Unit,
+        onEvent: suspend (GlobalStreamEvent) -> Unit,
+    ): String? {
         val res = http.get("$baseUrl/global/event") {
             header(HttpHeaders.Accept, "text/event-stream")
             header(HttpHeaders.CacheControl, "no-cache")
@@ -236,6 +241,7 @@ class ServerService(
             }
 
             if (data.isEmpty()) return
+            onRawEvent()
 
             val parsed = runCatching { json.parseToJsonElement(data.joinToString("\n")).jsonObject }
             val root = parsed.getOrNull() ?: return

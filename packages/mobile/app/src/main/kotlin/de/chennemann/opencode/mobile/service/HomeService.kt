@@ -92,6 +92,7 @@ class HomeService(
     private val syncActive = linkedSetOf<String>()
     private val syncGuard = Mutex()
     private var sseSeen = 0
+    private var sseRaw = 0
     private var sseApplied = 0
     private var sseDropped = 0
     private var sseConnected = 0
@@ -523,7 +524,10 @@ class HomeService(
                 val result = runCatching {
                     sseConnected += 1
                     debug.value = debug.value.copy(sseConnected = sseConnected, lastStreamError = null)
-                    repo.streamEvents(cursor) { event ->
+                    repo.streamEvents(cursor, {
+                        sseRaw += 1
+                        debug.value = debug.value.copy(sseRaw = sseRaw)
+                    }) { event ->
                         Log.d(LogTag, "sse event type=${event.type} dir=${event.directory} id=${event.id}")
                         if (!event.id.isNullOrBlank()) {
                             cursor = event.id
