@@ -4,6 +4,7 @@ import de.chennemann.opencode.mobile.api.apis.DefaultApi
 import de.chennemann.opencode.mobile.api.models.SessionCreateRequest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngine
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
@@ -13,7 +14,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
-import io.ktor.utils.io.readUTF8Line
+import io.ktor.utils.io.readAvailable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -198,92 +199,86 @@ class ServerService(
     }
 
     suspend fun streamEvents(baseUrl: String, lastEventId: String?, onEvent: suspend (GlobalStreamEvent) -> Unit): String? {
-        val res = client(baseUrl).globalEvent()
-        if (!res.success) {
+        val res = http.get("$baseUrl/global/event") {
+            header(HttpHeaders.Accept, "text/event-stream")
+            header(HttpHeaders.CacheControl, "no-cache")
+            if (!lastEventId.isNullOrBlank()) {
+                header("Last-Event-ID", lastEventId)
+            }
+        }
+        if (res.status.value !in 200..299) {
             throw IllegalStateException("Server returned ${res.status}")
         }
 
         var cursor = lastEventId
-        var eventId: String? = null
-        var eventRetry: Int? = null
-        val eventData = mutableListOf<String>()
+        val bytes = ByteArray(8192)
+        var buffer = ""
 
-        suspend fun flush() {
-            if (eventData.isEmpty()) {
-                eventId = null
-                eventRetry = null
-                return
+        suspend fun flush(chunk: String) {
+            val lines = chunk.split("\n")
+            val data = mutableListOf<String>()
+            var id: String? = null
+            var retry: Int? = null
+
+            lines.forEach { line ->
+                if (line.startsWith(":")) return@forEach
+                if (line.startsWith("data:")) {
+                    data.add(line.removePrefix("data:").trimStart())
+                    return@forEach
+                }
+                if (line.startsWith("id:")) {
+                    id = line.removePrefix("id:").trim()
+                    return@forEach
+                }
+                if (line.startsWith("retry:")) {
+                    retry = line.removePrefix("retry:").trim().toIntOrNull()
+                }
             }
 
-            val parsed = runCatching { json.parseToJsonElement(eventData.joinToString("\n")).jsonObject }
-            if (parsed.isFailure) {
-                eventId = null
-                eventRetry = null
-                eventData.clear()
-                return
-            }
-            val root = parsed.getOrNull() ?: run {
-                eventId = null
-                eventRetry = null
-                eventData.clear()
-                return
-            }
-            val payload = root["payload"]?.jsonObject ?: run {
-                eventId = null
-                eventRetry = null
-                eventData.clear()
-                return
-            }
-            val type = payload["type"]?.jsonPrimitive?.contentOrNull ?: run {
-                eventId = null
-                eventRetry = null
-                eventData.clear()
-                return
-            }
+            if (data.isEmpty()) return
+
+            val parsed = runCatching { json.parseToJsonElement(data.joinToString("\n")).jsonObject }
+            val root = parsed.getOrNull() ?: return
+            val payload = root["payload"]?.jsonObject ?: return
+            val type = payload["type"]?.jsonPrimitive?.contentOrNull ?: return
             val properties = payload["properties"]?.jsonObject ?: JsonObject(emptyMap())
-            val id = eventId
+
             if (!id.isNullOrBlank()) {
                 cursor = id
             }
+
             onEvent(
                 GlobalStreamEvent(
                     directory = root["directory"]?.jsonPrimitive?.contentOrNull ?: "global",
                     type = type,
                     properties = properties,
                     id = id,
-                    retry = eventRetry,
+                    retry = retry,
                 )
             )
-            eventId = null
-            eventRetry = null
-            eventData.clear()
         }
 
-        val channel = res.response.bodyAsChannel()
+        val channel = res.bodyAsChannel()
         while (!channel.isClosedForRead) {
-            val line = channel.readUTF8Line() ?: break
-            if (line.isBlank()) {
-                flush()
-                continue
-            }
-            if (line.startsWith(":")) continue
-            if (line.startsWith("data:")) {
-                eventData.add(line.removePrefix("data:").trimStart())
-                continue
-            }
-            if (line.startsWith("id:")) {
-                eventId = line.removePrefix("id:").trim()
-                continue
-            }
-            if (line.startsWith("retry:")) {
-                val parsed = line.removePrefix("retry:").trim().toIntOrNull()
-                if (parsed != null) {
-                    eventRetry = parsed
-                }
+            val read = channel.readAvailable(bytes, 0, bytes.size)
+            if (read <= 0) continue
+
+            buffer += bytes.decodeToString(endIndex = read)
+            buffer = buffer.replace("\r\n", "\n").replace("\r", "\n")
+
+            while (true) {
+                val split = buffer.indexOf("\n\n")
+                if (split < 0) break
+                val chunk = buffer.substring(0, split)
+                buffer = buffer.substring(split + 2)
+                flush(chunk)
             }
         }
 
-        flush()
+        if (buffer.isNotBlank()) {
+            flush(buffer)
+        }
+
         return cursor
     }
 
