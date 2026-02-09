@@ -4,8 +4,9 @@ import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
 import de.chennemann.opencode.mobile.home.HomeViewModel
 import de.chennemann.opencode.mobile.data.MdnsService
+import de.chennemann.opencode.mobile.data.NetworkService
 import de.chennemann.opencode.mobile.db.AppDatabase
-import de.chennemann.opencode.mobile.service.HomeService
+import de.chennemann.opencode.mobile.service.SessionService
 import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.serialization.json.Json
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
@@ -38,8 +39,9 @@ val appModule = module {
         )
     }
     single { MdnsService(get()) }
+    single { NetworkService(get()) }
     single { ServerService(get(), get()) }
-    single { ServerRepository(get(), get(), get()) }
-    single { HomeService(get(), get()) }
+    single { ServerRepository(get(), get(), get(), get()) }
+    single { SessionService(get(), get(), get()) }
     viewModel { HomeViewModel(get()) }
 }
