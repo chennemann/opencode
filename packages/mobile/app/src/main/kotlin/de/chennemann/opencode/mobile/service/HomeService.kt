@@ -91,6 +91,8 @@ class HomeService(
     private val sync = linkedMapOf<String, Job>()
     private val syncActive = linkedSetOf<String>()
     private val syncGuard = Mutex()
+    private val sessionResolve = linkedMapOf<String, Long>()
+    private val sseLog = ArrayDeque<String>()
     private var sseSeen = 0
     private var sseRaw = 0
     private var sseApplied = 0
@@ -515,45 +517,45 @@ class HomeService(
     private fun stream(scope: CoroutineScope) {
         stream?.cancel()
         stream = scope.launch {
-            var retryDelay = StreamRetryDefaultMs
             var attempt = 0
             var cursor = runCatching { repo.streamCursor() }.getOrNull()
             while (isActive) {
                 val endpoint = repo.endpoint.value
                 Log.d(LogTag, "sse connect attempt=${attempt + 1} endpoint=$endpoint cursor=$cursor")
+                pushSseLog("connect attempt=${attempt + 1} endpoint=$endpoint cursor=$cursor")
                 val result = runCatching {
                     sseConnected += 1
                     debug.value = debug.value.copy(sseConnected = sseConnected, lastStreamError = null)
-                    repo.streamEvents(cursor, {
+                    repo.streamEvents(cursor, { chunk ->
                         sseRaw += 1
                         debug.value = debug.value.copy(sseRaw = sseRaw)
+                        pushSseLog("raw ${chunk.replace("\n", "\\n")}")
                     }) { event ->
                         Log.d(LogTag, "sse event type=${event.type} dir=${event.directory} id=${event.id}")
+                        pushSseLog(
+                            "event type=${event.type} dir=${event.directory} id=${event.id} retry=${event.retry} properties=${event.properties}",
+                        )
                         if (!event.id.isNullOrBlank()) {
                             cursor = event.id
                             runCatching { repo.setStreamCursor(cursor) }
-                        }
-                        if (event.retry != null) {
-                            retryDelay = event.retry.coerceAtLeast(StreamRetryMinMs)
                         }
                         onEvent(event)
                     }
                 }
                 if (result.isSuccess) {
                     Log.d(LogTag, "sse stream ended normally reconnecting")
+                    pushSseLog("stream ended; reconnecting")
                     attempt = 0
-                    retryDelay = StreamRetryDefaultMs
                     continue
                 }
                 sseErrors += 1
                 val reason = result.exceptionOrNull()?.message ?: "unknown stream error"
                 debug.value = debug.value.copy(sseErrors = sseErrors, lastStreamError = reason)
                 Log.w(LogTag, "sse stream error attempt=${attempt + 1} reason=$reason")
+                pushSseLog("error attempt=${attempt + 1} reason=$reason")
                 attempt += 1
-                val backoff = (retryDelay * (1 shl (attempt - 1).coerceAtMost(8)))
-                    .coerceAtMost(StreamRetryMaxMs)
-                    .coerceAtLeast(StreamRetryMinMs)
-                delay(backoff.toLong())
+                pushSseLog("restart stream in ${StreamRestartDelayMs}ms")
+                delay(StreamRestartDelayMs)
             }
         }
     }
@@ -573,6 +575,11 @@ class HomeService(
         sseSeen += 1
         debug.value = debug.value.copy(sseSeen = sseSeen)
         when (event.type) {
+            "server.connected", "server.heartbeat" -> {
+                pushSseLog("ignore type=${event.type}")
+                return
+            }
+
             "server.instance.disposed", "global.disposed" -> {
                 markSseApplied(event.type, null)
                 loadProjects()
@@ -613,6 +620,7 @@ class HomeService(
                 val key = keyForSession(sessionId)
                 if (key == null) {
                     markSseDropped(event.type, "session not focused/active id=$sessionId")
+                    resolveSession(sessionId, event.directory)
                     return
                 }
                 val message = messageKey(key, id)
@@ -662,6 +670,7 @@ class HomeService(
                 val key = keyForSession(sessionId)
                 if (key == null) {
                     markSseDropped(event.type, "session not focused/active id=$sessionId")
+                    resolveSession(sessionId, event.directory)
                     return
                 }
                 val server = key.substringBefore("::")
@@ -713,6 +722,7 @@ class HomeService(
                 val key = keyForSession(sessionId)
                 if (key == null) {
                     markSseDropped(event.type, "session not focused/active id=$sessionId")
+                    resolveSession(sessionId, event.directory)
                     return
                 }
                 val message = messageKey(key, messageId)
@@ -775,6 +785,9 @@ class HomeService(
                     markSseDropped(event.type, "missing sessionID")
                     return
                 }
+                if (keyForSession(sessionId) == null) {
+                    resolveSession(sessionId, event.directory)
+                }
                 markSseApplied(event.type, sessionId)
                 scheduleSync(sessionId)
             }
@@ -792,6 +805,38 @@ class HomeService(
                 val entry = active.values.find { value -> value.id == sessionId } ?: return@launch
                 syncRemote(entry)
             }
+        }
+    }
+
+    private fun resolveSession(sessionId: String, directory: String?) {
+        val scope = scope ?: return
+        val now = System.currentTimeMillis()
+        val seen = sessionResolve[sessionId]
+        if (seen != null && now - seen < SessionResolveCooldownMs) return
+        sessionResolve[sessionId] = now
+        scope.launch {
+            val worktree = if (!directory.isNullOrBlank() && directory != "global") {
+                directory
+            } else {
+                local.value.selectedProject
+            }
+            if (worktree.isNullOrBlank()) return@launch
+            val result = runCatching { repo.sessions(worktree) }
+            result.onFailure {
+                pushSseLog("resolve session failed id=$sessionId reason=${it.message}")
+            }
+            val found = result.getOrNull()
+                ?.firstOrNull { it.id == sessionId }
+                ?: return@launch
+            val session = SessionState(
+                id = found.id,
+                title = found.title,
+                version = found.version,
+                directory = found.directory,
+            )
+            pushSseLog("resolve session id=$sessionId switch=${session.title}")
+            focusSession(session, worktree)
+            scheduleSync(sessionId)
         }
     }
 
@@ -985,7 +1030,22 @@ class HomeService(
     private fun markSseDropped(type: String, reason: String) {
         sseDropped += 1
         debug.value = debug.value.copy(sseDropped = sseDropped, lastDrop = "$type: $reason")
+        pushSseLog("drop type=$type reason=$reason")
         Log.w(LogTag, "sse drop type=$type reason=$reason seen=$sseSeen applied=$sseApplied dropped=$sseDropped")
+    }
+
+    private fun pushSseLog(line: String) {
+        val stamp = System.currentTimeMillis().toString()
+        sseLog.addLast("$stamp | $line")
+        while (sseLog.size > SseLogLimit) {
+            sseLog.removeFirst()
+        }
+        debug.value = debug.value.copy(sseLog = sseLog.toList())
+    }
+
+    fun clearDebug() {
+        sseLog.clear()
+        debug.value = debug.value.copy(sseLog = emptyList())
     }
 
     fun stop() {
@@ -1000,11 +1060,11 @@ class HomeService(
     }
 }
 
-private const val StreamRetryDefaultMs = 3000
-private const val StreamRetryMinMs = 1000
-private const val StreamRetryMaxMs = 30000
+private const val StreamRestartDelayMs = 3000L
 private const val MessageSyncLimit = 400
 private const val ReconcileIntervalMs = 10000L
 private const val ReconcileKeepPasses = 1
 private const val OptimisticKeepPasses = 1
 private const val LogTag = "HomeService"
+private const val SseLogLimit = 300
+private const val SessionResolveCooldownMs = 5000L

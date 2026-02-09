@@ -31,6 +31,7 @@ data class DebugState(
     val syncFails: Int = 0,
     val lastDrop: String? = null,
     val lastStreamError: String? = null,
+    val sseLog: List<String> = emptyList(),
 )
 
 data class HomeState(
