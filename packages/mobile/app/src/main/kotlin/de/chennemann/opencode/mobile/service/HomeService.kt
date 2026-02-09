@@ -91,8 +91,12 @@ class HomeService(
     private val sync = linkedMapOf<String, Job>()
     private val syncActive = linkedSetOf<String>()
     private val syncGuard = Mutex()
+    private val flush = linkedMapOf<String, Job>()
     private val sessionResolve = linkedMapOf<String, Long>()
     private val sseLog = ArrayDeque<String>()
+    private val overlay = linkedMapOf<String, MessageState>()
+    private val overlayDirty = linkedMapOf<String, LinkedHashSet<String>>()
+    private var focusedDb = emptyList<MessageState>()
     private var sseSeen = 0
     private var sseRaw = 0
     private var sseApplied = 0
@@ -310,6 +314,14 @@ class HomeService(
     private fun focusSession(session: SessionState, project: String?) {
         val server = if (manual) input.value else repo.endpoint.value
         val key = key(server, session.id)
+        val previous = focusedKey
+        if (previous != null && previous != key) {
+            flush.remove(previous)?.cancel()
+            val sessionId = previous.substringAfter("::")
+            scope?.launch {
+                flushStaged(previous, sessionId)
+            }
+        }
         active[key] = session
         sessionProject[key] = project
         messageLimit[key] = messageLimit[key] ?: MessageSyncLimit
@@ -439,6 +451,7 @@ class HomeService(
                     }
                 }
 
+                clearOverlay(key)
                 trimPending(key)
                 if (focusedKey == key) {
                     if (claimed) {
@@ -644,7 +657,7 @@ class HomeService(
                 role[message] = messageRole
                 retainPass.getOrPut(key) { linkedMapOf() }[id] = ReconcileKeepPasses
                 val sort = stickySort[key]?.remove(id) ?: order[message] ?: sequence()
-                persistMessage(
+                stageMessage(
                     key,
                     sessionId,
                     id,
@@ -653,7 +666,7 @@ class HomeService(
                     sort,
                 )
                 markSseApplied(event.type, sessionId)
-                scheduleSync(sessionId)
+                scheduleSync(sessionId, true)
             }
 
             "message.removed" -> {
@@ -680,6 +693,11 @@ class HomeService(
                 role.remove(messageKey(key, messageId))
                 part.remove(messageKey(key, messageId))
                 order.remove(messageKey(key, messageId))
+                overlay.remove(messageKey(key, messageId))
+                overlayDirty[key]?.remove(messageKey(key, messageId))
+                if (focusedKey == key) {
+                    publishFocused(key)
+                }
                 markSseApplied(event.type, sessionId)
             }
 
@@ -730,7 +748,7 @@ class HomeService(
                 parts[partId] = text
                 retainPass.getOrPut(key) { linkedMapOf() }[messageId] = ReconcileKeepPasses
                 val sort = order[message] ?: sequence()
-                persistMessage(
+                stageMessage(
                     key,
                     sessionId,
                     messageId,
@@ -739,7 +757,7 @@ class HomeService(
                     sort,
                 )
                 markSseApplied(event.type, sessionId)
-                scheduleSync(sessionId)
+                scheduleSync(sessionId, true)
             }
 
             "message.part.removed" -> {
@@ -767,7 +785,7 @@ class HomeService(
                 }
                 val sessionId = key.substringAfter("::")
                 val sort = order[message] ?: sequence()
-                persistMessage(
+                stageMessage(
                     key,
                     sessionId,
                     messageId,
@@ -776,7 +794,7 @@ class HomeService(
                     sort,
                 )
                 markSseApplied(event.type, sessionId)
-                scheduleSync(sessionId)
+                scheduleSync(sessionId, true)
             }
 
             "session.status" -> {
@@ -796,15 +814,13 @@ class HomeService(
         }
     }
 
-    private fun scheduleSync(sessionId: String) {
+    private fun scheduleSync(sessionId: String, burst: Boolean = false) {
         val scope = scope ?: return
         sync[sessionId]?.cancel()
         sync[sessionId] = scope.launch {
-            repeat(6) {
-                delay(if (it == 0) 300 else 900)
-                val entry = active.values.find { value -> value.id == sessionId } ?: return@launch
-                syncRemote(entry)
-            }
+            delay(if (burst) SyncBurstDelayMs else SyncDelayMs)
+            val entry = active.values.find { value -> value.id == sessionId } ?: return@launch
+            syncRemote(entry)
         }
     }
 
@@ -849,25 +865,65 @@ class HomeService(
         return text
     }
 
-    private suspend fun persistMessage(key: String, sessionId: String, messageId: String, role: String, text: String, sort: String) {
+    private fun stageMessage(key: String, sessionId: String, messageId: String, role: String, text: String, sort: String) {
+        val message = messageKey(key, messageId)
+        order[message] = sort
+        overlay[message] = MessageState(
+            id = messageId,
+            role = role,
+            text = text,
+            sort = sort,
+        )
+        overlayDirty.getOrPut(key) { linkedSetOf() }.add(message)
+        if (focusedKey == key) {
+            publishFocused(key)
+        }
+        queueFlush(key, sessionId)
+    }
+
+    private fun queueFlush(key: String, sessionId: String) {
+        val scope = scope ?: return
+        flush[key]?.cancel()
+        flush[key] = scope.launch {
+            delay(OverlayFlushDelayMs)
+            flushStaged(key, sessionId)
+        }
+    }
+
+    private suspend fun flushStaged(key: String, sessionId: String) {
+        val staged = overlayDirty.remove(key)?.toList() ?: return
         val server = key.substringBefore("::")
-        order[messageKey(key, messageId)] = sort
+        val now = System.currentTimeMillis()
         withContext(Dispatchers.IO) {
-            db.appDatabaseQueries.upsertMessageCache(
-                server,
-                sessionId,
-                messageId,
-                role,
-                text,
-                sort,
-                System.currentTimeMillis(),
-            )
+            staged.forEach {
+                val message = overlay[it] ?: return@forEach
+                db.appDatabaseQueries.upsertMessageCache(
+                    server,
+                    sessionId,
+                    message.id,
+                    message.role,
+                    message.text,
+                    message.sort,
+                    now,
+                )
+            }
+        }
+    }
+
+    private fun clearOverlay(key: String) {
+        overlay.keys
+            .filter { it.startsWith("$key::") }
+            .forEach(overlay::remove)
+        overlayDirty.remove(key)
+        if (focusedKey == key) {
+            publishFocused(key)
         }
     }
 
     private fun observeFocused() {
         observe?.cancel()
         val key = focusedKey ?: return
+        focusedDb = emptyList()
         val server = key.substringBefore("::")
         val session = key.substringAfter("::")
         observe = (scope ?: return).launch {
@@ -886,13 +942,30 @@ class HomeService(
                     it.forEach { message ->
                         order[messageKey(key, message.id)] = message.sort
                     }
-                    val list = pending[key]
-                    val merged = if (list.isNullOrEmpty()) it else it + list
-                    local.value = local.value.copy(
-                        focusedMessages = merged.sortedBy { message -> message.sort },
-                    )
+                    focusedDb = it
+                    publishFocused(key)
                 }
         }
+    }
+
+    private fun publishFocused(key: String) {
+        if (focusedKey != key) return
+        val base = focusedDb.associateBy { it.id }.toMutableMap()
+        overlay
+            .filterKeys { it.startsWith("$key::") }
+            .values
+            .forEach {
+                base[it.id] = it
+            }
+        val list = pending[key]
+        val merged = if (list.isNullOrEmpty()) {
+            base.values.toList()
+        } else {
+            base.values.toList() + list
+        }
+        local.value = local.value.copy(
+            focusedMessages = merged.sortedBy { it.sort },
+        )
     }
 
     private fun keyForSession(sessionId: String): String? {
@@ -982,6 +1055,8 @@ class HomeService(
         order.keys
             .filter { it.startsWith("$key::") }
             .forEach(order::remove)
+        clearOverlay(key)
+        flush.remove(key)?.cancel()
         messageLimit.remove(key)
         db.appDatabaseQueries.deleteMessageCacheSession(server, sessionId)
         if (focusedKey == key) {
@@ -1057,10 +1132,15 @@ class HomeService(
         observe = null
         sync.values.forEach { it.cancel() }
         sync.clear()
+        flush.values.forEach { it.cancel() }
+        flush.clear()
     }
 }
 
 private const val StreamRestartDelayMs = 3000L
+private const val SyncDelayMs = 300L
+private const val SyncBurstDelayMs = 1200L
+private const val OverlayFlushDelayMs = 500L
 private const val MessageSyncLimit = 400
 private const val ReconcileIntervalMs = 10000L
 private const val ReconcileKeepPasses = 1
