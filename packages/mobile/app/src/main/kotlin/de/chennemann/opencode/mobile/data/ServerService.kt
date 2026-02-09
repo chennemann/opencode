@@ -4,7 +4,6 @@ import de.chennemann.opencode.mobile.api.apis.DefaultApi
 import de.chennemann.opencode.mobile.api.models.SessionCreateRequest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngine
-import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
@@ -199,13 +198,8 @@ class ServerService(
     }
 
     suspend fun streamEvents(baseUrl: String, lastEventId: String?, onEvent: suspend (GlobalStreamEvent) -> Unit): String? {
-        val res = http.get("$baseUrl/global/event") {
-            header(HttpHeaders.Accept, "text/event-stream")
-            if (!lastEventId.isNullOrBlank()) {
-                header("Last-Event-ID", lastEventId)
-            }
-        }
-        if (res.status.value !in 200..299) {
+        val res = client(baseUrl).globalEvent()
+        if (!res.success) {
             throw IllegalStateException("Server returned ${res.status}")
         }
 
@@ -221,7 +215,19 @@ class ServerService(
                 return
             }
 
-            val root = json.parseToJsonElement(eventData.joinToString("\n")).jsonObject
+            val parsed = runCatching { json.parseToJsonElement(eventData.joinToString("\n")).jsonObject }
+            if (parsed.isFailure) {
+                eventId = null
+                eventRetry = null
+                eventData.clear()
+                return
+            }
+            val root = parsed.getOrNull() ?: run {
+                eventId = null
+                eventRetry = null
+                eventData.clear()
+                return
+            }
             val payload = root["payload"]?.jsonObject ?: run {
                 eventId = null
                 eventRetry = null
@@ -253,7 +259,7 @@ class ServerService(
             eventData.clear()
         }
 
-        val channel = res.bodyAsChannel()
+        val channel = res.response.bodyAsChannel()
         while (!channel.isClosedForRead) {
             val line = channel.readUTF8Line() ?: break
             if (line.isBlank()) {

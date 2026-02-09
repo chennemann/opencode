@@ -108,9 +108,6 @@ class MainActivity : ComponentActivity() {
                                             Text("⚙")
                                         }
                                     }
-                                    if (state.loadingMessages) {
-                                        SelectionContainer { Text("Loading messages...") }
-                                    }
                                     LazyColumn(
                                         verticalArrangement = Arrangement.spacedBy(12.dp),
                                         modifier = Modifier.weight(1f),
@@ -160,6 +157,17 @@ class MainActivity : ComponentActivity() {
                                     }
                                     state.message?.let {
                                         SelectionContainer { Text(it) }
+                                    }
+                                    SelectionContainer {
+                                        Text(
+                                            "SSE seen=${state.debug.sseSeen} applied=${state.debug.sseApplied} dropped=${state.debug.sseDropped} connected=${state.debug.sseConnected} errors=${state.debug.sseErrors} sync=${state.debug.syncRuns}/${state.debug.syncFails}",
+                                        )
+                                    }
+                                    state.debug.lastDrop?.let {
+                                        SelectionContainer { Text("Last drop: $it") }
+                                    }
+                                    state.debug.lastStreamError?.let {
+                                        SelectionContainer { Text("Last stream error: $it") }
                                     }
                                     var draft by remember { mutableStateOf(TextFieldValue("")) }
                                     Row(
