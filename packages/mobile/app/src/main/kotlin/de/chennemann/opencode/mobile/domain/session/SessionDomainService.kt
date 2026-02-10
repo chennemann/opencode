@@ -3,7 +3,6 @@ package de.chennemann.opencode.mobile.domain.session
 import android.util.Log
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
-import de.chennemann.opencode.mobile.data.NetworkService
 import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePart
@@ -30,7 +29,7 @@ class SessionDomainService(
     private val msg: MessageGateway,
     private val feed: StreamGateway,
     private val db: AppDatabase,
-    private val network: NetworkService,
+    private val net: ConnectivityGateway,
     private val parser: MessagePartParser,
     private val decorator: MessageDecorator,
     private val reducer: SessionEventReducer,
@@ -579,13 +578,13 @@ class SessionDomainService(
                 Log.w(LogTag, "sse stream error attempt=${attempt + 1} reason=$reason")
                 pushSseLog("error attempt=${attempt + 1} reason=$reason")
                 attempt += 1
-                val seen = network.changed.value
-                if (!network.online.value) {
+                val seen = net.changed.value
+                if (!net.online.value) {
                     pushSseLog("offline; waiting for network change")
                 } else {
                     pushSseLog("waiting for network change before reconnect")
                 }
-                network.changed.first { it > seen }
+                net.changed.first { it > seen }
                 pushSseLog("network changed; retrying stream")
                 delay(StreamRestartDelayMs)
             }
