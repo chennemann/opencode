@@ -18,7 +18,6 @@ class ConversationViewModel(
     private val service: SessionService,
 ) : ViewModel() {
     private data class LocalState(
-        val debugOpen: Boolean = false,
         val draft: String = "",
         val stepOpen: Map<String, Boolean> = emptyMap(),
         val callOpen: Map<String, Boolean> = emptyMap(),
@@ -36,8 +35,6 @@ class ConversationViewModel(
             focusedMessages = global.focusedMessages,
             canLoadMoreMessages = global.canLoadMoreMessages,
             loadingMoreMessages = global.loadingMoreMessages,
-            debug = global.debug,
-            debugOpen = local.debugOpen,
             draft = local.draft,
             stepOpen = local.stepOpen,
             callOpen = local.callOpen,
@@ -51,8 +48,6 @@ class ConversationViewModel(
             focusedMessages = emptyList(),
             canLoadMoreMessages = false,
             loadingMoreMessages = false,
-            debug = service.state.value.debug,
-            debugOpen = false,
             draft = "",
             stepOpen = emptyMap(),
             callOpen = emptyMap(),
@@ -67,10 +62,6 @@ class ConversationViewModel(
         when (event) {
             is ConversationEvent.OpenManageTapped -> {
                 navFlow.tryEmit(NavEvent.ToManage)
-            }
-
-            is ConversationEvent.ToggleDebug -> {
-                local.update { it.copy(debugOpen = !it.debugOpen) }
             }
 
             is ConversationEvent.ToggleSteps -> {
