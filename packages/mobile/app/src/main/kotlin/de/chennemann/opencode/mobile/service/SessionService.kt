@@ -3,14 +3,15 @@ package de.chennemann.opencode.mobile.service
 import android.util.Log
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
-import de.chennemann.opencode.mobile.data.GlobalStreamEvent
 import de.chennemann.opencode.mobile.data.NetworkService
-import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePart
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
+import de.chennemann.opencode.mobile.domain.session.SessionEventAction
+import de.chennemann.opencode.mobile.domain.session.SessionEventReducer
 import de.chennemann.opencode.mobile.domain.session.SessionGateway
+import de.chennemann.opencode.mobile.domain.session.SessionStreamEvent
 import de.chennemann.opencode.mobile.home.HomeState
 import de.chennemann.opencode.mobile.home.MessageState
 import de.chennemann.opencode.mobile.home.ProjectState
@@ -31,9 +32,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import java.util.concurrent.atomic.AtomicLong
 
 class SessionService(
@@ -42,6 +40,7 @@ class SessionService(
     private val network: NetworkService,
     private val parser: MessagePartParser,
     private val decorator: MessageDecorator,
+    private val reducer: SessionEventReducer,
 ) {
     private data class LocalState(
         val projects: List<ProjectState> = emptyList(),
@@ -614,188 +613,129 @@ class SessionService(
         }
     }
 
-    private suspend fun onEvent(event: GlobalStreamEvent) {
+    private suspend fun onEvent(event: SessionStreamEvent) {
         sseSeen += 1
         debug.value = debug.value.copy(sseSeen = sseSeen)
-        when (event.type) {
-            "server.connected", "server.heartbeat" -> {
-                pushSseLog("ignore type=${event.type}")
+        when (val action = reducer.reduce(event)) {
+            is SessionEventAction.Ignore -> {
+                pushSseLog("ignore type=${action.type}")
                 return
             }
 
-            "server.instance.disposed", "global.disposed" -> {
+            is SessionEventAction.ReloadProjects -> {
                 markSseApplied(event.type, null)
                 loadProjects()
                 local.value.focusedSession?.let { syncRemote(it) }
             }
 
-            "session.created", "session.updated", "session.deleted" -> {
-                markSseApplied(event.type, null)
+            is SessionEventAction.SessionChanged -> {
+                markSseApplied(action.type, null)
                 val selected = local.value.selectedProject
-                if (!selected.isNullOrBlank() && event.directory == selected) {
+                if (!selected.isNullOrBlank() && action.directory == selected) {
                     loadSessions(selected)
                 }
-                if (event.type == "session.deleted") {
-                    val sessionId = event.properties["info"]
-                        ?.jsonObject
-                        ?.get("id")
-                        ?.jsonPrimitive
-                        ?.contentOrNull
-                        ?: return
-                    removeSession(sessionId)
-                }
+                action.deletedSessionId?.let(::removeSession)
             }
 
-            "message.updated" -> {
-                val info = event.properties["info"]?.jsonObject ?: event.properties
-                val sessionId = info["sessionID"]?.jsonPrimitive?.contentOrNull
-                if (sessionId.isNullOrBlank()) {
-                    markSseDropped(event.type, "missing sessionID")
-                    return
-                }
-                val id = info["id"]?.jsonPrimitive?.contentOrNull
-                if (id.isNullOrBlank()) {
-                    markSseDropped(event.type, "missing message id")
-                    return
-                }
-                val messageRole = info["role"]?.jsonPrimitive?.contentOrNull ?: "assistant"
-                val messageText = info["text"]?.jsonPrimitive?.contentOrNull?.trim()
-                val key = keyForSession(sessionId)
+            is SessionEventAction.MessageUpdated -> {
+                val key = keyForSession(action.sessionId)
                 if (key == null) {
-                    markSseDropped(event.type, "session not focused/active id=$sessionId")
-                    resolveSession(sessionId, event.directory)
+                    markSseDropped(event.type, "session not focused/active id=${action.sessionId}")
+                    resolveSession(action.sessionId, action.directory)
                     return
                 }
-                val message = messageKey(key, id)
-
-                if (messageRole == "user") {
+                val message = messageKey(key, action.messageId)
+                if (action.role == "user") {
                     pending[key]?.let {
                         if (it.isNotEmpty()) {
-                            val index = if (messageText.isNullOrBlank()) {
+                            val index = if (action.text.isNullOrBlank()) {
                                 0
                             } else {
-                                it.indexOfFirst { pending -> pending.text.trim() == messageText }
+                                it.indexOfFirst { pending -> pending.text.trim() == action.text }
                                     .let { found -> if (found >= 0) found else 0 }
                             }
                             val removed = it.removeAt(index)
                             pendingPass[key]?.remove(removed.id)
-                            stickySort.getOrPut(key) { linkedMapOf() }[id] = removed.sort
+                            stickySort.getOrPut(key) { linkedMapOf() }[action.messageId] = removed.sort
                         }
                     }
                 }
-
-                role[message] = messageRole
-                retainPass.getOrPut(key) { linkedMapOf() }[id] = ReconcileKeepPasses
-                val sort = stickySort[key]?.remove(id) ?: order[message] ?: sequence()
+                role[message] = action.role
+                retainPass.getOrPut(key) { linkedMapOf() }[action.messageId] = ReconcileKeepPasses
+                val sort = stickySort[key]?.remove(action.messageId) ?: order[message] ?: sequence()
                 stageMessage(
                     key,
-                    sessionId,
-                    id,
-                    messageRole,
-                    if (!messageText.isNullOrBlank()) messageText else decorator.render(part[message]?.values),
+                    action.sessionId,
+                    action.messageId,
+                    action.role,
+                    if (!action.text.isNullOrBlank()) action.text else decorator.render(part[message]?.values),
                     sort,
                 )
-                markSseApplied(event.type, sessionId)
-                scheduleSync(sessionId, true)
+                markSseApplied(event.type, action.sessionId)
+                scheduleSync(action.sessionId, true)
             }
 
-            "message.removed" -> {
-                val sessionId = event.properties["sessionID"]?.jsonPrimitive?.contentOrNull
-                if (sessionId.isNullOrBlank()) {
-                    markSseDropped(event.type, "missing sessionID")
-                    return
-                }
-                val messageId = event.properties["messageID"]?.jsonPrimitive?.contentOrNull
-                if (messageId.isNullOrBlank()) {
-                    markSseDropped(event.type, "missing messageID")
-                    return
-                }
-                val key = keyForSession(sessionId)
+            is SessionEventAction.MessageRemoved -> {
+                val key = keyForSession(action.sessionId)
                 if (key == null) {
-                    markSseDropped(event.type, "session not focused/active id=$sessionId")
-                    resolveSession(sessionId, event.directory)
+                    markSseDropped(event.type, "session not focused/active id=${action.sessionId}")
+                    resolveSession(action.sessionId, action.directory)
                     return
                 }
                 val server = key.substringBefore("::")
                 withContext(Dispatchers.IO) {
-                    db.appDatabaseQueries.deleteMessageCache(server, sessionId, messageId)
+                    db.appDatabaseQueries.deleteMessageCache(server, action.sessionId, action.messageId)
                 }
-                role.remove(messageKey(key, messageId))
-                part.remove(messageKey(key, messageId))
-                order.remove(messageKey(key, messageId))
-                overlay.remove(messageKey(key, messageId))
-                overlayDirty[key]?.remove(messageKey(key, messageId))
+                role.remove(messageKey(key, action.messageId))
+                part.remove(messageKey(key, action.messageId))
+                order.remove(messageKey(key, action.messageId))
+                overlay.remove(messageKey(key, action.messageId))
+                overlayDirty[key]?.remove(messageKey(key, action.messageId))
                 if (focusedKey == key) {
                     publishFocused(key)
                 }
-                markSseApplied(event.type, sessionId)
+                markSseApplied(event.type, action.sessionId)
             }
 
-            "message.part.updated" -> {
-                val payload = event.properties["part"]?.jsonObject ?: event.properties
-                val sessionId = payload["sessionID"]?.jsonPrimitive?.contentOrNull
-                if (sessionId.isNullOrBlank()) {
-                    markSseDropped(event.type, "missing sessionID")
-                    return
-                }
-                val messageId = payload["messageID"]?.jsonPrimitive?.contentOrNull
-                if (messageId.isNullOrBlank()) {
-                    markSseDropped(event.type, "missing messageID")
-                    return
-                }
-                val partId = payload["id"]?.jsonPrimitive?.contentOrNull
-                if (partId.isNullOrBlank()) {
-                    markSseDropped(event.type, "missing part id")
-                    return
-                }
-                val next = parser.parsePart(payload)
+            is SessionEventAction.MessagePartUpdated -> {
+                val next = parser.parsePart(action.part)
                 if (next == null) {
                     markSseDropped(event.type, "missing part type")
                     return
                 }
-                val key = keyForSession(sessionId)
+                val key = keyForSession(action.sessionId)
                 if (key == null) {
-                    markSseDropped(event.type, "session not focused/active id=$sessionId")
-                    resolveSession(sessionId, event.directory)
+                    markSseDropped(event.type, "session not focused/active id=${action.sessionId}")
+                    resolveSession(action.sessionId, action.directory)
                     return
                 }
-                val message = messageKey(key, messageId)
+                val message = messageKey(key, action.messageId)
                 val parts = part.getOrPut(message) { linkedMapOf() }
                 parts[next.id] = next
-                retainPass.getOrPut(key) { linkedMapOf() }[messageId] = ReconcileKeepPasses
+                retainPass.getOrPut(key) { linkedMapOf() }[action.messageId] = ReconcileKeepPasses
                 val sort = order[message] ?: sequence()
                 stageMessage(
                     key,
-                    sessionId,
-                    messageId,
+                    action.sessionId,
+                    action.messageId,
                     role[message] ?: "assistant",
                     decorator.render(part[message]?.values),
                     sort,
                 )
-                markSseApplied(event.type, sessionId)
-                scheduleSync(sessionId, true)
+                markSseApplied(event.type, action.sessionId)
+                scheduleSync(action.sessionId, true)
             }
 
-            "message.part.removed" -> {
-                val messageId = event.properties["messageID"]?.jsonPrimitive?.contentOrNull
-                if (messageId.isNullOrBlank()) {
-                    markSseDropped(event.type, "missing messageID")
-                    return
-                }
-                val partId = event.properties["partID"]?.jsonPrimitive?.contentOrNull
-                if (partId.isNullOrBlank()) {
-                    markSseDropped(event.type, "missing partID")
-                    return
-                }
-                val entry = active.entries.find { messageKey(it.key, messageId).let(part::containsKey) }
+            is SessionEventAction.MessagePartRemoved -> {
+                val entry = active.entries.find { messageKey(it.key, action.messageId).let(part::containsKey) }
                 if (entry == null) {
                     markSseDropped(event.type, "message not in active cache")
                     return
                 }
                 val key = entry.key
-                val message = messageKey(key, messageId)
+                val message = messageKey(key, action.messageId)
                 val parts = part[message] ?: return
-                parts.remove(partId)
+                parts.remove(action.partId)
                 if (parts.isEmpty()) {
                     part.remove(message)
                 }
@@ -804,7 +744,7 @@ class SessionService(
                 stageMessage(
                     key,
                     sessionId,
-                    messageId,
+                    action.messageId,
                     role[message] ?: "assistant",
                     decorator.render(part[message]?.values),
                     sort,
@@ -813,32 +753,24 @@ class SessionService(
                 scheduleSync(sessionId, true)
             }
 
-            "session.status" -> {
-                val sessionId = event.properties["sessionID"]?.jsonPrimitive?.contentOrNull
-                if (sessionId.isNullOrBlank()) {
-                    markSseDropped(event.type, "missing sessionID")
-                    return
+            is SessionEventAction.SessionStatus -> {
+                if (keyForSession(action.sessionId) == null) {
+                    resolveSession(action.sessionId, action.directory)
                 }
-                if (keyForSession(sessionId) == null) {
-                    resolveSession(sessionId, event.directory)
-                }
-                markSseApplied(event.type, sessionId)
-                scheduleSync(sessionId)
+                markSseApplied(event.type, action.sessionId)
+                scheduleSync(action.sessionId)
             }
 
-            "session.diff" -> {
-                val sessionId = event.properties["sessionID"]?.jsonPrimitive?.contentOrNull
-                if (sessionId.isNullOrBlank()) {
-                    markSseDropped(event.type, "missing sessionID")
-                    return
+            is SessionEventAction.SessionDiff -> {
+                if (keyForSession(action.sessionId) == null) {
+                    resolveSession(action.sessionId, action.directory)
                 }
-                if (keyForSession(sessionId) == null) {
-                    resolveSession(sessionId, event.directory)
-                }
-                markSseApplied(event.type, sessionId)
+                markSseApplied(event.type, action.sessionId)
             }
 
-            else -> markSseDropped(event.type, "unhandled event")
+            is SessionEventAction.Drop -> {
+                markSseDropped(action.type, action.reason)
+            }
         }
     }
 
