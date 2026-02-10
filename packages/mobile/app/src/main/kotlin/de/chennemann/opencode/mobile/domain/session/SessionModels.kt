@@ -1,0 +1,31 @@
+package de.chennemann.opencode.mobile.domain.session
+
+import kotlinx.serialization.json.JsonObject
+
+data class SessionProject(
+    val id: String,
+    val worktree: String,
+    val name: String,
+)
+
+data class SessionSummary(
+    val id: String,
+    val title: String,
+    val version: String,
+    val directory: String,
+)
+
+data class SessionMessage(
+    val id: String,
+    val role: String,
+    val text: String,
+    val parts: List<JsonObject>,
+)
+
+data class SessionStreamEvent(
+    val directory: String,
+    val type: String,
+    val properties: JsonObject,
+    val id: String?,
+    val retry: Int?,
+)

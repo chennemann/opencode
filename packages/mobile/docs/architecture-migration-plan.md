@@ -66,6 +66,7 @@ Progress:
 - `domain/message/MessagePartParser` extracted and used by `SessionService`.
 - `domain/message/MessageDecorator` extracted and used by `SessionService`.
 - `SessionDomainService` is now a concrete domain wrapper instead of a typealias.
+- Stream-event payload parsing/classification moved into `SessionEventReducer`.
 
 ### Phase 3: Data/domain contracts
 
@@ -80,6 +81,7 @@ Progress:
 
 - Added `SessionGateway` domain interface for session/server access.
 - `ServerRepository` now implements `SessionGateway` and `SessionService` depends on the interface.
+- Added domain session models (`SessionProject`, `SessionSummary`, `SessionMessage`, `SessionStreamEvent`) to stop leaking data-layer DTOs across the boundary.
 
 ### Phase 4: UI event-driven parity
 

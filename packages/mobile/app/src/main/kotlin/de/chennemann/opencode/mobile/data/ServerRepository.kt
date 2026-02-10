@@ -3,6 +3,10 @@ package de.chennemann.opencode.mobile.data
 import android.util.Log
 import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.domain.session.SessionGateway
+import de.chennemann.opencode.mobile.domain.session.SessionMessage
+import de.chennemann.opencode.mobile.domain.session.SessionProject
+import de.chennemann.opencode.mobile.domain.session.SessionStreamEvent
+import de.chennemann.opencode.mobile.domain.session.SessionSummary
 import de.chennemann.opencode.mobile.home.ServerState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,24 +69,60 @@ class ServerRepository(
         )
     }
 
-    override suspend fun projects(): List<ProjectInfo> {
-        return service.projects(url.value)
+    override suspend fun projects(): List<SessionProject> {
+        return service.projects(url.value).map {
+            SessionProject(
+                id = it.id,
+                worktree = it.worktree,
+                name = it.name,
+            )
+        }
     }
 
-    override suspend fun sessions(worktree: String): List<SessionInfo> {
-        return service.sessions(url.value, worktree)
+    override suspend fun sessions(worktree: String): List<SessionSummary> {
+        return service.sessions(url.value, worktree).map {
+            SessionSummary(
+                id = it.id,
+                title = it.title,
+                version = it.version,
+                directory = it.directory,
+            )
+        }
     }
 
-    override suspend fun createSession(worktree: String, title: String): SessionInfo {
-        return service.createSession(url.value, worktree, title)
+    override suspend fun createSession(worktree: String, title: String): SessionSummary {
+        val created = service.createSession(url.value, worktree, title)
+        return SessionSummary(
+            id = created.id,
+            title = created.title,
+            version = created.version,
+            directory = created.directory,
+        )
     }
 
-    override suspend fun messages(sessionId: String, directory: String, limit: Int?): List<SessionMessageInfo> {
-        return service.sessionMessages(url.value, sessionId, directory, limit)
+    override suspend fun messages(sessionId: String, directory: String, limit: Int?): List<SessionMessage> {
+        return service.sessionMessages(url.value, sessionId, directory, limit).map {
+            SessionMessage(
+                id = it.id,
+                role = it.role,
+                text = it.text,
+                parts = it.parts,
+            )
+        }
     }
 
-    override suspend fun streamEvents(lastEventId: String?, onRawEvent: suspend (String) -> Unit, onEvent: suspend (GlobalStreamEvent) -> Unit): String? {
-        return service.streamEvents(url.value, lastEventId, onRawEvent, onEvent)
+    override suspend fun streamEvents(lastEventId: String?, onRawEvent: suspend (String) -> Unit, onEvent: suspend (SessionStreamEvent) -> Unit): String? {
+        return service.streamEvents(url.value, lastEventId, onRawEvent) {
+            onEvent(
+                SessionStreamEvent(
+                    directory = it.directory,
+                    type = it.type,
+                    properties = it.properties,
+                    id = it.id,
+                    retry = it.retry,
+                )
+            )
+        }
     }
 
     override suspend fun sendMessage(sessionId: String, directory: String, text: String) {
@@ -125,8 +165,6 @@ private fun normalizeUrl(input: String): String? {
 
 private const val DefaultUrl = "http://opencode.local:4096"
 private const val UrlKey = "server_url"
-private const val MessageSyncLimit = 400
-
 private fun eventCursorKey(url: String): String {
     return "event_cursor:$url"
 }
