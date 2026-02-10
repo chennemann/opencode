@@ -65,6 +65,7 @@ Progress:
 
 - `domain/message/MessagePartParser` extracted and used by `SessionService`.
 - `domain/message/MessageDecorator` extracted and used by `SessionService`.
+- `SessionDomainService` is now a concrete domain wrapper instead of a typealias.
 
 ### Phase 3: Data/domain contracts
 
