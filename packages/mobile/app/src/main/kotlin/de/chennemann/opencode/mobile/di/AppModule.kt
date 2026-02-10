@@ -4,6 +4,7 @@ import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
+import de.chennemann.opencode.mobile.domain.session.ConnectivityGateway
 import de.chennemann.opencode.mobile.domain.session.ConnectionGateway
 import de.chennemann.opencode.mobile.domain.session.MessageGateway
 import de.chennemann.opencode.mobile.domain.session.ProjectGateway
@@ -48,6 +49,7 @@ val appModule = module {
     }
     single { MdnsService(get()) }
     single { NetworkService(get()) }
+    single<ConnectivityGateway> { get<NetworkService>() }
     single { ServerService(get(), get()) }
     single { ServerRepository(get(), get(), get(), get()) }
     single<ConnectionGateway> { get<ServerRepository>() }
