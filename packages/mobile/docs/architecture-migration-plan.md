@@ -84,6 +84,7 @@ Progress:
 
 - Split domain data access into focused ports: `ConnectionGateway`, `ProjectGateway`, `MessageGateway`, and `StreamGateway`.
 - `ServerRepository` now implements all gateway ports and `SessionDomainService` depends on those interfaces.
+- Added `ConnectivityGateway` so `SessionDomainService` depends on an interface instead of the concrete network service.
 - Added domain session models (`SessionProject`, `SessionSummary`, `SessionMessage`, `SessionStreamEvent`) to stop leaking data-layer DTOs across the boundary.
 - Added domain `ConnectionState` and mapped it to UI state in `SessionDomainService`, removing domain-to-UI dependency from connection/data ports.
 

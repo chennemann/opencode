@@ -4,17 +4,18 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import de.chennemann.opencode.mobile.domain.session.ConnectivityGateway
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class NetworkService(context: Context) {
+class NetworkService(context: Context) : ConnectivityGateway {
     private val manager = context.getSystemService(ConnectivityManager::class.java)
     private val connected = MutableStateFlow(isConnected())
     private val change = MutableStateFlow(0L)
 
-    val online: StateFlow<Boolean> = connected.asStateFlow()
-    val changed: StateFlow<Long> = change.asStateFlow()
+    override val online: StateFlow<Boolean> = connected.asStateFlow()
+    override val changed: StateFlow<Long> = change.asStateFlow()
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
