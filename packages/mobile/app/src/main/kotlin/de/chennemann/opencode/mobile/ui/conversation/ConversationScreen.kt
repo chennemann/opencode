@@ -52,28 +52,31 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
     val scope = rememberCoroutineScope()
     var follow by remember(state.title) { mutableStateOf(true) }
     val offset = if (state.canLoadMoreMessages || state.loadingMoreMessages) 1 else 0
+    val messages = state.focusedMessages.filter {
+        it.role == "user" || it.toolCalls.isNotEmpty() || (it.text.isNotBlank() && it.text != "(streaming...)")
+    }
     val isTool = { text: String, role: String ->
         role != "user" && text.startsWith("[") && text.endsWith("]")
     }
     val current = {
         (list.firstVisibleItemIndex - offset)
-            .coerceIn(-1, state.focusedMessages.lastIndex)
+            .coerceIn(-1, messages.lastIndex)
     }
     val previous = {
         (current() - 1 downTo 0)
             .firstOrNull { index ->
                 !isTool(
-                    state.focusedMessages[index].text,
-                    state.focusedMessages[index].role,
+                    messages[index].text,
+                    messages[index].role,
                 )
             }
     }
     val next = {
-        (current() + 1..state.focusedMessages.lastIndex)
+        (current() + 1..messages.lastIndex)
             .firstOrNull { index ->
                 !isTool(
-                    state.focusedMessages[index].text,
-                    state.focusedMessages[index].role,
+                    messages[index].text,
+                    messages[index].role,
                 )
             }
     }
@@ -88,13 +91,13 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
 
     LaunchedEffect(
         state.title,
-        state.focusedMessages.size,
-        state.focusedMessages.lastOrNull()?.text?.length,
+        messages.size,
+        messages.lastOrNull()?.text?.length,
         follow,
         offset,
     ) {
         if (!follow) return@LaunchedEffect
-        val count = state.focusedMessages.size + offset
+        val count = messages.size + offset
         if (count <= 0) return@LaunchedEffect
         list.scrollToItem(count - 1)
     }
@@ -131,7 +134,7 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                         }
                     }
                 }
-                itemsIndexed(state.focusedMessages, key = { _, it -> it.id }) { index, message ->
+                itemsIndexed(messages, key = { _, it -> it.id }) { index, message ->
                     val user = message.role == "user"
                     if (user) {
                         Card(
@@ -148,15 +151,15 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                             }
                         }
 
-                        val nextUser = state.focusedMessages
-                            .subList(index + 1, state.focusedMessages.size)
+                        val nextUser = messages
+                            .subList(index + 1, messages.size)
                             .indexOfFirst { it.role == "user" }
                         val end = if (nextUser < 0) {
-                            state.focusedMessages.lastIndex
+                            messages.lastIndex
                         } else {
                             index + nextUser
                         }
-                        val calls = state.focusedMessages
+                        val calls = messages
                             .subList(index + 1, end + 1)
                             .flatMap { it.toolCalls }
                         if (calls.isNotEmpty()) {
@@ -256,7 +259,7 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                                     list.scrollToItem(target + offset)
                                     return@launch
                                 }
-                                val count = state.focusedMessages.size + offset
+                                val count = messages.size + offset
                                 if (count <= 0) return@launch
                                 list.scrollToItem(count - 1)
                             }
