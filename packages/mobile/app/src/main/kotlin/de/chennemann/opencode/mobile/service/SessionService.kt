@@ -13,6 +13,7 @@ import de.chennemann.opencode.mobile.home.ProjectState
 import de.chennemann.opencode.mobile.home.ServerState
 import de.chennemann.opencode.mobile.home.SessionState
 import de.chennemann.opencode.mobile.home.DebugState
+import de.chennemann.opencode.mobile.home.ToolCallState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
@@ -28,8 +29,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonObject
 import java.util.concurrent.atomic.AtomicLong
 
 class SessionService(
@@ -37,6 +40,16 @@ class SessionService(
     private val db: AppDatabase,
     private val network: NetworkService,
 ) {
+    private data class PartState(
+        val id: String,
+        val type: String,
+        val text: String,
+        val tool: String? = null,
+        val status: String? = null,
+        val title: String? = null,
+        val output: String? = null,
+    )
+
     private data class LocalState(
         val projects: List<ProjectState> = emptyList(),
         val selectedProject: String? = null,
@@ -78,7 +91,7 @@ class SessionService(
 
     private val active = linkedMapOf<String, SessionState>()
     private val sessionProject = linkedMapOf<String, String?>()
-    private val part = linkedMapOf<String, LinkedHashMap<String, String>>()
+    private val part = linkedMapOf<String, LinkedHashMap<String, PartState>>()
     private val role = linkedMapOf<String, String>()
     private val pending = linkedMapOf<String, MutableList<MessageState>>()
     private val pendingPass = linkedMapOf<String, MutableMap<String, Int>>()
@@ -399,8 +412,22 @@ class SessionService(
                 next.forEach {
                     val id = requireNotNull(it.id)
                     val message = messageKey(key, id)
-                    val messageRole = it.role ?: "assistant"
-                    val messageText = it.text ?: ""
+                    val messageRole = it.role
+                    val parsed = parseParts(it.parts)
+                    if (parsed.isEmpty()) {
+                        part.remove(message)
+                    } else {
+                        val map = linkedMapOf<String, PartState>()
+                        parsed.forEach { item ->
+                            map[item.id] = item
+                        }
+                        part[message] = map
+                    }
+                    val messageText = if (messageRole == "assistant") {
+                        renderMessage(message)
+                    } else {
+                        it.text
+                    }
                     role[message] = messageRole
                     val cachedMessage = cachedMap[id]
                     val known = cachedMessage?.sort ?: order[message]
@@ -728,24 +755,10 @@ class SessionService(
                     markSseDropped(event.type, "missing part id")
                     return
                 }
-                val type = payload["type"]?.jsonPrimitive?.contentOrNull
-                val text = when (type) {
-                    "text" -> payload["text"]?.jsonPrimitive?.contentOrNull ?: ""
-                    "tool" -> {
-                        val tool = payload["tool"]?.jsonPrimitive?.contentOrNull ?: "tool"
-                        val status = payload["state"]
-                            ?.jsonObject
-                            ?.get("status")
-                            ?.jsonPrimitive
-                            ?.contentOrNull
-                            ?: "running"
-                        "[$tool: $status]"
-                    }
-                    null -> {
-                        markSseDropped(event.type, "missing part type")
-                        return
-                    }
-                    else -> "[$type]"
+                val next = parsePart(payload)
+                if (next == null) {
+                    markSseDropped(event.type, "missing part type")
+                    return
                 }
                 val key = keyForSession(sessionId)
                 if (key == null) {
@@ -755,7 +768,7 @@ class SessionService(
                 }
                 val message = messageKey(key, messageId)
                 val parts = part.getOrPut(message) { linkedMapOf() }
-                parts[partId] = text
+                parts[next.id] = next
                 retainPass.getOrPut(key) { linkedMapOf() }[messageId] = ReconcileKeepPasses
                 val sort = order[message] ?: sequence()
                 stageMessage(
@@ -820,6 +833,18 @@ class SessionService(
                 scheduleSync(sessionId)
             }
 
+            "session.diff" -> {
+                val sessionId = event.properties["sessionID"]?.jsonPrimitive?.contentOrNull
+                if (sessionId.isNullOrBlank()) {
+                    markSseDropped(event.type, "missing sessionID")
+                    return
+                }
+                if (keyForSession(sessionId) == null) {
+                    resolveSession(sessionId, event.directory)
+                }
+                markSseApplied(event.type, sessionId)
+            }
+
             else -> markSseDropped(event.type, "unhandled event")
         }
     }
@@ -866,13 +891,109 @@ class SessionService(
         }
     }
 
+    private fun parseParts(parts: List<JsonObject>): List<PartState> {
+        return parts.mapNotNull(::parsePart)
+    }
+
+    private fun parsePart(part: JsonObject): PartState? {
+        val id = part["id"]?.jsonPrimitive?.contentOrNull ?: return null
+        val type = part["type"]?.jsonPrimitive?.contentOrNull ?: return null
+        if (type == "text") {
+            return PartState(
+                id = id,
+                type = type,
+                text = part["text"]?.jsonPrimitive?.contentOrNull ?: "",
+            )
+        }
+        if (type == "reasoning") {
+            return PartState(
+                id = id,
+                type = type,
+                text = part["text"]?.jsonPrimitive?.contentOrNull ?: "",
+            )
+        }
+        if (type == "tool") {
+            val tool = part["tool"]?.jsonPrimitive?.contentOrNull ?: "tool"
+            val state = part["state"]?.jsonObject
+            val status = state?.get("status")?.jsonPrimitive?.contentOrNull ?: "running"
+            val title = state?.get("title")?.jsonPrimitive?.contentOrNull
+            val output = state?.get("output")?.jsonPrimitive?.contentOrNull
+            val text = listOfNotNull(title?.line(), output?.line()).joinToString("\n")
+            return PartState(
+                id = id,
+                type = type,
+                text = text,
+                tool = tool,
+                status = status,
+                title = title,
+                output = output,
+            )
+        }
+        if (type == "step-start") {
+            return PartState(id = id, type = type, text = "")
+        }
+        if (type == "step-finish") {
+            val reason = part["reason"]?.jsonPrimitive?.contentOrNull ?: "done"
+            return PartState(id = id, type = type, text = reason)
+        }
+        if (type == "patch") {
+            val files = part["files"]
+                ?.jsonArray
+                ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                ?: emptyList()
+            val text = if (files.isEmpty()) {
+                "changed files"
+            } else {
+                "${files.size} files: ${files.take(3).joinToString(", ")}" + if (files.size > 3) "..." else ""
+            }
+            return PartState(id = id, type = type, text = text)
+        }
+        return PartState(id = id, type = type, text = "[$type]")
+    }
+
     private fun renderMessage(message: String): String {
         val text = part[message]
             ?.values
+            ?.filter { it.type == "text" }
+            ?.map { it.text }
             ?.filter { it.isNotBlank() }
             ?.joinToString("\n")
         if (text == null || text.isBlank()) return "(streaming...)"
         return text
+    }
+
+    private fun decorate(key: String, message: MessageState): MessageState {
+        if (message.role == "user") return message
+        val messageKey = messageKey(key, message.id)
+        val parts = part[messageKey]?.values?.toList() ?: emptyList()
+        if (parts.isEmpty()) return message
+        return message.copy(
+            text = renderMessage(messageKey),
+            toolCalls = toolCalls(parts),
+        )
+    }
+
+    private fun toolCalls(parts: List<PartState>): List<ToolCallState> {
+        return parts
+            .filter { it.type == "tool" }
+            .map {
+                ToolCallState(
+                    id = it.id,
+                    title = it.tool ?: "tool",
+                    status = it.status,
+                    details = listOfNotNull(
+                        it.status?.let { status -> "Status: $status" },
+                        it.title?.let { title -> "Title: ${title.line()}" },
+                        it.output?.let { output -> "Output: ${output.line()}" },
+                    ),
+                )
+            }
+    }
+
+    private fun String.line(): String {
+        val value = lineSequence().firstOrNull()?.trim().orEmpty()
+        if (value.length <= 160) return value
+        return value.take(157) + "..."
     }
 
     private fun stageMessage(key: String, sessionId: String, messageId: String, role: String, text: String, sort: String) {
@@ -974,7 +1095,9 @@ class SessionService(
             base.values.toList() + list
         }
         local.value = local.value.copy(
-            focusedMessages = merged.sortedBy { it.sort },
+            focusedMessages = merged
+                .sortedBy { it.sort }
+                .map { decorate(key, it) },
         )
     }
 
