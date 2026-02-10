@@ -84,6 +84,7 @@ Progress:
 - Session resolve cooldown bookkeeping was extracted into `SessionResolver` with dedicated unit coverage.
 - Remote message diff/upsert/remove planning was extracted into `SessionSyncPlanner` with dedicated unit coverage.
 - Pending optimistic-message lifecycle bookkeeping was extracted into `PendingBuffer` with dedicated unit coverage.
+- Periodic reconcile loop scheduling was extracted into `ReconcileCoordinator` with dedicated unit coverage.
 
 ### Phase 3: Data/domain contracts
 
