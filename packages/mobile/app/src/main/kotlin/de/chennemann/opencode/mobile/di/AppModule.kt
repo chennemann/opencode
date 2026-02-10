@@ -2,11 +2,12 @@ package de.chennemann.opencode.mobile.di
 
 import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
-import de.chennemann.opencode.mobile.home.HomeViewModel
+import de.chennemann.opencode.mobile.ui.conversation.ConversationViewModel
 import de.chennemann.opencode.mobile.data.MdnsService
 import de.chennemann.opencode.mobile.data.NetworkService
 import de.chennemann.opencode.mobile.db.AppDatabase
-import de.chennemann.opencode.mobile.service.SessionService
+import de.chennemann.opencode.mobile.domain.session.SessionDomainService
+import de.chennemann.opencode.mobile.ui.manage.ManageViewModel
 import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.serialization.json.Json
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
@@ -42,6 +43,7 @@ val appModule = module {
     single { NetworkService(get()) }
     single { ServerService(get(), get()) }
     single { ServerRepository(get(), get(), get(), get()) }
-    single { SessionService(get(), get(), get()) }
-    viewModel { HomeViewModel(get()) }
+    single { SessionDomainService(get(), get(), get()) }
+    viewModel { ConversationViewModel(get()) }
+    viewModel { ManageViewModel(get()) }
 }
