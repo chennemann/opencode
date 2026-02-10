@@ -2,12 +2,15 @@ package de.chennemann.opencode.mobile.data
 
 import android.util.Log
 import de.chennemann.opencode.mobile.db.AppDatabase
-import de.chennemann.opencode.mobile.domain.session.SessionGateway
+import de.chennemann.opencode.mobile.domain.session.ConnectionGateway
+import de.chennemann.opencode.mobile.domain.session.MessageGateway
+import de.chennemann.opencode.mobile.domain.session.ProjectGateway
 import de.chennemann.opencode.mobile.domain.session.SessionMessage
 import de.chennemann.opencode.mobile.domain.session.SessionProject
 import de.chennemann.opencode.mobile.domain.session.SessionStreamEvent
 import de.chennemann.opencode.mobile.domain.session.SessionSummary
 import de.chennemann.opencode.mobile.domain.session.ConnectionState
+import de.chennemann.opencode.mobile.domain.session.StreamGateway
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,7 +24,7 @@ class ServerRepository(
     private val mdns: MdnsService,
     private val service: ServerService,
     private val network: NetworkService,
-) : SessionGateway {
+) : ConnectionGateway, ProjectGateway, MessageGateway, StreamGateway {
     private val state = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     private val url = MutableStateFlow(DefaultUrl)
     private val discovered = MutableStateFlow<String?>(null)
