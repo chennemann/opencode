@@ -42,7 +42,7 @@ data class DebugState(
     val sseLog: List<String> = emptyList(),
 )
 
-data class HomeState(
+data class SessionUiState(
     val url: String,
     val discovered: String?,
     val status: ServerState,

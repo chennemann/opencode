@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 
-class SessionDomainService(
+class SessionService(
     private val conn: ConnectionGateway,
     private val proj: ProjectGateway,
     private val msg: MessageGateway,
@@ -47,7 +47,7 @@ class SessionDomainService(
     private val local = MutableStateFlow(LocalState())
     private val debug = SessionDebugTracker(log, LogTag, SseLogLimit)
     private val output = MutableStateFlow(
-        HomeState(
+        SessionUiState(
             url = conn.endpoint.value,
             discovered = null,
             status = ServerState.Idle,
@@ -90,7 +90,7 @@ class SessionDomainService(
     private var started = false
     private var focusedKey: String? = null
 
-    val state: StateFlow<HomeState> = output.asStateFlow()
+    val state: StateFlow<SessionUiState> = output.asStateFlow()
 
     fun start(scope: CoroutineScope) {
         if (started) return
@@ -99,7 +99,7 @@ class SessionDomainService(
         conn.start(scope)
         scope.launch {
             combine(input, conn.found, conn.status, local, debug.state) { url, discovered, status, local, debug ->
-                HomeState(
+                SessionUiState(
                     url = url,
                     discovered = discovered,
                     status = status.toUi(),
@@ -884,6 +884,6 @@ private const val MessageSyncLimit = 400
 private const val ReconcileIntervalMs = 10000L
 private const val ReconcileKeepPasses = 1
 private const val OptimisticKeepPasses = 1
-private const val LogTag = "SessionDomainService"
+private const val LogTag = "SessionService"
 private const val SseLogLimit = 300
 private const val SessionResolveCooldownMs = 5000L

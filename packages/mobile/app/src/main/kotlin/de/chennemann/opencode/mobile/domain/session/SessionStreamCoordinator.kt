@@ -62,5 +62,5 @@ class SessionStreamCoordinator(
     }
 }
 
-private const val SessionLogTag = "SessionDomainService"
+private const val SessionLogTag = "SessionService"
 private const val StreamRestartDelay = 3000L

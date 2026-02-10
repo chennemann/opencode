@@ -27,7 +27,7 @@ Screens do not invoke arbitrary view model methods and do not own business logic
 
 ## Domain session flow
 
-`SessionDomainService` is the orchestration boundary used by view models.
+`SessionService` is the orchestration boundary used by view models.
 
 Key collaborators:
 
@@ -41,6 +41,10 @@ Key collaborators:
 - `ReconcileCoordinator` for periodic focused-session resync loop
 - `SessionResolver` for session resolve cooldown and deduplicated resolve attempts
 - `SessionDebugTracker` for stream/sync debug counters and debug log lines
+
+Produced state:
+
+- `SessionUiState` is the domain-owned aggregate state observed by screen view models.
 
 Domain ports:
 
