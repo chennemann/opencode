@@ -72,10 +72,9 @@ class SessionStreamCoordinatorTest {
             net = StubNet(),
             log = StubLog(),
         )
-        val debug = SessionDebugTracker(StubLog(), "test", 10)
         var events = 0
 
-        val job = coordinator.start(this, debug) {
+        val job = coordinator.start(this) {
             events += 1
         }
 

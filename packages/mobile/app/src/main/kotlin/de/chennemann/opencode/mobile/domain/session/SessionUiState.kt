@@ -28,20 +28,6 @@ data class ToolCallState(
     val details: List<String>,
 )
 
-data class DebugState(
-    val sseRaw: Int = 0,
-    val sseSeen: Int = 0,
-    val sseApplied: Int = 0,
-    val sseDropped: Int = 0,
-    val sseConnected: Int = 0,
-    val sseErrors: Int = 0,
-    val syncRuns: Int = 0,
-    val syncFails: Int = 0,
-    val lastDrop: String? = null,
-    val lastStreamError: String? = null,
-    val sseLog: List<String> = emptyList(),
-)
-
 data class SessionUiState(
     val url: String,
     val discovered: String?,
@@ -57,5 +43,4 @@ data class SessionUiState(
     val loadingProjects: Boolean,
     val loadingSessions: Boolean,
     val message: String?,
-    val debug: DebugState,
 )

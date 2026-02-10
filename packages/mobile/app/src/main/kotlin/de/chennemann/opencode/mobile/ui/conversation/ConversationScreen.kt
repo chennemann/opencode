@@ -42,7 +42,6 @@ import de.chennemann.opencode.mobile.icons.ChevronDown
 import de.chennemann.opencode.mobile.icons.ChevronUp
 import de.chennemann.opencode.mobile.icons.Icons
 import de.chennemann.opencode.mobile.ui.components.ConversationHeader
-import de.chennemann.opencode.mobile.ui.components.DebugPanel
 import de.chennemann.opencode.mobile.ui.components.MessageComposer
 import de.chennemann.opencode.mobile.ui.components.ToolCallCard
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -118,14 +117,7 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
     ) {
         ConversationHeader(
             title = state.title,
-            debugOpen = state.debugOpen,
-            onToggleDebug = { onEvent(ConversationEvent.ToggleDebug) },
             onOpenManage = { onEvent(ConversationEvent.OpenManageTapped) },
-        )
-
-        DebugPanel(
-            visible = state.debugOpen,
-            debug = state.debug,
         )
 
         Box(modifier = Modifier.weight(1f)) {

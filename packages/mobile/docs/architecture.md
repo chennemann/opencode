@@ -40,7 +40,6 @@ Key collaborators:
 - `SyncCoordinator` for scheduled sync and active-run guard
 - `ReconcileCoordinator` for periodic focused-session resync loop
 - `SessionResolver` for session resolve cooldown and deduplicated resolve attempts
-- `SessionDebugTracker` for stream/sync debug counters and debug log lines
 
 Produced state:
 
