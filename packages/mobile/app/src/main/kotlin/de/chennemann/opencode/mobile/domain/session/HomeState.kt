@@ -1,4 +1,4 @@
-package de.chennemann.opencode.mobile.ui.state
+package de.chennemann.opencode.mobile.domain.session
 
 data class ProjectState(
     val id: String,

@@ -21,7 +21,7 @@ Additionally, message enrichment work is now part of the migration baseline:
 
 - raw message `parts` are returned by `ServerService`.
 - `MessageState` includes `toolCalls`.
-- `SessionService` parses structured parts and enriches assistant messages.
+- `SessionDomainService` parses structured parts and enriches assistant messages.
 - stream handling includes `session.diff`.
 
 ## Dependency direction
@@ -52,23 +52,23 @@ Screens do not call arbitrary view model functions and do not receive business-a
 
 ### Phase 2: Domain extraction from SessionService
 
-Extract domain services from `SessionService` incrementally:
+Extract domain services from session orchestration incrementally:
 
 - `domain/session/SessionOrchestrator`
 - `domain/session/StreamEventReducer`
 - `domain/message/MessagePartParser`
 - `domain/message/MessageDecorator`
 
-`SessionService` becomes a thin orchestration shell until fully replaced.
+Session orchestration is now fully in `SessionDomainService`.
 
 Progress:
 
-- `domain/message/MessagePartParser` extracted and used by `SessionService`.
-- `domain/message/MessageDecorator` extracted and used by `SessionService`.
+- `domain/message/MessagePartParser` extracted and used by `SessionDomainService`.
+- `domain/message/MessageDecorator` extracted and used by `SessionDomainService`.
 - `SessionDomainService` is now a concrete domain wrapper instead of a typealias.
 - Stream-event payload parsing/classification moved into `SessionEventReducer`.
 - `MessageDecorator` now returns domain render models and no longer depends on UI state types.
-- `SessionService` stream handler was split into focused action handlers (`handleMessageUpdated`, `handleMessageRemoved`, etc.) to reduce monolithic event logic.
+- `SessionDomainService` stream handler was split into focused action handlers (`handleMessageUpdated`, `handleMessageRemoved`, etc.) to reduce monolithic event logic.
 - Session orchestration was moved from `service/SessionService` into `domain/session/SessionDomainService` and DI now wires view models directly to domain.
 
 ### Phase 3: Data/domain contracts
@@ -83,9 +83,9 @@ Progress:
 Progress:
 
 - Added `SessionGateway` domain interface for session/server access.
-- `ServerRepository` now implements `SessionGateway` and `SessionService` depends on the interface.
+- `ServerRepository` now implements `SessionGateway` and `SessionDomainService` depends on the interface.
 - Added domain session models (`SessionProject`, `SessionSummary`, `SessionMessage`, `SessionStreamEvent`) to stop leaking data-layer DTOs across the boundary.
-- Added domain `ConnectionState` and mapped it to UI state in `SessionService`, removing domain-to-UI dependency from `SessionGateway`.
+- Added domain `ConnectionState` and mapped it to UI state in `SessionDomainService`, removing domain-to-UI dependency from `SessionGateway`.
 
 ### Phase 4: UI event-driven parity
 
@@ -97,7 +97,7 @@ Progress:
 
 - Tool-call sections and cards were reintroduced in conversation UI.
 - Expand/collapse state is managed in `ConversationViewModel` and driven via screen events.
-- Screen-facing state models were moved from `home` package into `ui/state` to align ownership with the UI layer.
+- Screen-facing state models were moved from `home` package and now live in `domain/session`, so UI consumes state from domain instead of owning shared app state models.
 
 ### Phase 5: Navigation event handling
 
