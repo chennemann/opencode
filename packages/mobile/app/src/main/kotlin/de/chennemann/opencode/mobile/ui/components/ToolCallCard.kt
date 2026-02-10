@@ -30,7 +30,7 @@ import de.chennemann.opencode.mobile.domain.session.ToolCallState
 fun ToolCallCard(call: ToolCallState, expanded: Boolean, onToggle: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
         ),
         modifier = Modifier.fillMaxWidth(),
     ) {
