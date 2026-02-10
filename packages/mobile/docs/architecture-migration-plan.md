@@ -76,6 +76,7 @@ Progress:
 - Pending/reconcile pass bookkeeping was extracted into `PassCounter` to simplify `SessionDomainService` flow control.
 - `SessionEventReducer` coverage was expanded for ignore/session-delete/session-diff and drop-path handling.
 - Sync job scheduling/active-guard behavior was extracted into `SyncCoordinator` to shrink orchestration internals.
+- Stream connection/retry loop was extracted into `SessionStreamCoordinator` with dedicated unit coverage.
 
 ### Phase 3: Data/domain contracts
 
