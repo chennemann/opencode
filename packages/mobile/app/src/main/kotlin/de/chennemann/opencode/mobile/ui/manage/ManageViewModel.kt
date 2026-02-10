@@ -2,7 +2,7 @@ package de.chennemann.opencode.mobile.ui.manage
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import de.chennemann.opencode.mobile.domain.session.SessionDomainService
+import de.chennemann.opencode.mobile.domain.session.SessionService
 import de.chennemann.opencode.mobile.navigation.NavEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 class ManageViewModel(
-    private val service: SessionDomainService,
+    private val service: SessionService,
 ) : ViewModel() {
     private val navFlow = MutableSharedFlow<NavEvent>(extraBufferCapacity = 1)
 

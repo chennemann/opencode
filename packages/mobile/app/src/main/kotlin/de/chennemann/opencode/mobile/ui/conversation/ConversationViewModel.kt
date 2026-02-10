@@ -2,7 +2,7 @@ package de.chennemann.opencode.mobile.ui.conversation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import de.chennemann.opencode.mobile.domain.session.SessionDomainService
+import de.chennemann.opencode.mobile.domain.session.SessionService
 import de.chennemann.opencode.mobile.navigation.NavEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class ConversationViewModel(
-    private val service: SessionDomainService,
+    private val service: SessionService,
 ) : ViewModel() {
     private data class LocalState(
         val debugOpen: Boolean = false,
