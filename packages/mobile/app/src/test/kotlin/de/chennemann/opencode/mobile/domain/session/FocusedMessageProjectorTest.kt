@@ -3,6 +3,7 @@ package de.chennemann.opencode.mobile.domain.session
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePart
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class FocusedMessageProjectorTest {
@@ -59,5 +60,42 @@ class FocusedMessageProjectorTest {
         )
 
         assertEquals("rendered", value.single().text)
+    }
+
+    @Test
+    fun keepsToolCallsWhenPartsTemporarilyMissing() {
+        val key = "server::session"
+        val base = listOf(
+            MessageState(id = "1", role = "assistant", text = "(streaming...)", sort = "1"),
+        )
+        val withParts = mapOf(
+            "$key::1" to linkedMapOf(
+                "tool" to MessagePart(
+                    id = "tool",
+                    type = "tool",
+                    text = "",
+                    tool = "bash",
+                ),
+            ),
+        )
+
+        val first = projector.project(
+            key = key,
+            base = base,
+            staged = emptyMap(),
+            pending = null,
+            parts = withParts,
+        )
+
+        val second = projector.project(
+            key = key,
+            base = base,
+            staged = emptyMap(),
+            pending = null,
+            parts = emptyMap(),
+        )
+
+        assertTrue(first.single().toolCalls.isNotEmpty())
+        assertTrue(second.single().toolCalls.isNotEmpty())
     }
 }
