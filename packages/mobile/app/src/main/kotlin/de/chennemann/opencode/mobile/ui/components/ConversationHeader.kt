@@ -3,7 +3,6 @@ package de.chennemann.opencode.mobile.ui.components
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -15,15 +14,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import de.chennemann.opencode.mobile.icons.Adb
 import de.chennemann.opencode.mobile.icons.Icons
 import de.chennemann.opencode.mobile.icons.Settings
 
 @Composable
 fun ConversationHeader(
     title: String,
-    debugOpen: Boolean,
-    onToggleDebug: () -> Unit,
     onOpenManage: () -> Unit,
 ) {
     Row(
@@ -38,27 +34,13 @@ fun ConversationHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Row(
-            modifier = Modifier.width(96.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        IconButton(
+            onClick = onOpenManage,
+            colors = IconButtonDefaults.iconButtonColors(
+                contentColor = MaterialTheme.colorScheme.primary,
+            ),
         ) {
-            IconButton(
-                onClick = onToggleDebug,
-                colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = MaterialTheme.colorScheme.primary,
-                ),
-            ) {
-                val label = if (debugOpen) "Hide debug panel" else "Show debug panel"
-                Icon(Icons.Adb, label)
-            }
-            IconButton(
-                onClick = onOpenManage,
-                colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = MaterialTheme.colorScheme.primary,
-                ),
-            ) {
-                Icon(Icons.Settings, "Open settings")
-            }
+            Icon(Icons.Settings, "Open settings")
         }
     }
 }

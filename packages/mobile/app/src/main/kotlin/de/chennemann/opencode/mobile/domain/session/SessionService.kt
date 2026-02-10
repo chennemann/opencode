@@ -45,7 +45,6 @@ class SessionService(
 
     private val input = MutableStateFlow(conn.endpoint.value)
     private val local = MutableStateFlow(LocalState())
-    private val debug = SessionDebugTracker(log, LogTag, SseLogLimit)
     private val output = MutableStateFlow(
         SessionUiState(
             url = conn.endpoint.value,
@@ -62,7 +61,6 @@ class SessionService(
             loadingProjects = false,
             loadingSessions = false,
             message = null,
-            debug = DebugState(),
         )
     )
 
@@ -98,7 +96,7 @@ class SessionService(
         this.scope = scope
         conn.start(scope)
         scope.launch {
-            combine(input, conn.found, conn.status, local, debug.state) { url, discovered, status, local, debug ->
+            combine(input, conn.found, conn.status, local) { url, discovered, status, local ->
                 SessionUiState(
                     url = url,
                     discovered = discovered,
@@ -114,7 +112,6 @@ class SessionService(
                     loadingProjects = local.loadingProjects,
                     loadingSessions = local.loadingSessions,
                     message = local.message,
-                    debug = debug,
                 )
             }.collect {
                 output.value = it
@@ -327,7 +324,6 @@ class SessionService(
             if (!beginSync(session.id)) return@launch
             try {
             val started = System.currentTimeMillis()
-            debug.onSyncRun()
             if (more) {
                 local.value = local.value.copy(loadingMoreMessages = true, message = null)
             }
@@ -427,7 +423,6 @@ class SessionService(
                 log.debug(LogTag, "sync ok session=${session.id} messages=${next.size} dt=${System.currentTimeMillis() - started}ms")
             }
             result.onFailure {
-                debug.onSyncFail()
                 log.warn(LogTag, "sync failed session=${session.id} reason=${it.message}")
                 local.value = local.value.copy(message = it.message ?: "Failed to load messages")
             }
@@ -478,7 +473,7 @@ class SessionService(
 
     private fun stream(scope: CoroutineScope) {
         stream?.cancel()
-        stream = streamer.start(scope, debug, ::onEvent)
+        stream = streamer.start(scope, ::onEvent)
     }
 
     private fun reconcile(scope: CoroutineScope) {
@@ -490,10 +485,9 @@ class SessionService(
     }
 
     private suspend fun onEvent(event: SessionStreamEvent) {
-        debug.onSeen()
         when (val action = reducer.reduce(event)) {
             is SessionEventAction.Ignore -> {
-                debug.push("ignore type=${action.type}")
+                log.debug(LogTag, "ignore type=${action.type}")
                 return
             }
 
@@ -689,7 +683,7 @@ class SessionService(
             if (worktree.isNullOrBlank()) return@launch
             val result = runCatching { proj.sessions(worktree) }
             result.onFailure {
-                debug.push("resolve session failed id=$sessionId reason=${it.message}")
+                log.warn(LogTag, "resolve session failed id=$sessionId reason=${it.message}")
             }
             val found = result.getOrNull()
                 ?.firstOrNull { it.id == sessionId }
@@ -700,7 +694,7 @@ class SessionService(
                 version = found.version,
                 directory = found.directory,
             )
-            debug.push("resolve session id=$sessionId switch=${session.title}")
+            log.debug(LogTag, "resolve session id=$sessionId switch=${session.title}")
             focusSession(session, worktree)
             scheduleSync(sessionId)
         }
@@ -852,15 +846,11 @@ class SessionService(
     }
 
     private fun markSseApplied(type: String, sessionId: String?) {
-        debug.onApplied(type, sessionId)
+        log.debug(LogTag, "sse apply type=$type session=$sessionId")
     }
 
     private fun markSseDropped(type: String, reason: String) {
-        debug.onDropped(type, reason)
-    }
-
-    fun clearDebug() {
-        debug.clear()
+        log.warn(LogTag, "sse drop type=$type reason=$reason")
     }
 
     fun stop() {
@@ -885,5 +875,4 @@ private const val ReconcileIntervalMs = 10000L
 private const val ReconcileKeepPasses = 1
 private const val OptimisticKeepPasses = 1
 private const val LogTag = "SessionService"
-private const val SseLogLimit = 300
 private const val SessionResolveCooldownMs = 5000L
