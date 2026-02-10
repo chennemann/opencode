@@ -640,149 +640,177 @@ class SessionService(
             }
 
             is SessionEventAction.SessionChanged -> {
-                markSseApplied(action.type, null)
-                val selected = local.value.selectedProject
-                if (!selected.isNullOrBlank() && action.directory == selected) {
-                    loadSessions(selected)
-                }
-                action.deletedSessionId?.let(::removeSession)
+                handleSessionChanged(action)
             }
 
             is SessionEventAction.MessageUpdated -> {
-                val key = keyForSession(action.sessionId)
-                if (key == null) {
-                    markSseDropped(event.type, "session not focused/active id=${action.sessionId}")
-                    resolveSession(action.sessionId, action.directory)
-                    return
-                }
-                val message = messageKey(key, action.messageId)
-                if (action.role == "user") {
-                    pending[key]?.let {
-                        if (it.isNotEmpty()) {
-                            val index = if (action.text.isNullOrBlank()) {
-                                0
-                            } else {
-                                it.indexOfFirst { pending -> pending.text.trim() == action.text }
-                                    .let { found -> if (found >= 0) found else 0 }
-                            }
-                            val removed = it.removeAt(index)
-                            pendingPass[key]?.remove(removed.id)
-                            stickySort.getOrPut(key) { linkedMapOf() }[action.messageId] = removed.sort
-                        }
-                    }
-                }
-                role[message] = action.role
-                retainPass.getOrPut(key) { linkedMapOf() }[action.messageId] = ReconcileKeepPasses
-                val sort = stickySort[key]?.remove(action.messageId) ?: order[message] ?: sequence()
-                stageMessage(
-                    key,
-                    action.sessionId,
-                    action.messageId,
-                    action.role,
-                    if (!action.text.isNullOrBlank()) action.text else decorator.render(part[message]?.values),
-                    sort,
-                )
-                markSseApplied(event.type, action.sessionId)
-                scheduleSync(action.sessionId, true)
+                handleMessageUpdated(action, event.type)
             }
 
             is SessionEventAction.MessageRemoved -> {
-                val key = keyForSession(action.sessionId)
-                if (key == null) {
-                    markSseDropped(event.type, "session not focused/active id=${action.sessionId}")
-                    resolveSession(action.sessionId, action.directory)
-                    return
-                }
-                val server = key.substringBefore("::")
-                withContext(Dispatchers.IO) {
-                    db.appDatabaseQueries.deleteMessageCache(server, action.sessionId, action.messageId)
-                }
-                role.remove(messageKey(key, action.messageId))
-                part.remove(messageKey(key, action.messageId))
-                order.remove(messageKey(key, action.messageId))
-                overlay.remove(messageKey(key, action.messageId))
-                overlayDirty[key]?.remove(messageKey(key, action.messageId))
-                if (focusedKey == key) {
-                    publishFocused(key)
-                }
-                markSseApplied(event.type, action.sessionId)
+                handleMessageRemoved(action, event.type)
             }
 
             is SessionEventAction.MessagePartUpdated -> {
-                val next = parser.parsePart(action.part)
-                if (next == null) {
-                    markSseDropped(event.type, "missing part type")
-                    return
-                }
-                val key = keyForSession(action.sessionId)
-                if (key == null) {
-                    markSseDropped(event.type, "session not focused/active id=${action.sessionId}")
-                    resolveSession(action.sessionId, action.directory)
-                    return
-                }
-                val message = messageKey(key, action.messageId)
-                val parts = part.getOrPut(message) { linkedMapOf() }
-                parts[next.id] = next
-                retainPass.getOrPut(key) { linkedMapOf() }[action.messageId] = ReconcileKeepPasses
-                val sort = order[message] ?: sequence()
-                stageMessage(
-                    key,
-                    action.sessionId,
-                    action.messageId,
-                    role[message] ?: "assistant",
-                    decorator.render(part[message]?.values),
-                    sort,
-                )
-                markSseApplied(event.type, action.sessionId)
-                scheduleSync(action.sessionId, true)
+                handleMessagePartUpdated(action, event.type)
             }
 
             is SessionEventAction.MessagePartRemoved -> {
-                val entry = active.entries.find { messageKey(it.key, action.messageId).let(part::containsKey) }
-                if (entry == null) {
-                    markSseDropped(event.type, "message not in active cache")
-                    return
-                }
-                val key = entry.key
-                val message = messageKey(key, action.messageId)
-                val parts = part[message] ?: return
-                parts.remove(action.partId)
-                if (parts.isEmpty()) {
-                    part.remove(message)
-                }
-                val sessionId = key.substringAfter("::")
-                val sort = order[message] ?: sequence()
-                stageMessage(
-                    key,
-                    sessionId,
-                    action.messageId,
-                    role[message] ?: "assistant",
-                    decorator.render(part[message]?.values),
-                    sort,
-                )
-                markSseApplied(event.type, sessionId)
-                scheduleSync(sessionId, true)
+                handleMessagePartRemoved(action, event.type)
             }
 
             is SessionEventAction.SessionStatus -> {
-                if (keyForSession(action.sessionId) == null) {
-                    resolveSession(action.sessionId, action.directory)
-                }
-                markSseApplied(event.type, action.sessionId)
-                scheduleSync(action.sessionId)
+                handleSessionStatus(action, event.type)
             }
 
             is SessionEventAction.SessionDiff -> {
-                if (keyForSession(action.sessionId) == null) {
-                    resolveSession(action.sessionId, action.directory)
-                }
-                markSseApplied(event.type, action.sessionId)
+                handleSessionDiff(action, event.type)
             }
 
             is SessionEventAction.Drop -> {
                 markSseDropped(action.type, action.reason)
             }
         }
+    }
+
+    private fun handleSessionChanged(action: SessionEventAction.SessionChanged) {
+        markSseApplied(action.type, null)
+        val selected = local.value.selectedProject
+        if (!selected.isNullOrBlank() && action.directory == selected) {
+            loadSessions(selected)
+        }
+        action.deletedSessionId?.let(::removeSession)
+    }
+
+    private fun handleMessageUpdated(action: SessionEventAction.MessageUpdated, type: String) {
+        val key = keyForSession(action.sessionId)
+        if (key == null) {
+            markSseDropped(type, "session not focused/active id=${action.sessionId}")
+            resolveSession(action.sessionId, action.directory)
+            return
+        }
+        val message = messageKey(key, action.messageId)
+        if (action.role == "user") {
+            pending[key]?.let {
+                if (it.isNotEmpty()) {
+                    val index = if (action.text.isNullOrBlank()) {
+                        0
+                    } else {
+                        it.indexOfFirst { pending -> pending.text.trim() == action.text }
+                            .let { found -> if (found >= 0) found else 0 }
+                    }
+                    val removed = it.removeAt(index)
+                    pendingPass[key]?.remove(removed.id)
+                    stickySort.getOrPut(key) { linkedMapOf() }[action.messageId] = removed.sort
+                }
+            }
+        }
+        role[message] = action.role
+        retainPass.getOrPut(key) { linkedMapOf() }[action.messageId] = ReconcileKeepPasses
+        val sort = stickySort[key]?.remove(action.messageId) ?: order[message] ?: sequence()
+        stageMessage(
+            key,
+            action.sessionId,
+            action.messageId,
+            action.role,
+            if (!action.text.isNullOrBlank()) action.text else decorator.render(part[message]?.values),
+            sort,
+        )
+        markSseApplied(type, action.sessionId)
+        scheduleSync(action.sessionId, true)
+    }
+
+    private suspend fun handleMessageRemoved(action: SessionEventAction.MessageRemoved, type: String) {
+        val key = keyForSession(action.sessionId)
+        if (key == null) {
+            markSseDropped(type, "session not focused/active id=${action.sessionId}")
+            resolveSession(action.sessionId, action.directory)
+            return
+        }
+        val server = key.substringBefore("::")
+        withContext(Dispatchers.IO) {
+            db.appDatabaseQueries.deleteMessageCache(server, action.sessionId, action.messageId)
+        }
+        role.remove(messageKey(key, action.messageId))
+        part.remove(messageKey(key, action.messageId))
+        order.remove(messageKey(key, action.messageId))
+        overlay.remove(messageKey(key, action.messageId))
+        overlayDirty[key]?.remove(messageKey(key, action.messageId))
+        if (focusedKey == key) {
+            publishFocused(key)
+        }
+        markSseApplied(type, action.sessionId)
+    }
+
+    private fun handleMessagePartUpdated(action: SessionEventAction.MessagePartUpdated, type: String) {
+        val next = parser.parsePart(action.part)
+        if (next == null) {
+            markSseDropped(type, "missing part type")
+            return
+        }
+        val key = keyForSession(action.sessionId)
+        if (key == null) {
+            markSseDropped(type, "session not focused/active id=${action.sessionId}")
+            resolveSession(action.sessionId, action.directory)
+            return
+        }
+        val message = messageKey(key, action.messageId)
+        val parts = part.getOrPut(message) { linkedMapOf() }
+        parts[next.id] = next
+        retainPass.getOrPut(key) { linkedMapOf() }[action.messageId] = ReconcileKeepPasses
+        val sort = order[message] ?: sequence()
+        stageMessage(
+            key,
+            action.sessionId,
+            action.messageId,
+            role[message] ?: "assistant",
+            decorator.render(part[message]?.values),
+            sort,
+        )
+        markSseApplied(type, action.sessionId)
+        scheduleSync(action.sessionId, true)
+    }
+
+    private fun handleMessagePartRemoved(action: SessionEventAction.MessagePartRemoved, type: String) {
+        val entry = active.entries.find { messageKey(it.key, action.messageId).let(part::containsKey) }
+        if (entry == null) {
+            markSseDropped(type, "message not in active cache")
+            return
+        }
+        val key = entry.key
+        val message = messageKey(key, action.messageId)
+        val parts = part[message] ?: return
+        parts.remove(action.partId)
+        if (parts.isEmpty()) {
+            part.remove(message)
+        }
+        val sessionId = key.substringAfter("::")
+        val sort = order[message] ?: sequence()
+        stageMessage(
+            key,
+            sessionId,
+            action.messageId,
+            role[message] ?: "assistant",
+            decorator.render(part[message]?.values),
+            sort,
+        )
+        markSseApplied(type, sessionId)
+        scheduleSync(sessionId, true)
+    }
+
+    private fun handleSessionStatus(action: SessionEventAction.SessionStatus, type: String) {
+        if (keyForSession(action.sessionId) == null) {
+            resolveSession(action.sessionId, action.directory)
+        }
+        markSseApplied(type, action.sessionId)
+        scheduleSync(action.sessionId)
+    }
+
+    private fun handleSessionDiff(action: SessionEventAction.SessionDiff, type: String) {
+        if (keyForSession(action.sessionId) == null) {
+            resolveSession(action.sessionId, action.directory)
+        }
+        markSseApplied(type, action.sessionId)
     }
 
     private fun scheduleSync(sessionId: String, burst: Boolean = false) {
