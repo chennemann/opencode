@@ -9,6 +9,8 @@ Move the app to a package-based layered architecture where:
 - `navigation` owns routes and nav host behavior.
 - `ui` owns rendering with screen-specific view models and event contracts.
 
+Steady-state architecture reference: `packages/mobile/docs/architecture.md`.
+
 ## Current baseline
 
 Completed snapshots:
