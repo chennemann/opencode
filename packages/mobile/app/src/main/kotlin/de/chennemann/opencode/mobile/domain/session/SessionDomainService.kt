@@ -1,6 +1,5 @@
 package de.chennemann.opencode.mobile.domain.session
 
-import android.util.Log
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePart
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
@@ -27,6 +26,7 @@ class SessionDomainService(
     private val feed: StreamGateway,
     private val cache: SessionCacheGateway,
     private val net: ConnectivityGateway,
+    private val log: LogGateway,
     private val parser: MessagePartParser,
     private val decorator: MessageDecorator,
     private val reducer: SessionEventReducer,
@@ -451,13 +451,13 @@ class SessionDomainService(
                     local.value = local.value.copy(canLoadMoreMessages = !complete)
                 }
                 if (syncRuns % 10 == 0) {
-                    Log.d(LogTag, "sync ok session=${session.id} messages=${next.size} dt=${System.currentTimeMillis() - started}ms")
+                    log.debug(LogTag, "sync ok session=${session.id} messages=${next.size} dt=${System.currentTimeMillis() - started}ms")
                 }
             }
             result.onFailure {
                 syncFails += 1
                 debug.value = debug.value.copy(syncFails = syncFails)
-                Log.w(LogTag, "sync failed session=${session.id} reason=${it.message}")
+                log.warn(LogTag, "sync failed session=${session.id} reason=${it.message}")
                 local.value = local.value.copy(message = it.message ?: "Failed to load messages")
             }
             } finally {
@@ -512,7 +512,7 @@ class SessionDomainService(
             var cursor = runCatching { feed.streamCursor() }.getOrNull()
             while (isActive) {
                 val endpoint = conn.endpoint.value
-                Log.d(LogTag, "sse connect attempt=${attempt + 1} endpoint=$endpoint cursor=$cursor")
+                log.debug(LogTag, "sse connect attempt=${attempt + 1} endpoint=$endpoint cursor=$cursor")
                 pushSseLog("connect attempt=${attempt + 1} endpoint=$endpoint cursor=$cursor")
                 val result = runCatching {
                     sseConnected += 1
@@ -522,7 +522,7 @@ class SessionDomainService(
                         debug.value = debug.value.copy(sseRaw = sseRaw)
                         pushSseLog("raw ${chunk.replace("\n", "\\n")}")
                     }) { event ->
-                        Log.d(LogTag, "sse event type=${event.type} dir=${event.directory} id=${event.id}")
+                        log.debug(LogTag, "sse event type=${event.type} dir=${event.directory} id=${event.id}")
                         pushSseLog(
                             "event type=${event.type} dir=${event.directory} id=${event.id} retry=${event.retry} properties=${event.properties}",
                         )
@@ -534,7 +534,7 @@ class SessionDomainService(
                     }
                 }
                 if (result.isSuccess) {
-                    Log.d(LogTag, "sse stream ended normally reconnecting")
+                    log.debug(LogTag, "sse stream ended normally reconnecting")
                     pushSseLog("stream ended; reconnecting")
                     attempt = 0
                     continue
@@ -542,7 +542,7 @@ class SessionDomainService(
                 sseErrors += 1
                 val reason = result.exceptionOrNull()?.message ?: "unknown stream error"
                 debug.value = debug.value.copy(sseErrors = sseErrors, lastStreamError = reason)
-                Log.w(LogTag, "sse stream error attempt=${attempt + 1} reason=$reason")
+                log.warn(LogTag, "sse stream error attempt=${attempt + 1} reason=$reason")
                 pushSseLog("error attempt=${attempt + 1} reason=$reason")
                 attempt += 1
                 val seen = net.changed.value
@@ -1035,7 +1035,7 @@ class SessionDomainService(
         sseApplied += 1
         debug.value = debug.value.copy(sseApplied = sseApplied)
         if (sseApplied % 5 == 0) {
-            Log.d(
+            log.debug(
                 LogTag,
                 "sse applied=$sseApplied dropped=$sseDropped seen=$sseSeen connected=$sseConnected errors=$sseErrors last=$type session=$sessionId",
             )
@@ -1046,7 +1046,7 @@ class SessionDomainService(
         sseDropped += 1
         debug.value = debug.value.copy(sseDropped = sseDropped, lastDrop = "$type: $reason")
         pushSseLog("drop type=$type reason=$reason")
-        Log.w(LogTag, "sse drop type=$type reason=$reason seen=$sseSeen applied=$sseApplied dropped=$sseDropped")
+        log.warn(LogTag, "sse drop type=$type reason=$reason seen=$sseSeen applied=$sseApplied dropped=$sseDropped")
     }
 
     private fun pushSseLog(line: String) {
