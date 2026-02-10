@@ -4,6 +4,7 @@ import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
+import de.chennemann.opencode.mobile.domain.session.SessionEventReducer
 import de.chennemann.opencode.mobile.domain.session.SessionGateway
 import de.chennemann.opencode.mobile.service.SessionService
 import de.chennemann.opencode.mobile.ui.conversation.ConversationViewModel
@@ -49,7 +50,8 @@ val appModule = module {
     single<SessionGateway> { ServerRepository(get(), get(), get(), get()) }
     single { MessagePartParser() }
     single { MessageDecorator() }
-    single { SessionService(get(), get(), get(), get(), get()) }
+    single { SessionEventReducer() }
+    single { SessionService(get(), get(), get(), get(), get(), get()) }
     single { SessionDomainService(get()) }
     viewModel { ConversationViewModel(get()) }
     viewModel { ManageViewModel(get()) }
