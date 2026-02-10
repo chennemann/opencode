@@ -74,8 +74,8 @@ class SessionDomainService(
     private val part = linkedMapOf<String, LinkedHashMap<String, MessagePart>>()
     private val role = linkedMapOf<String, String>()
     private val pending = linkedMapOf<String, MutableList<MessageState>>()
-    private val pendingPass = linkedMapOf<String, MutableMap<String, Int>>()
-    private val retainPass = linkedMapOf<String, MutableMap<String, Int>>()
+    private val pendingPass = PassCounter()
+    private val retainPass = PassCounter()
     private val stickySort = linkedMapOf<String, MutableMap<String, String>>()
     private val order = linkedMapOf<String, String>()
     private val messageLimit = linkedMapOf<String, Int>()
@@ -265,7 +265,7 @@ class SessionDomainService(
                 sort = sort,
             )
         )
-        pendingPass.getOrPut(key) { linkedMapOf() }[id] = OptimisticKeepPasses
+        pendingPass.set(key, id, OptimisticKeepPasses)
         local.value = local.value.copy(
             focusedMessages = local.value.focusedMessages + MessageState(
                 id = id,
@@ -283,7 +283,7 @@ class SessionDomainService(
             }
             result.onFailure {
                 pending[key]?.removeAll { it.id == id }
-                pendingPass[key]?.remove(id)
+                pendingPass.remove(key, id)
                 if (focusedKey == key) observeFocused()
                 local.value = local.value.copy(message = it.message ?: "Failed to send message")
             }
@@ -430,7 +430,7 @@ class SessionDomainService(
                     val removed = mutableListOf<String>()
                     cachedMap.keys.forEach { id ->
                         if (nextIds.contains(id)) return@forEach
-                        if (keepForPass(retainPass, key, id)) return@forEach
+                        if (retainPass.consume(key, id)) return@forEach
                         removed.add(id)
                         role.remove(messageKey(key, id))
                         part.remove(messageKey(key, id))
@@ -646,13 +646,13 @@ class SessionDomainService(
                             .let { found -> if (found >= 0) found else 0 }
                     }
                     val removed = it.removeAt(index)
-                    pendingPass[key]?.remove(removed.id)
+                    pendingPass.remove(key, removed.id)
                     stickySort.getOrPut(key) { linkedMapOf() }[action.messageId] = removed.sort
                 }
             }
         }
         role[message] = action.role
-        retainPass.getOrPut(key) { linkedMapOf() }[action.messageId] = ReconcileKeepPasses
+        retainPass.set(key, action.messageId, ReconcileKeepPasses)
         val sort = stickySort[key]?.remove(action.messageId) ?: order[message] ?: sequence()
         stageMessage(
             key,
@@ -703,7 +703,7 @@ class SessionDomainService(
         val message = messageKey(key, action.messageId)
         val parts = part.getOrPut(message) { linkedMapOf() }
         parts[next.id] = next
-        retainPass.getOrPut(key) { linkedMapOf() }[action.messageId] = ReconcileKeepPasses
+        retainPass.set(key, action.messageId, ReconcileKeepPasses)
         val sort = order[message] ?: sequence()
         stageMessage(
             key,
@@ -904,40 +904,22 @@ class SessionDomainService(
         if (index < 0) return null
 
         val removed = list.removeAt(index)
-        pendingPass[key]?.remove(removed.id)
+        pendingPass.remove(key, removed.id)
         if (list.isEmpty()) {
             pending.remove(key)
-            pendingPass.remove(key)
+            pendingPass.clear(key)
         }
         return removed.sort
-    }
-
-    private fun keepForPass(map: MutableMap<String, MutableMap<String, Int>>, key: String, id: String): Boolean {
-        val passes = map[key] ?: return false
-        val value = passes[id] ?: return false
-        if (value <= 0) {
-            passes.remove(id)
-            if (passes.isEmpty()) map.remove(key)
-            return false
-        }
-        passes[id] = value - 1
-        if (passes[id] == 0) {
-            passes.remove(id)
-        }
-        if (passes.isEmpty()) {
-            map.remove(key)
-        }
-        return true
     }
 
     private fun trimPending(key: String) {
         val list = pending[key] ?: return
         if (list.isEmpty()) return
 
-        val filtered = list.filter { keepForPass(pendingPass, key, it.id) }
+        val filtered = list.filter { pendingPass.consume(key, it.id) }
         if (filtered.isEmpty()) {
             pending.remove(key)
-            pendingPass.remove(key)
+            pendingPass.clear(key)
             if (focusedKey == key) {
                 observeFocused()
             }
@@ -959,8 +941,8 @@ class SessionDomainService(
         active.remove(key)
         sessionProject.remove(key)
         pending.remove(key)
-        pendingPass.remove(key)
-        retainPass.remove(key)
+        pendingPass.clear(key)
+        retainPass.clear(key)
         stickySort.remove(key)
         order.keys
             .filter { it.startsWith("$key::") }
