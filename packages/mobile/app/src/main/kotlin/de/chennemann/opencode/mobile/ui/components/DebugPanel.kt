@@ -17,7 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import de.chennemann.opencode.mobile.home.DebugState
+import de.chennemann.opencode.mobile.ui.state.DebugState
 
 @Composable
 fun DebugPanel(visible: Boolean, debug: DebugState) {
