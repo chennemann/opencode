@@ -4,14 +4,13 @@ import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
+import de.chennemann.opencode.mobile.domain.session.SessionDomainService
 import de.chennemann.opencode.mobile.domain.session.SessionEventReducer
 import de.chennemann.opencode.mobile.domain.session.SessionGateway
-import de.chennemann.opencode.mobile.service.SessionService
 import de.chennemann.opencode.mobile.ui.conversation.ConversationViewModel
 import de.chennemann.opencode.mobile.data.MdnsService
 import de.chennemann.opencode.mobile.data.NetworkService
 import de.chennemann.opencode.mobile.db.AppDatabase
-import de.chennemann.opencode.mobile.domain.session.SessionDomainService
 import de.chennemann.opencode.mobile.ui.manage.ManageViewModel
 import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.serialization.json.Json
@@ -51,8 +50,7 @@ val appModule = module {
     single { MessagePartParser() }
     single { MessageDecorator() }
     single { SessionEventReducer() }
-    single { SessionService(get(), get(), get(), get(), get(), get()) }
-    single { SessionDomainService(get()) }
+    single { SessionDomainService(get(), get(), get(), get(), get(), get()) }
     viewModel { ConversationViewModel(get()) }
     viewModel { ManageViewModel(get()) }
 }
