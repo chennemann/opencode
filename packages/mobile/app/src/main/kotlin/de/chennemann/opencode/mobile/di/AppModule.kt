@@ -2,6 +2,8 @@ package de.chennemann.opencode.mobile.di
 
 import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
+import de.chennemann.opencode.mobile.domain.message.MessageDecorator
+import de.chennemann.opencode.mobile.domain.message.MessagePartParser
 import de.chennemann.opencode.mobile.ui.conversation.ConversationViewModel
 import de.chennemann.opencode.mobile.data.MdnsService
 import de.chennemann.opencode.mobile.data.NetworkService
@@ -43,7 +45,9 @@ val appModule = module {
     single { NetworkService(get()) }
     single { ServerService(get(), get()) }
     single { ServerRepository(get(), get(), get(), get()) }
-    single { SessionDomainService(get(), get(), get()) }
+    single { MessagePartParser() }
+    single { MessageDecorator() }
+    single { SessionDomainService(get(), get(), get(), get(), get()) }
     viewModel { ConversationViewModel(get()) }
     viewModel { ManageViewModel(get()) }
 }

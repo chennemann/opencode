@@ -15,6 +15,7 @@ Completed snapshots:
 
 1. `feat(mobile): split navigation and UI into screen packages`
 2. `refactor(mobile): extract conversation UI components`
+3. `feat(mobile): enrich streamed messages with parsed parts and tool calls`
 
 Additionally, message enrichment work is now part of the migration baseline:
 
@@ -59,6 +60,11 @@ Extract domain services from `SessionService` incrementally:
 - `domain/message/MessageDecorator`
 
 `SessionService` becomes a thin orchestration shell until fully replaced.
+
+Progress:
+
+- `domain/message/MessagePartParser` extracted and used by `SessionService`.
+- `domain/message/MessageDecorator` extracted and used by `SessionService`.
 
 ### Phase 3: Data/domain contracts
 
