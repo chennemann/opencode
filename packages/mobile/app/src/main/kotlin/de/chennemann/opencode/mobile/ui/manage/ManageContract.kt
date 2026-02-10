@@ -1,7 +1,7 @@
 package de.chennemann.opencode.mobile.ui.manage
 
-import de.chennemann.opencode.mobile.home.ProjectState
-import de.chennemann.opencode.mobile.home.SessionState
+import de.chennemann.opencode.mobile.ui.state.ProjectState
+import de.chennemann.opencode.mobile.ui.state.SessionState
 
 data class ManageUiState(
     val url: String,

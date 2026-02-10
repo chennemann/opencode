@@ -7,7 +7,7 @@ import de.chennemann.opencode.mobile.domain.session.SessionMessage
 import de.chennemann.opencode.mobile.domain.session.SessionProject
 import de.chennemann.opencode.mobile.domain.session.SessionStreamEvent
 import de.chennemann.opencode.mobile.domain.session.SessionSummary
-import de.chennemann.opencode.mobile.home.ServerState
+import de.chennemann.opencode.mobile.ui.state.ServerState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

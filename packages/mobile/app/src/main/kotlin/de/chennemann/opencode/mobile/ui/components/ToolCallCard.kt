@@ -15,7 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import de.chennemann.opencode.mobile.home.ToolCallState
+import de.chennemann.opencode.mobile.ui.state.ToolCallState
 
 @Composable
 fun ToolCallCard(call: ToolCallState, expanded: Boolean, onToggle: () -> Unit) {
