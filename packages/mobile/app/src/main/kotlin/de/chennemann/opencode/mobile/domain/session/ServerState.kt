@@ -1,4 +1,4 @@
-package de.chennemann.opencode.mobile.ui.state
+package de.chennemann.opencode.mobile.domain.session
 
 sealed interface ServerState {
     data object Idle : ServerState
