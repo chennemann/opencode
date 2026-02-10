@@ -64,7 +64,6 @@ class ManageViewModel(
             }
 
             is ManageEvent.BackTapped -> {
-                service.closeManagement()
                 navFlow.tryEmit(NavEvent.Back)
             }
         }

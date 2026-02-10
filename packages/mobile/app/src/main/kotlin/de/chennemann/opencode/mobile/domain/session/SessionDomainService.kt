@@ -41,7 +41,6 @@ class SessionDomainService(
         val focusedMessages: List<MessageState> = emptyList(),
         val canLoadMoreMessages: Boolean = false,
         val loadingMoreMessages: Boolean = false,
-        val managementOpen: Boolean = false,
         val loadingProjects: Boolean = false,
         val loadingSessions: Boolean = false,
         val message: String? = null,
@@ -63,7 +62,6 @@ class SessionDomainService(
             focusedMessages = emptyList(),
             canLoadMoreMessages = false,
             loadingMoreMessages = false,
-            managementOpen = false,
             loadingProjects = false,
             loadingSessions = false,
             message = null,
@@ -128,7 +126,6 @@ class SessionDomainService(
                     focusedMessages = local.focusedMessages,
                     canLoadMoreMessages = local.canLoadMoreMessages,
                     loadingMoreMessages = local.loadingMoreMessages,
-                    managementOpen = local.managementOpen,
                     loadingProjects = local.loadingProjects,
                     loadingSessions = local.loadingSessions,
                     message = local.message,
@@ -177,14 +174,6 @@ class SessionDomainService(
             repo.setUrl(input.value)
             repo.refresh()
         }
-    }
-
-    fun openManagement() {
-        local.value = local.value.copy(managementOpen = true)
-    }
-
-    fun closeManagement() {
-        local.value = local.value.copy(managementOpen = false)
     }
 
     fun loadProjects() {
@@ -338,7 +327,6 @@ class SessionDomainService(
             activeSessions = active.values.sortedByDescending { it.id },
             canLoadMoreMessages = false,
             loadingMoreMessages = false,
-            managementOpen = false,
         )
         val now = System.currentTimeMillis()
         db.appDatabaseQueries.upsertSessionCache(
