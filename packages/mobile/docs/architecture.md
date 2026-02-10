@@ -32,6 +32,7 @@ Screens do not invoke arbitrary view model methods and do not own business logic
 Key collaborators:
 
 - `SessionEventReducer` for stream payload classification
+- `SessionStreamCoordinator` for stream connection/retry loop and callback dispatch
 - `FocusedMessageProjector` for focused message projection/decorating
 - `PassCounter` for optimistic/reconcile pass tracking
 - `SyncCoordinator` for scheduled sync and active-run guard
