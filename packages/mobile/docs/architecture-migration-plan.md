@@ -70,6 +70,7 @@ Progress:
 - `MessageDecorator` now returns domain render models and no longer depends on UI state types.
 - `SessionDomainService` stream handler was split into focused action handlers (`handleMessageUpdated`, `handleMessageRemoved`, etc.) to reduce monolithic event logic.
 - Session orchestration was moved from `service/SessionService` into `domain/session/SessionDomainService` and DI now wires view models directly to domain.
+- Focused message projection/decoration for UI state was extracted to `FocusedMessageProjector` with dedicated unit tests.
 
 ### Phase 3: Data/domain contracts
 
