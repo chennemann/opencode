@@ -73,6 +73,7 @@ Progress:
 - Focused message projection/decoration for UI state was extracted to `FocusedMessageProjector` with dedicated unit tests.
 - Pending/reconcile pass bookkeeping was extracted into `PassCounter` to simplify `SessionDomainService` flow control.
 - `SessionEventReducer` coverage was expanded for ignore/session-delete/session-diff and drop-path handling.
+- Sync job scheduling/active-guard behavior was extracted into `SyncCoordinator` to shrink orchestration internals.
 
 ### Phase 3: Data/domain contracts
 
