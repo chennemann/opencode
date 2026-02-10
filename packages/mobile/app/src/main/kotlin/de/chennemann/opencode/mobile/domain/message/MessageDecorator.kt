@@ -1,8 +1,5 @@
 package de.chennemann.opencode.mobile.domain.message
 
-import de.chennemann.opencode.mobile.ui.state.MessageState
-import de.chennemann.opencode.mobile.ui.state.ToolCallState
-
 class MessageDecorator {
     fun render(parts: Collection<MessagePart>?): String {
         val text = parts
@@ -14,20 +11,20 @@ class MessageDecorator {
         return text
     }
 
-    fun decorate(message: MessageState, parts: List<MessagePart>): MessageState {
-        if (message.role == "user") return message
-        if (parts.isEmpty()) return message
-        return message.copy(
+    fun decorate(role: String, text: String, parts: List<MessagePart>): MessageRender {
+        if (role == "user") return MessageRender(text, emptyList())
+        if (parts.isEmpty()) return MessageRender(text, emptyList())
+        return MessageRender(
             text = render(parts),
             toolCalls = toolCalls(parts),
         )
     }
 
-    private fun toolCalls(parts: List<MessagePart>): List<ToolCallState> {
+    private fun toolCalls(parts: List<MessagePart>): List<ToolCallRender> {
         return parts
             .filter { it.type == "tool" }
             .map {
-                ToolCallState(
+                ToolCallRender(
                     id = it.id,
                     title = it.tool ?: "tool",
                     status = it.status,

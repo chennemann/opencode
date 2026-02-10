@@ -12,12 +12,14 @@ import de.chennemann.opencode.mobile.domain.session.SessionEventAction
 import de.chennemann.opencode.mobile.domain.session.SessionEventReducer
 import de.chennemann.opencode.mobile.domain.session.SessionGateway
 import de.chennemann.opencode.mobile.domain.session.SessionStreamEvent
+import de.chennemann.opencode.mobile.domain.session.ConnectionState
 import de.chennemann.opencode.mobile.ui.state.DebugState
 import de.chennemann.opencode.mobile.ui.state.HomeState
 import de.chennemann.opencode.mobile.ui.state.MessageState
 import de.chennemann.opencode.mobile.ui.state.ProjectState
 import de.chennemann.opencode.mobile.ui.state.ServerState
 import de.chennemann.opencode.mobile.ui.state.SessionState
+import de.chennemann.opencode.mobile.ui.state.ToolCallState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
@@ -129,7 +131,7 @@ class SessionService(
                 HomeState(
                     url = url,
                     discovered = discovered,
-                    status = status,
+                    status = status.toUi(),
                     projects = local.projects,
                     selectedProject = local.selectedProject,
                     sessions = local.sessions,
@@ -159,6 +161,15 @@ class SessionService(
         }
         reconcile(scope)
         stream(scope)
+    }
+
+    private fun ConnectionState.toUi(): ServerState {
+        return when (this) {
+            is ConnectionState.Idle -> ServerState.Idle
+            is ConnectionState.Loading -> ServerState.Loading
+            is ConnectionState.Connected -> ServerState.Connected(version)
+            is ConnectionState.Failed -> ServerState.Failed(reason)
+        }
     }
 
     fun updateUrl(value: String) {
@@ -357,7 +368,7 @@ class SessionService(
     }
 
     private fun syncRemote(session: SessionState, more: Boolean = false) {
-        if (repo.status.value !is ServerState.Connected) return
+        if (repo.status.value !is ConnectionState.Connected) return
         val scope = scope ?: return
         scope.launch(Dispatchers.Default) {
             if (!beginSync(session.id)) return@launch
@@ -919,7 +930,18 @@ class SessionService(
                 .sortedBy { it.sort }
                 .map {
                     val parts = part[messageKey(key, it.id)]?.values?.toList() ?: emptyList()
-                    decorator.decorate(it, parts)
+                    val rendered = decorator.decorate(it.role, it.text, parts)
+                    it.copy(
+                        text = rendered.text,
+                        toolCalls = rendered.toolCalls.map { call ->
+                            ToolCallState(
+                                id = call.id,
+                                title = call.title,
+                                status = call.status,
+                                details = call.details,
+                            )
+                        },
+                    )
                 },
         )
     }
