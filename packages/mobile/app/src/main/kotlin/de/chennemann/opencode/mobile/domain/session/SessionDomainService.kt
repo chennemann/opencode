@@ -46,7 +46,7 @@ class SessionDomainService(
 
     private val input = MutableStateFlow(conn.endpoint.value)
     private val local = MutableStateFlow(LocalState())
-    private val debug = MutableStateFlow(DebugState())
+    private val debug = SessionDebugTracker(log, LogTag, SseLogLimit)
     private val output = MutableStateFlow(
         HomeState(
             url = conn.endpoint.value,
@@ -85,18 +85,9 @@ class SessionDomainService(
     private val sync = SyncCoordinator()
     private val flush = linkedMapOf<String, Job>()
     private val sessionResolve = linkedMapOf<String, Long>()
-    private val sseLog = ArrayDeque<String>()
     private val overlay = linkedMapOf<String, MessageState>()
     private val overlayDirty = linkedMapOf<String, LinkedHashSet<String>>()
     private var focusedDb = emptyList<MessageState>()
-    private var sseSeen = 0
-    private var sseRaw = 0
-    private var sseApplied = 0
-    private var sseDropped = 0
-    private var sseConnected = 0
-    private var sseErrors = 0
-    private var syncRuns = 0
-    private var syncFails = 0
     private var scope: CoroutineScope? = null
     private var started = false
     private var focusedKey: String? = null
@@ -109,7 +100,7 @@ class SessionDomainService(
         this.scope = scope
         conn.start(scope)
         scope.launch {
-            combine(input, conn.found, conn.status, local, debug) { url, discovered, status, local, debug ->
+            combine(input, conn.found, conn.status, local, debug.state) { url, discovered, status, local, debug ->
                 HomeState(
                     url = url,
                     discovered = discovered,
@@ -338,8 +329,7 @@ class SessionDomainService(
             if (!beginSync(session.id)) return@launch
             try {
             val started = System.currentTimeMillis()
-            syncRuns += 1
-            debug.value = debug.value.copy(syncRuns = syncRuns)
+            debug.onSyncRun()
             if (more) {
                 local.value = local.value.copy(loadingMoreMessages = true, message = null)
             }
@@ -447,13 +437,10 @@ class SessionDomainService(
                     }
                     local.value = local.value.copy(canLoadMoreMessages = !complete)
                 }
-                if (syncRuns % 10 == 0) {
-                    log.debug(LogTag, "sync ok session=${session.id} messages=${next.size} dt=${System.currentTimeMillis() - started}ms")
-                }
+                log.debug(LogTag, "sync ok session=${session.id} messages=${next.size} dt=${System.currentTimeMillis() - started}ms")
             }
             result.onFailure {
-                syncFails += 1
-                debug.value = debug.value.copy(syncFails = syncFails)
+                debug.onSyncFail()
                 log.warn(LogTag, "sync failed session=${session.id} reason=${it.message}")
                 local.value = local.value.copy(message = it.message ?: "Failed to load messages")
             }
@@ -510,17 +497,14 @@ class SessionDomainService(
             while (isActive) {
                 val endpoint = conn.endpoint.value
                 log.debug(LogTag, "sse connect attempt=${attempt + 1} endpoint=$endpoint cursor=$cursor")
-                pushSseLog("connect attempt=${attempt + 1} endpoint=$endpoint cursor=$cursor")
+                debug.push("connect attempt=${attempt + 1} endpoint=$endpoint cursor=$cursor")
                 val result = runCatching {
-                    sseConnected += 1
-                    debug.value = debug.value.copy(sseConnected = sseConnected, lastStreamError = null)
+                    debug.onConnected()
                     feed.streamEvents(cursor, { chunk ->
-                        sseRaw += 1
-                        debug.value = debug.value.copy(sseRaw = sseRaw)
-                        pushSseLog("raw ${chunk.replace("\n", "\\n")}")
+                        debug.onRaw(chunk)
                     }) { event ->
                         log.debug(LogTag, "sse event type=${event.type} dir=${event.directory} id=${event.id}")
-                        pushSseLog(
+                        debug.push(
                             "event type=${event.type} dir=${event.directory} id=${event.id} retry=${event.retry} properties=${event.properties}",
                         )
                         if (!event.id.isNullOrBlank()) {
@@ -532,24 +516,23 @@ class SessionDomainService(
                 }
                 if (result.isSuccess) {
                     log.debug(LogTag, "sse stream ended normally reconnecting")
-                    pushSseLog("stream ended; reconnecting")
+                    debug.push("stream ended; reconnecting")
                     attempt = 0
                     continue
                 }
-                sseErrors += 1
                 val reason = result.exceptionOrNull()?.message ?: "unknown stream error"
-                debug.value = debug.value.copy(sseErrors = sseErrors, lastStreamError = reason)
+                debug.onStreamError(reason)
                 log.warn(LogTag, "sse stream error attempt=${attempt + 1} reason=$reason")
-                pushSseLog("error attempt=${attempt + 1} reason=$reason")
+                debug.push("error attempt=${attempt + 1} reason=$reason")
                 attempt += 1
                 val seen = net.changed.value
                 if (!net.online.value) {
-                    pushSseLog("offline; waiting for network change")
+                    debug.push("offline; waiting for network change")
                 } else {
-                    pushSseLog("waiting for network change before reconnect")
+                    debug.push("waiting for network change before reconnect")
                 }
                 net.changed.first { it > seen }
-                pushSseLog("network changed; retrying stream")
+                debug.push("network changed; retrying stream")
                 delay(StreamRestartDelayMs)
             }
         }
@@ -567,11 +550,10 @@ class SessionDomainService(
     }
 
     private suspend fun onEvent(event: SessionStreamEvent) {
-        sseSeen += 1
-        debug.value = debug.value.copy(sseSeen = sseSeen)
+        debug.onSeen()
         when (val action = reducer.reduce(event)) {
             is SessionEventAction.Ignore -> {
-                pushSseLog("ignore type=${action.type}")
+                debug.push("ignore type=${action.type}")
                 return
             }
 
@@ -780,7 +762,7 @@ class SessionDomainService(
             if (worktree.isNullOrBlank()) return@launch
             val result = runCatching { proj.sessions(worktree) }
             result.onFailure {
-                pushSseLog("resolve session failed id=$sessionId reason=${it.message}")
+                debug.push("resolve session failed id=$sessionId reason=${it.message}")
             }
             val found = result.getOrNull()
                 ?.firstOrNull { it.id == sessionId }
@@ -791,7 +773,7 @@ class SessionDomainService(
                 version = found.version,
                 directory = found.directory,
             )
-            pushSseLog("resolve session id=$sessionId switch=${session.title}")
+            debug.push("resolve session id=$sessionId switch=${session.title}")
             focusSession(session, worktree)
             scheduleSync(sessionId)
         }
@@ -976,35 +958,15 @@ class SessionDomainService(
     }
 
     private fun markSseApplied(type: String, sessionId: String?) {
-        sseApplied += 1
-        debug.value = debug.value.copy(sseApplied = sseApplied)
-        if (sseApplied % 5 == 0) {
-            log.debug(
-                LogTag,
-                "sse applied=$sseApplied dropped=$sseDropped seen=$sseSeen connected=$sseConnected errors=$sseErrors last=$type session=$sessionId",
-            )
-        }
+        debug.onApplied(type, sessionId)
     }
 
     private fun markSseDropped(type: String, reason: String) {
-        sseDropped += 1
-        debug.value = debug.value.copy(sseDropped = sseDropped, lastDrop = "$type: $reason")
-        pushSseLog("drop type=$type reason=$reason")
-        log.warn(LogTag, "sse drop type=$type reason=$reason seen=$sseSeen applied=$sseApplied dropped=$sseDropped")
-    }
-
-    private fun pushSseLog(line: String) {
-        val stamp = System.currentTimeMillis().toString()
-        sseLog.addLast("$stamp | $line")
-        while (sseLog.size > SseLogLimit) {
-            sseLog.removeFirst()
-        }
-        debug.value = debug.value.copy(sseLog = sseLog.toList())
+        debug.onDropped(type, reason)
     }
 
     fun clearDebug() {
-        sseLog.clear()
-        debug.value = debug.value.copy(sseLog = emptyList())
+        debug.clear()
     }
 
     fun stop() {
