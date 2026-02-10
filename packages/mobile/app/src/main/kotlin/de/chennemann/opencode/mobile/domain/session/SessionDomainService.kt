@@ -11,7 +11,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
@@ -28,6 +27,7 @@ class SessionDomainService(
     private val planner: SessionSyncPlanner,
     private val reducer: SessionEventReducer,
     private val streamer: SessionStreamCoordinator,
+    private val reconciler: ReconcileCoordinator,
 ) {
     private data class LocalState(
         val projects: List<ProjectState> = emptyList(),
@@ -483,12 +483,9 @@ class SessionDomainService(
 
     private fun reconcile(scope: CoroutineScope) {
         reconcile?.cancel()
-        reconcile = scope.launch {
-            while (isActive) {
-                delay(ReconcileIntervalMs)
-                val focused = local.value.focusedSession ?: continue
-                syncRemote(focused)
-            }
+        reconcile = reconciler.start(scope) {
+            val focused = local.value.focusedSession ?: return@start
+            syncRemote(focused)
         }
     }
 
