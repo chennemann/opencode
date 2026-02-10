@@ -36,6 +36,7 @@ Key collaborators:
 - `FocusedMessageProjector` for focused message projection/decorating
 - `PassCounter` for optimistic/reconcile pass tracking
 - `SyncCoordinator` for scheduled sync and active-run guard
+- `SessionResolver` for session resolve cooldown and deduplicated resolve attempts
 - `SessionDebugTracker` for stream/sync debug counters and debug log lines
 
 Domain ports:

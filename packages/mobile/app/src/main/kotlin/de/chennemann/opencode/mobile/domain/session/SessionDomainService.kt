@@ -83,7 +83,7 @@ class SessionDomainService(
     private var reconcile: Job? = null
     private val sync = SyncCoordinator()
     private val flush = linkedMapOf<String, Job>()
-    private val sessionResolve = linkedMapOf<String, Long>()
+    private val resolver = SessionResolver(SessionResolveCooldownMs)
     private val overlay = linkedMapOf<String, MessageState>()
     private val overlayDirty = linkedMapOf<String, LinkedHashSet<String>>()
     private var focusedDb = emptyList<MessageState>()
@@ -704,10 +704,7 @@ class SessionDomainService(
 
     private fun resolveSession(sessionId: String, directory: String?) {
         val scope = scope ?: return
-        val now = System.currentTimeMillis()
-        val seen = sessionResolve[sessionId]
-        if (seen != null && now - seen < SessionResolveCooldownMs) return
-        sessionResolve[sessionId] = now
+        if (!resolver.allow(sessionId)) return
         scope.launch {
             val worktree = if (!directory.isNullOrBlank() && directory != "global") {
                 directory
