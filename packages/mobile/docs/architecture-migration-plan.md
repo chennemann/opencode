@@ -81,6 +81,11 @@ Progress:
 - Ensure all UI interactions remain event-driven via `onEvent`.
 - Reintroduce/extend reusable tool-call components under `ui/components` while keeping logic in view models/domain.
 
+Progress:
+
+- Tool-call sections and cards were reintroduced in conversation UI.
+- Expand/collapse state is managed in `ConversationViewModel` and driven via screen events.
+
 ### Phase 5: Navigation event handling
 
 - Keep `NavEvent` emission in screen view models.

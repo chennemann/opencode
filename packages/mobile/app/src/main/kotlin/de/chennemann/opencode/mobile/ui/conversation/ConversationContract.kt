@@ -13,12 +13,18 @@ data class ConversationUiState(
     val debug: DebugState,
     val debugOpen: Boolean,
     val draft: String,
+    val stepOpen: Map<String, Boolean>,
+    val callOpen: Map<String, Boolean>,
 )
 
 sealed interface ConversationEvent {
     data object OpenManageTapped : ConversationEvent
 
     data object ToggleDebug : ConversationEvent
+
+    data class ToggleSteps(val messageId: String) : ConversationEvent
+
+    data class ToggleToolCall(val callId: String) : ConversationEvent
 
     data class DraftChanged(val value: String) : ConversationEvent
 
