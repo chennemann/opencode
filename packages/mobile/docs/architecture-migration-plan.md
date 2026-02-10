@@ -71,6 +71,7 @@ Progress:
 - `SessionDomainService` stream handler was split into focused action handlers (`handleMessageUpdated`, `handleMessageRemoved`, etc.) to reduce monolithic event logic.
 - Session orchestration was moved from `service/SessionService` into `domain/session/SessionDomainService` and DI now wires view models directly to domain.
 - Focused message projection/decoration for UI state was extracted to `FocusedMessageProjector` with dedicated unit tests.
+- Pending/reconcile pass bookkeeping was extracted into `PassCounter` to simplify `SessionDomainService` flow control.
 
 ### Phase 3: Data/domain contracts
 
