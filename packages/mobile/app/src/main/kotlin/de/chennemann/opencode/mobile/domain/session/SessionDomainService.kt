@@ -29,6 +29,7 @@ class SessionDomainService(
     private val log: LogGateway,
     private val parser: MessagePartParser,
     private val decorator: MessageDecorator,
+    private val projector: FocusedMessageProjector,
     private val reducer: SessionEventReducer,
 ) {
     private data class LocalState(
@@ -872,37 +873,8 @@ class SessionDomainService(
 
     private fun publishFocused(key: String) {
         if (focusedKey != key) return
-        val base = focusedDb.associateBy { it.id }.toMutableMap()
-        overlay
-            .filterKeys { it.startsWith("$key::") }
-            .values
-            .forEach {
-                base[it.id] = it
-            }
-        val list = pending[key]
-        val merged = if (list.isNullOrEmpty()) {
-            base.values.toList()
-        } else {
-            base.values.toList() + list
-        }
         local.value = local.value.copy(
-            focusedMessages = merged
-                .sortedBy { it.sort }
-                .map {
-                    val parts = part[messageKey(key, it.id)]?.values?.toList() ?: emptyList()
-                    val rendered = decorator.decorate(it.role, it.text, parts)
-                    it.copy(
-                        text = rendered.text,
-                        toolCalls = rendered.toolCalls.map { call ->
-                            ToolCallState(
-                                id = call.id,
-                                title = call.title,
-                                status = call.status,
-                                details = call.details,
-                            )
-                        },
-                    )
-                },
+            focusedMessages = projector.project(key, focusedDb, overlay, pending[key], part),
         )
     }
 
