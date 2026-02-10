@@ -8,29 +8,24 @@ class ConversationRenderMapper {
         val id: String,
         val userText: String?,
         val toolCalls: List<ToolCallState>,
+        val answerWriting: Boolean,
         val systemTexts: List<String>,
         val startedAt: Long?,
         val completedAt: Long?,
     )
 
     fun map(messages: List<MessageState>): List<ConversationTurnUiState> {
-        val visible = messages.filter {
-            it.role == "user" ||
-                it.toolCalls.isNotEmpty() ||
-                (it.text.isNotBlank() && it.text != "(streaming...)")
-        }
-        if (visible.isEmpty()) return emptyList()
-
         val turns = mutableListOf<Turn>()
         var turn: Turn? = null
 
-        visible.forEach { message ->
+        messages.forEach { message ->
             if (message.role == "user") {
                 turn?.let(turns::add)
                 turn = Turn(
                     id = message.id,
                     userText = message.text,
                     toolCalls = emptyList(),
+                    answerWriting = false,
                     systemTexts = emptyList(),
                     startedAt = message.createdAt,
                     completedAt = null,
@@ -42,12 +37,15 @@ class ConversationRenderMapper {
                 id = message.id,
                 userText = null,
                 toolCalls = emptyList(),
+                answerWriting = false,
                 systemTexts = emptyList(),
                 startedAt = message.createdAt,
                 completedAt = message.completedAt,
             )
+            val toolCalls = current.toolCalls + message.toolCalls
             turn = current.copy(
-                toolCalls = current.toolCalls + message.toolCalls,
+                toolCalls = toolCalls,
+                answerWriting = current.answerWriting || (toolCalls.isNotEmpty() && message.toolCalls.isEmpty()),
                 systemTexts = if (message.text.isNotBlank() && message.text != "(streaming...)") {
                     current.systemTexts + message.text
                 } else {
@@ -60,15 +58,22 @@ class ConversationRenderMapper {
 
         turn?.let(turns::add)
 
-        return turns.map { value ->
+        return turns
+            .filter {
+                it.userText != null ||
+                    it.toolCalls.isNotEmpty() ||
+                    it.systemTexts.isNotEmpty()
+            }
+            .map { value ->
             ConversationTurnUiState(
                 id = value.id,
                 userText = value.userText,
                 toolCalls = value.toolCalls,
+                answerWriting = value.answerWriting,
                 systemTexts = value.systemTexts,
                 startedAt = value.startedAt,
                 completedAt = value.completedAt,
             )
-        }
+            }
     }
 }

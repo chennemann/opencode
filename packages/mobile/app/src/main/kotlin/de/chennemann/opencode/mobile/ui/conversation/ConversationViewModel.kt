@@ -21,6 +21,12 @@ class ConversationViewModel(
     private val service: SessionService,
 ) : ViewModel() {
     private val mapper = ConversationRenderMapper()
+    private data class ActiveToolSlot(
+        val id: String,
+        val size: Int,
+    )
+
+    private val active = linkedMapOf<String, ActiveToolSlot>()
 
     private data class GlobalRenderState(
         val title: String,
@@ -47,7 +53,7 @@ class ConversationViewModel(
             GlobalRenderState(
                 title = it.focusedSession?.title ?: "No session selected",
                 status = it.status,
-                turns = mapper.map(it.focusedMessages),
+                turns = splitActiveTools(mapper.map(it.focusedMessages)),
                 canLoadMoreMessages = it.canLoadMoreMessages,
                 loadingMoreMessages = it.loadingMoreMessages,
             )
@@ -129,5 +135,54 @@ class ConversationViewModel(
                 service.loadMoreMessages()
             }
         }
+    }
+
+    private fun splitActiveTools(turns: List<ConversationTurnUiState>): List<ConversationTurnUiState> {
+        val latest = turns.lastOrNull()?.id
+        active.keys.toList().forEach {
+            if (it != latest) {
+                active.remove(it)
+            }
+        }
+        return turns.mapIndexed { index, turn ->
+            if (index != turns.lastIndex) {
+                turn.copy(activeTool = null)
+            } else {
+                splitActiveTool(turn)
+            }
+        }
+    }
+
+    private fun splitActiveTool(turn: ConversationTurnUiState): ConversationTurnUiState {
+        if (turn.answerWriting) {
+            active.remove(turn.id)
+            return turn.copy(activeTool = null)
+        }
+        if (turn.toolCalls.isEmpty()) {
+            active.remove(turn.id)
+            return turn.copy(activeTool = null)
+        }
+        val current = active[turn.id]
+        val id = if (current == null || turn.toolCalls.none { it.id == current.id }) {
+            turn.toolCalls.first().id
+        } else {
+            current.id
+        }
+        val next = if ((current?.size ?: 0) < turn.toolCalls.size) {
+            val i = turn.toolCalls.indexOfFirst { it.id == id }
+            if (i >= 0 && i < turn.toolCalls.lastIndex) {
+                turn.toolCalls[i + 1].id
+            } else {
+                id
+            }
+        } else {
+            id
+        }
+        active[turn.id] = ActiveToolSlot(id = next, size = turn.toolCalls.size)
+        val tool = turn.toolCalls.firstOrNull { it.id == next } ?: return turn.copy(activeTool = null)
+        return turn.copy(
+            toolCalls = turn.toolCalls.filterNot { it.id == tool.id },
+            activeTool = tool,
+        )
     }
 }
