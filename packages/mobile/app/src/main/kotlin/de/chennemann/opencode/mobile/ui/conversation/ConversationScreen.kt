@@ -1,13 +1,5 @@
 package de.chennemann.opencode.mobile.ui.conversation
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -25,12 +16,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,15 +29,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import de.chennemann.opencode.mobile.home.ServerState
-import de.chennemann.opencode.mobile.icons.Adb
 import de.chennemann.opencode.mobile.icons.ChevronDown
 import de.chennemann.opencode.mobile.icons.ChevronUp
 import de.chennemann.opencode.mobile.icons.Icons
-import de.chennemann.opencode.mobile.icons.Send
-import de.chennemann.opencode.mobile.icons.Settings
+import de.chennemann.opencode.mobile.ui.components.ConversationHeader
+import de.chennemann.opencode.mobile.ui.components.DebugPanel
+import de.chennemann.opencode.mobile.ui.components.MessageComposer
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
@@ -121,71 +108,17 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
             .padding(horizontal = 16.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SelectionContainer(modifier = Modifier.weight(1f)) {
-                Text(
-                    state.title,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Row(
-                modifier = Modifier.width(96.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                IconButton(
-                    onClick = { onEvent(ConversationEvent.ToggleDebug) },
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary,
-                    ),
-                ) {
-                    val label = if (state.debugOpen) "Hide debug panel" else "Show debug panel"
-                    Icon(Icons.Adb, label)
-                }
-                IconButton(
-                    onClick = { onEvent(ConversationEvent.OpenManageTapped) },
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary,
-                    ),
-                ) {
-                    Icon(Icons.Settings, "Open settings")
-                }
-            }
-        }
+        ConversationHeader(
+            title = state.title,
+            debugOpen = state.debugOpen,
+            onToggleDebug = { onEvent(ConversationEvent.ToggleDebug) },
+            onOpenManage = { onEvent(ConversationEvent.OpenManageTapped) },
+        )
 
-        AnimatedVisibility(
+        DebugPanel(
             visible = state.debugOpen,
-            enter = slideInVertically(initialOffsetY = { -it / 2 }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { -it / 2 }) + fadeOut(),
-        ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                ),
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    SelectionContainer {
-                        Text(
-                            "SSE raw=${state.debug.sseRaw} seen=${state.debug.sseSeen} applied=${state.debug.sseApplied} dropped=${state.debug.sseDropped} connected=${state.debug.sseConnected} errors=${state.debug.sseErrors} sync=${state.debug.syncRuns}/${state.debug.syncFails}",
-                        )
-                    }
-                    state.debug.lastDrop?.let {
-                        SelectionContainer { Text("Last drop: $it") }
-                    }
-                    state.debug.lastStreamError?.let {
-                        SelectionContainer { Text("Last stream error: $it") }
-                    }
-                }
-            }
-        }
+            debug = state.debug,
+        )
 
         Box(modifier = Modifier.weight(1f)) {
             LazyColumn(
@@ -279,36 +212,12 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
             }
         }
 
-        val connected = state.status is ServerState.Connected
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            TextField(
-                value = state.draft,
-                onValueChange = { onEvent(ConversationEvent.DraftChanged(it)) },
-                modifier = Modifier.weight(1f),
-                label = { Text("Message") },
-            )
-            if (connected) {
-                IconButton(
-                    onClick = { onEvent(ConversationEvent.SendTapped) },
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary,
-                    ),
-                    modifier = Modifier.align(Alignment.Bottom),
-                ) {
-                    Icon(Icons.Send, "")
-                }
-            } else {
-                Button(
-                    onClick = { onEvent(ConversationEvent.ReloadTapped) },
-                    modifier = Modifier.align(Alignment.Bottom),
-                ) {
-                    Text("Reload")
-                }
-            }
-        }
+        MessageComposer(
+            draft = state.draft,
+            connected = state.status is ServerState.Connected,
+            onDraftChange = { onEvent(ConversationEvent.DraftChanged(it)) },
+            onSend = { onEvent(ConversationEvent.SendTapped) },
+            onReload = { onEvent(ConversationEvent.ReloadTapped) },
+        )
     }
 }
