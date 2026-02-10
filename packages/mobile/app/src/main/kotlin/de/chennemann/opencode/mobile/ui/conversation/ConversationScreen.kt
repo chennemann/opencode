@@ -43,9 +43,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.ToolCallState
-import de.chennemann.opencode.mobile.icons.Adb
 import de.chennemann.opencode.mobile.icons.ChevronDown
 import de.chennemann.opencode.mobile.icons.ChevronUp
+import de.chennemann.opencode.mobile.icons.DoubleChevronDown
 import de.chennemann.opencode.mobile.icons.Icons
 import de.chennemann.opencode.mobile.ui.components.ConversationHeader
 import de.chennemann.opencode.mobile.ui.components.MessageComposer
@@ -482,7 +482,7 @@ private fun NavigationButtons(
             Icon(Icons.ChevronUp, "Previous message")
         }
         SmallFloatingActionButton(onClick = onNext) {
-            Icon(if (following) Icons.Adb else Icons.ChevronDown, "Follow latest")
+            Icon(if (following) Icons.DoubleChevronDown else Icons.ChevronDown, "Follow latest")
         }
     }
 }
