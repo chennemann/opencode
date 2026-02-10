@@ -11,7 +11,6 @@ import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -37,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import de.chennemann.opencode.mobile.domain.session.ServerState
+import de.chennemann.opencode.mobile.domain.session.ToolCallState
 import de.chennemann.opencode.mobile.icons.ChevronDown
 import de.chennemann.opencode.mobile.icons.ChevronUp
 import de.chennemann.opencode.mobile.icons.Icons
@@ -52,33 +52,16 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
     val scope = rememberCoroutineScope()
     var follow by remember(state.title) { mutableStateOf(true) }
     val offset = if (state.canLoadMoreMessages || state.loadingMoreMessages) 1 else 0
-    val messages = state.focusedMessages.filter {
-        it.role == "user" || it.toolCalls.isNotEmpty() || (it.text.isNotBlank() && it.text != "(streaming...)")
-    }
-    val isTool = { text: String, role: String ->
-        role != "user" && text.startsWith("[") && text.endsWith("]")
-    }
+    val turns = state.turns
     val current = {
         (list.firstVisibleItemIndex - offset)
-            .coerceIn(-1, messages.lastIndex)
+            .coerceIn(-1, turns.lastIndex)
     }
     val previous = {
-        (current() - 1 downTo 0)
-            .firstOrNull { index ->
-                !isTool(
-                    messages[index].text,
-                    messages[index].role,
-                )
-            }
+        (current() - 1).takeIf { it >= 0 }
     }
     val next = {
-        (current() + 1..messages.lastIndex)
-            .firstOrNull { index ->
-                !isTool(
-                    messages[index].text,
-                    messages[index].role,
-                )
-            }
+        (current() + 1).takeIf { it <= turns.lastIndex }
     }
 
     LaunchedEffect(dragging) {
@@ -91,13 +74,15 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
 
     LaunchedEffect(
         state.title,
-        messages.size,
-        messages.lastOrNull()?.text?.length,
+        turns.size,
+        turns.lastOrNull()?.systemTexts?.lastOrNull()?.length,
+        turns.lastOrNull()?.toolCalls?.size,
+        turns.lastOrNull()?.userText?.length,
         follow,
         offset,
     ) {
         if (!follow) return@LaunchedEffect
-        val count = messages.size + offset
+        val count = turns.size + offset
         if (count <= 0) return@LaunchedEffect
         list.scrollToItem(count - 1)
     }
@@ -134,141 +119,42 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                         }
                     }
                 }
-                itemsIndexed(messages, key = { _, it -> it.id }) { index, message ->
-                    val user = message.role == "user"
-                    if (user) {
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            SelectionContainer {
-                                Text(
-                                    message.text,
-                                    modifier = Modifier.padding(12.dp),
-                                )
-                            }
-                        }
-
-                        val nextUser = messages
-                            .subList(index + 1, messages.size)
-                            .indexOfFirst { it.role == "user" }
-                        val end = if (nextUser < 0) {
-                            messages.lastIndex
-                        } else {
-                            index + nextUser
-                        }
-                        val calls = messages
-                            .subList(index + 1, end + 1)
-                            .flatMap { it.toolCalls }
-                        if (calls.isNotEmpty()) {
-                            val open = state.stepOpen[message.id] == true
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 4.dp)
-                                    .animateContentSize(),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { onEvent(ConversationEvent.ToggleSteps(message.id)) }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Icon(
-                                            if (open) Icons.ChevronUp else Icons.ChevronDown,
-                                            "Toggle steps",
-                                        )
-                                        Text(if (open) "Hide steps" else "Show steps")
-                                    }
-                                    Text("${calls.size}")
-                                }
-                                AnimatedVisibility(
-                                    visible = open,
-                                    enter = expandVertically(
-                                        expandFrom = Alignment.Top,
-                                        animationSpec = tween(240),
-                                    ) + fadeIn(animationSpec = tween(180)),
-                                    exit = shrinkVertically(
-                                        shrinkTowards = Alignment.Top,
-                                        animationSpec = tween(240),
-                                    ),
-                                ) {
-                                    Column(
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        calls.forEach { call ->
-                                            ToolCallCard(
-                                                call = call,
-                                                expanded = state.callOpen[call.id] == true,
-                                                onToggle = { onEvent(ConversationEvent.ToggleToolCall(call.id)) },
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        return@itemsIndexed
-                    }
-
-                    val showText = message.text.isNotBlank() && message.text != "(streaming...)"
-                    if (showText) {
-                        SelectionContainer {
-                            Text(
-                                message.text,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
+                itemsIndexed(turns, key = { _, it -> it.id }) { _, turn ->
+                    ConversationTurnItem(
+                        turn = turn,
+                        stepOpen = state.stepOpen[turn.id] == true,
+                        callOpen = state.callOpen,
+                        onToggleSteps = { onEvent(ConversationEvent.ToggleSteps(turn.id)) },
+                        onToggleToolCall = { onEvent(ConversationEvent.ToggleToolCall(it)) },
+                    )
                 }
             }
 
-            Row(
+            NavigationButtons(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(bottom = 8.dp),
-            ) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    SmallFloatingActionButton(
-                        onClick = {
-                            follow = false
-                            val target = previous() ?: return@SmallFloatingActionButton
-                            scope.launch {
-                                list.scrollToItem(target + offset)
-                            }
-                        },
-                    ) {
-                        Icon(Icons.ChevronUp, "Previous message")
+                onPrevious = {
+                    follow = false
+                    val target = previous() ?: return@NavigationButtons
+                    scope.launch {
+                        list.scrollToItem(target + offset)
                     }
-                    SmallFloatingActionButton(
-                        onClick = {
-                            follow = false
-                            scope.launch {
-                                val target = next()
-                                if (target != null) {
-                                    list.scrollToItem(target + offset)
-                                    return@launch
-                                }
-                                val count = messages.size + offset
-                                if (count <= 0) return@launch
-                                list.scrollToItem(count - 1)
-                            }
-                        },
-                    ) {
-                        Icon(Icons.ChevronDown, "Next message")
+                },
+                onNext = {
+                    follow = false
+                    scope.launch {
+                        val target = next()
+                        if (target != null) {
+                            list.scrollToItem(target + offset)
+                            return@launch
+                        }
+                        val count = turns.size + offset
+                        if (count <= 0) return@launch
+                        list.scrollToItem(count - 1)
                     }
-                }
-            }
+                },
+            )
         }
 
         MessageComposer(
@@ -278,5 +164,134 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
             onSend = { onEvent(ConversationEvent.SendTapped) },
             onReload = { onEvent(ConversationEvent.ReloadTapped) },
         )
+    }
+}
+
+@Composable
+private fun ConversationTurnItem(
+    turn: ConversationTurnUiState,
+    stepOpen: Boolean,
+    callOpen: Map<String, Boolean>,
+    onToggleSteps: () -> Unit,
+    onToggleToolCall: (String) -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        turn.userText?.let {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                SelectionContainer {
+                    Text(
+                        it,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+            }
+        }
+
+        if (turn.toolCalls.isNotEmpty()) {
+            ToolCallsSection(
+                count = turn.toolCalls.size,
+                calls = turn.toolCalls,
+                open = stepOpen,
+                callOpen = callOpen,
+                onToggleSteps = onToggleSteps,
+                onToggleToolCall = onToggleToolCall,
+            )
+        }
+
+        turn.systemTexts.forEach {
+            SelectionContainer {
+                Text(
+                    it,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToolCallsSection(
+    count: Int,
+    calls: List<ToolCallState>,
+    open: Boolean,
+    callOpen: Map<String, Boolean>,
+    onToggleSteps: () -> Unit,
+    onToggleToolCall: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        androidx.compose.foundation.layout.Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggleSteps)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.foundation.layout.Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (open) Icons.ChevronUp else Icons.ChevronDown,
+                    "Toggle steps",
+                )
+                Text(if (open) "Hide steps" else "Show steps")
+            }
+            Text("$count")
+        }
+        AnimatedVisibility(
+            visible = open,
+            enter = expandVertically(
+                expandFrom = Alignment.Top,
+                animationSpec = tween(240),
+            ) + fadeIn(animationSpec = tween(180)),
+            exit = shrinkVertically(
+                shrinkTowards = Alignment.Top,
+                animationSpec = tween(240),
+            ),
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                calls.forEach { call ->
+                    ToolCallCard(
+                        call = call,
+                        expanded = callOpen[call.id] == true,
+                        onToggle = { onToggleToolCall(call.id) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NavigationButtons(
+    modifier: Modifier = Modifier,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        SmallFloatingActionButton(onClick = onPrevious) {
+            Icon(Icons.ChevronUp, "Previous message")
+        }
+        SmallFloatingActionButton(onClick = onNext) {
+            Icon(Icons.ChevronDown, "Next message")
+        }
     }
 }
