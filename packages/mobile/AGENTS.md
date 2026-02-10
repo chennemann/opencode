@@ -111,5 +111,17 @@ Changes:
 - Bullet list of what changed
 ```
 
+### 4. Install the app
+
+When a device is connected to the computer:
+
+- build
+- install
+- launch
+
+the application.
+
+---
+
 Once all is done, **stop immediately**.
 Do **not** suggest next steps, and do **not** continue with any additional work.
