@@ -37,7 +37,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import de.chennemann.opencode.mobile.home.ServerState
+import de.chennemann.opencode.mobile.ui.state.ServerState
 import de.chennemann.opencode.mobile.icons.ChevronDown
 import de.chennemann.opencode.mobile.icons.ChevronUp
 import de.chennemann.opencode.mobile.icons.Icons

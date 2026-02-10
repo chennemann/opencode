@@ -1,6 +1,6 @@
 package de.chennemann.opencode.mobile.domain.session
 
-import de.chennemann.opencode.mobile.home.ServerState
+import de.chennemann.opencode.mobile.ui.state.ServerState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 

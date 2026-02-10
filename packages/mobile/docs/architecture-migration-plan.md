@@ -93,6 +93,7 @@ Progress:
 
 - Tool-call sections and cards were reintroduced in conversation UI.
 - Expand/collapse state is managed in `ConversationViewModel` and driven via screen events.
+- Screen-facing state models were moved from `home` package into `ui/state` to align ownership with the UI layer.
 
 ### Phase 5: Navigation event handling
 

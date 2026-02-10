@@ -1,8 +1,8 @@
 package de.chennemann.opencode.mobile.ui.conversation
 
-import de.chennemann.opencode.mobile.home.DebugState
-import de.chennemann.opencode.mobile.home.MessageState
-import de.chennemann.opencode.mobile.home.ServerState
+import de.chennemann.opencode.mobile.ui.state.DebugState
+import de.chennemann.opencode.mobile.ui.state.MessageState
+import de.chennemann.opencode.mobile.ui.state.ServerState
 
 data class ConversationUiState(
     val title: String,

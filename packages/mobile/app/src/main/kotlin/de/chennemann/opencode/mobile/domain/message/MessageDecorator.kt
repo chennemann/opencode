@@ -1,7 +1,7 @@
 package de.chennemann.opencode.mobile.domain.message
 
-import de.chennemann.opencode.mobile.home.MessageState
-import de.chennemann.opencode.mobile.home.ToolCallState
+import de.chennemann.opencode.mobile.ui.state.MessageState
+import de.chennemann.opencode.mobile.ui.state.ToolCallState
 
 class MessageDecorator {
     fun render(parts: Collection<MessagePart>?): String {
