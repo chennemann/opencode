@@ -18,6 +18,7 @@ class ConversationViewModel(
     private val service: SessionService,
 ) : ViewModel() {
     private data class LocalState(
+        val scroll: Long = 0,
         val draft: String = "",
         val stepOpen: Map<String, Boolean> = emptyMap(),
         val callOpen: Map<String, Boolean> = emptyMap(),
@@ -35,6 +36,7 @@ class ConversationViewModel(
             focusedMessages = global.focusedMessages,
             canLoadMoreMessages = global.canLoadMoreMessages,
             loadingMoreMessages = global.loadingMoreMessages,
+            scroll = local.scroll,
             draft = local.draft,
             stepOpen = local.stepOpen,
             callOpen = local.callOpen,
@@ -48,6 +50,7 @@ class ConversationViewModel(
             focusedMessages = emptyList(),
             canLoadMoreMessages = false,
             loadingMoreMessages = false,
+            scroll = 0,
             draft = "",
             stepOpen = emptyMap(),
             callOpen = emptyMap(),
@@ -88,7 +91,7 @@ class ConversationViewModel(
                 val value = local.value.draft
                 service.send(value)
                 if (value.isNotBlank()) {
-                    local.update { it.copy(draft = "") }
+                    local.update { it.copy(draft = "", scroll = it.scroll + 1) }
                 }
             }
 
