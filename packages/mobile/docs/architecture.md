@@ -34,6 +34,7 @@ Key collaborators:
 - `SessionEventReducer` for stream payload classification
 - `SessionStreamCoordinator` for stream connection/retry loop and callback dispatch
 - `FocusedMessageProjector` for focused message projection/decorating
+- `SessionSyncPlanner` for deterministic sort/upsert/remove planning during remote sync
 - `PassCounter` for optimistic/reconcile pass tracking
 - `SyncCoordinator` for scheduled sync and active-run guard
 - `SessionResolver` for session resolve cooldown and deduplicated resolve attempts

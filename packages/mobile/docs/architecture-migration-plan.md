@@ -82,6 +82,7 @@ Progress:
 - Sync job scheduling/active-guard behavior was extracted into `SyncCoordinator` to shrink orchestration internals.
 - Stream connection/retry loop was extracted into `SessionStreamCoordinator` with dedicated unit coverage.
 - Session resolve cooldown bookkeeping was extracted into `SessionResolver` with dedicated unit coverage.
+- Remote message diff/upsert/remove planning was extracted into `SessionSyncPlanner` with dedicated unit coverage.
 
 ### Phase 3: Data/domain contracts
 
