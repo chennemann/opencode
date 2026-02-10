@@ -7,7 +7,7 @@ import de.chennemann.opencode.mobile.domain.session.SessionMessage
 import de.chennemann.opencode.mobile.domain.session.SessionProject
 import de.chennemann.opencode.mobile.domain.session.SessionStreamEvent
 import de.chennemann.opencode.mobile.domain.session.SessionSummary
-import de.chennemann.opencode.mobile.ui.state.ServerState
+import de.chennemann.opencode.mobile.domain.session.ConnectionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,11 +22,11 @@ class ServerRepository(
     private val service: ServerService,
     private val network: NetworkService,
 ) : SessionGateway {
-    private val state = MutableStateFlow<ServerState>(ServerState.Idle)
+    private val state = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     private val url = MutableStateFlow(DefaultUrl)
     private val discovered = MutableStateFlow<String?>(null)
 
-    override val status: StateFlow<ServerState> = state.asStateFlow()
+    override val status: StateFlow<ConnectionState> = state.asStateFlow()
     override val endpoint: StateFlow<String> = url.asStateFlow()
     override val found: StateFlow<String?> = discovered.asStateFlow()
 
@@ -55,17 +55,17 @@ class ServerRepository(
 
     override suspend fun refresh(loading: Boolean) {
         val endpoint = url.value
-        if (loading) state.value = ServerState.Loading
+        if (loading) state.value = ConnectionState.Loading
         val result = runCatching { service.health(endpoint) }
         result.exceptionOrNull()?.let {
             Log.e("ServerRepository", "health failed for $endpoint", it)
         }
         state.value = result.fold(
             onSuccess = {
-                if (it.healthy) ServerState.Connected(it.version)
-                else ServerState.Failed("Server is unhealthy")
+                if (it.healthy) ConnectionState.Connected(it.version)
+                else ConnectionState.Failed("Server is unhealthy")
             },
-            onFailure = { ServerState.Failed(it.message ?: "Connection failed") },
+            onFailure = { ConnectionState.Failed(it.message ?: "Connection failed") },
         )
     }
 

@@ -1,11 +1,10 @@
 package de.chennemann.opencode.mobile.domain.session
 
-import de.chennemann.opencode.mobile.ui.state.ServerState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
 interface SessionGateway {
-    val status: StateFlow<ServerState>
+    val status: StateFlow<ConnectionState>
     val endpoint: StateFlow<String>
     val found: StateFlow<String?>
 
