@@ -8,12 +8,33 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+    primary = Color(0xFFBFE13B),
+    onPrimary = Color(0xFF1A2400),
+    primaryContainer = Color(0xFF2D3D00),
+    onPrimaryContainer = Color(0xFFE8FF9A),
+    secondary = Color(0xFFA0CC5B),
+    onSecondary = Color(0xFF172900),
+    secondaryContainer = Color(0xFF223B00),
+    onSecondaryContainer = Color(0xFFD5F3A0),
+    tertiary = Color(0xFF7FCF9E),
+    onTertiary = Color(0xFF003921),
+    tertiaryContainer = Color(0xFF1F5032),
+    onTertiaryContainer = Color(0xFFABF7C1),
+    background = Color(0xFF000000),
+    onBackground = Color(0xFFEAEAEA),
+    surface = Color(0xFF000000),
+    onSurface = Color(0xFFEAEAEA),
+    surfaceVariant = Color(0xFF171A20),
+    onSurfaceVariant = Color(0xFFC1C7D0),
+    outline = Color(0xFF8B9199),
+    error = Color(0xFFFFB4AB),
+    onError = Color(0xFF690005),
+    errorContainer = Color(0xFF93000A),
+    onErrorContainer = Color(0xFFFFDAD6),
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -36,7 +57,7 @@ private val LightColorScheme = lightColorScheme(
 fun MobileTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
