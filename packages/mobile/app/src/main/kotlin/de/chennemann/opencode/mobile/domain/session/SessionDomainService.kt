@@ -70,8 +70,7 @@ class SessionDomainService(
     private val sessionProject = linkedMapOf<String, String?>()
     private val part = linkedMapOf<String, LinkedHashMap<String, MessagePart>>()
     private val role = linkedMapOf<String, String>()
-    private val pending = linkedMapOf<String, MutableList<MessageState>>()
-    private val pendingPass = PassCounter()
+    private val pending = PendingBuffer()
     private val retainPass = PassCounter()
     private val stickySort = linkedMapOf<String, MutableMap<String, String>>()
     private val order = linkedMapOf<String, String>()
@@ -243,15 +242,16 @@ class SessionDomainService(
         }
         val id = "local-${System.currentTimeMillis()}"
         val sort = sequence()
-        pending.getOrPut(key) { mutableListOf() }.add(
+        pending.add(
+            key,
             MessageState(
                 id = id,
                 role = "user",
                 text = value,
                 sort = sort,
-            )
+            ),
+            OptimisticKeepPasses,
         )
-        pendingPass.set(key, id, OptimisticKeepPasses)
         local.value = local.value.copy(
             focusedMessages = local.value.focusedMessages + MessageState(
                 id = id,
@@ -268,8 +268,7 @@ class SessionDomainService(
                 scheduleSync(focused.id)
             }
             result.onFailure {
-                pending[key]?.removeAll { it.id == id }
-                pendingPass.remove(key, id)
+                pending.remove(key, id)
                 if (focusedKey == key) observeFocused()
                 local.value = local.value.copy(message = it.message ?: "Failed to send message")
             }
@@ -559,18 +558,8 @@ class SessionDomainService(
         }
         val message = messageKey(key, action.messageId)
         if (action.role == "user") {
-            pending[key]?.let {
-                if (it.isNotEmpty()) {
-                    val index = if (action.text.isNullOrBlank()) {
-                        0
-                    } else {
-                        it.indexOfFirst { pending -> pending.text.trim() == action.text }
-                            .let { found -> if (found >= 0) found else 0 }
-                    }
-                    val removed = it.removeAt(index)
-                    pendingPass.remove(key, removed.id)
-                    stickySort.getOrPut(key) { linkedMapOf() }[action.messageId] = removed.sort
-                }
+            pending.claim(key, action.text ?: "")?.let {
+                stickySort.getOrPut(key) { linkedMapOf() }[action.messageId] = it.sort
             }
         }
         role[message] = action.role
@@ -793,7 +782,7 @@ class SessionDomainService(
     private fun publishFocused(key: String) {
         if (focusedKey != key) return
         local.value = local.value.copy(
-            focusedMessages = projector.project(key, focusedDb, overlay, pending[key], part),
+            focusedMessages = projector.project(key, focusedDb, overlay, pending.list(key), part),
         )
     }
 
@@ -810,43 +799,11 @@ class SessionDomainService(
     }
 
     private fun claimPendingSort(key: String, text: String): String? {
-        val list = pending[key] ?: return null
-        if (list.isEmpty()) return null
-
-        val target = text.trim()
-        val index = if (target.isBlank()) {
-            0
-        } else {
-            list.indexOfFirst { it.text.trim() == target }
-                .let { found -> if (found >= 0) found else if (list.size == 1) 0 else -1 }
-        }
-        if (index < 0) return null
-
-        val removed = list.removeAt(index)
-        pendingPass.remove(key, removed.id)
-        if (list.isEmpty()) {
-            pending.remove(key)
-            pendingPass.clear(key)
-        }
-        return removed.sort
+        return pending.claim(key, text)?.sort
     }
 
     private fun trimPending(key: String) {
-        val list = pending[key] ?: return
-        if (list.isEmpty()) return
-
-        val filtered = list.filter { pendingPass.consume(key, it.id) }
-        if (filtered.isEmpty()) {
-            pending.remove(key)
-            pendingPass.clear(key)
-            if (focusedKey == key) {
-                observeFocused()
-            }
-            return
-        }
-
-        if (filtered.size != list.size) {
-            pending[key] = filtered.toMutableList()
+        if (pending.trim(key)) {
             if (focusedKey == key) {
                 observeFocused()
             }
@@ -859,8 +816,7 @@ class SessionDomainService(
         val server = key.substringBefore("::")
         active.remove(key)
         sessionProject.remove(key)
-        pending.remove(key)
-        pendingPass.clear(key)
+        pending.clear(key)
         retainPass.clear(key)
         stickySort.remove(key)
         order.keys
