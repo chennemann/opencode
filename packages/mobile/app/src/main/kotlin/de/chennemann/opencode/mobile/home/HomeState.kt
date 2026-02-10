@@ -18,6 +18,14 @@ data class MessageState(
     val role: String,
     val text: String,
     val sort: String,
+    val toolCalls: List<ToolCallState> = emptyList(),
+)
+
+data class ToolCallState(
+    val id: String,
+    val title: String,
+    val status: String? = null,
+    val details: List<String>,
 )
 
 data class DebugState(
