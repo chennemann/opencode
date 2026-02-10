@@ -2,12 +2,14 @@ package de.chennemann.opencode.mobile.di
 
 import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
+import de.chennemann.opencode.mobile.data.SessionCacheRepository
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
 import de.chennemann.opencode.mobile.domain.session.ConnectivityGateway
 import de.chennemann.opencode.mobile.domain.session.ConnectionGateway
 import de.chennemann.opencode.mobile.domain.session.MessageGateway
 import de.chennemann.opencode.mobile.domain.session.ProjectGateway
+import de.chennemann.opencode.mobile.domain.session.SessionCacheGateway
 import de.chennemann.opencode.mobile.domain.session.SessionDomainService
 import de.chennemann.opencode.mobile.domain.session.SessionEventReducer
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
@@ -52,10 +54,12 @@ val appModule = module {
     single<ConnectivityGateway> { get<NetworkService>() }
     single { ServerService(get(), get()) }
     single { ServerRepository(get(), get(), get(), get()) }
+    single { SessionCacheRepository(get()) }
     single<ConnectionGateway> { get<ServerRepository>() }
     single<ProjectGateway> { get<ServerRepository>() }
     single<MessageGateway> { get<ServerRepository>() }
     single<StreamGateway> { get<ServerRepository>() }
+    single<SessionCacheGateway> { get<SessionCacheRepository>() }
     single { MessagePartParser() }
     single { MessageDecorator() }
     single { SessionEventReducer() }

@@ -1,9 +1,6 @@
 package de.chennemann.opencode.mobile.domain.session
 
 import android.util.Log
-import app.cash.sqldelight.coroutines.asFlow
-import app.cash.sqldelight.coroutines.mapToList
-import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePart
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
@@ -28,7 +25,7 @@ class SessionDomainService(
     private val proj: ProjectGateway,
     private val msg: MessageGateway,
     private val feed: StreamGateway,
-    private val db: AppDatabase,
+    private val cache: SessionCacheGateway,
     private val net: ConnectivityGateway,
     private val parser: MessagePartParser,
     private val decorator: MessageDecorator,
@@ -330,17 +327,9 @@ class SessionDomainService(
             canLoadMoreMessages = false,
             loadingMoreMessages = false,
         )
-        val now = System.currentTimeMillis()
-        db.appDatabaseQueries.upsertSessionCache(
-            server,
-            session.id,
-            sessionProject[key],
-            session.directory,
-            session.title,
-            session.version,
-            now,
-            now,
-        )
+        scope?.launch {
+            cache.upsertSession(server, sessionProject[key], session)
+        }
         observeFocused()
         syncRemote(session)
     }
@@ -373,18 +362,7 @@ class SessionDomainService(
                 val nextIds = next
                     .map { it.id }
                     .toHashSet()
-                val cached = withContext(Dispatchers.IO) {
-                    db.appDatabaseQueries
-                        .listMessageCache(server, session.id) { _, _, messageId, messageRole, messageText, sortKey, _ ->
-                            MessageState(
-                                id = messageId,
-                                role = messageRole,
-                                text = messageText,
-                                sort = sortKey,
-                            )
-                        }
-                        .executeAsList()
-                }
+                val cached = withContext(Dispatchers.IO) { cache.listMessages(server, session.id) }
                 val cachedMap = cached.associateBy { it.id }
                 val sticky = stickySort[key]
                 var claimed = false
@@ -433,13 +411,15 @@ class SessionDomainService(
 
                 withContext(Dispatchers.IO) {
                     upserts.forEach {
-                        db.appDatabaseQueries.upsertMessageCache(
+                        cache.upsertMessage(
                             server,
                             session.id,
-                            it[0],
-                            it[1],
-                            it[2],
-                            it[3],
+                            MessageState(
+                                id = it[0],
+                                role = it[1],
+                                text = it[2],
+                                sort = it[3],
+                            ),
                             now,
                         )
                     }
@@ -457,7 +437,7 @@ class SessionDomainService(
                     }
                     withContext(Dispatchers.IO) {
                         removed.forEach {
-                            db.appDatabaseQueries.deleteMessageCache(server, session.id, it)
+                            cache.deleteMessage(server, session.id, it)
                         }
                     }
                 }
@@ -513,28 +493,15 @@ class SessionDomainService(
     }
 
     private fun hydrateLast() {
-        val recent = db.appDatabaseQueries.selectRecentSessionCache(
-            mapper = { serverUrl, sessionId, projectId, directory, title, version, _, _ ->
-                Triple(
-                    serverUrl,
-                    projectId,
-                    SessionState(
-                        id = sessionId,
-                        title = title,
-                        version = version,
-                        directory = directory,
-                    ),
-                )
-            }
-        ).executeAsOneOrNull() ?: return
+        val recent = runCatching { cache.recentSession() }.getOrNull() ?: return
         val scope = scope ?: return
         scope.launch {
             manual = true
-            input.value = recent.first
-            conn.setUrl(recent.first)
+            input.value = recent.server
+            conn.setUrl(recent.server)
             conn.refresh(false)
             manual = false
-            focusSession(recent.third, recent.second)
+            focusSession(recent.session, recent.project)
         }
     }
 
@@ -707,7 +674,7 @@ class SessionDomainService(
         }
         val server = key.substringBefore("::")
         withContext(Dispatchers.IO) {
-            db.appDatabaseQueries.deleteMessageCache(server, action.sessionId, action.messageId)
+            cache.deleteMessage(server, action.sessionId, action.messageId)
         }
         role.remove(messageKey(key, action.messageId))
         part.remove(messageKey(key, action.messageId))
@@ -865,13 +832,10 @@ class SessionDomainService(
         withContext(Dispatchers.IO) {
             staged.forEach {
                 val message = overlay[it] ?: return@forEach
-                db.appDatabaseQueries.upsertMessageCache(
+                cache.upsertMessage(
                     server,
                     sessionId,
-                    message.id,
-                    message.role,
-                    message.text,
-                    message.sort,
+                    message,
                     now,
                 )
             }
@@ -895,17 +859,7 @@ class SessionDomainService(
         val server = key.substringBefore("::")
         val session = key.substringAfter("::")
         observe = (scope ?: return).launch {
-            db.appDatabaseQueries
-                .listMessageCache(server, session) { _, _, messageId, role, text, sortKey, _ ->
-                    MessageState(
-                        id = messageId,
-                        role = role,
-                        text = text,
-                        sort = sortKey,
-                    )
-                }
-                .asFlow()
-                .mapToList(Dispatchers.IO)
+            cache.observeMessages(server, session)
                 .collect {
                     it.forEach { message ->
                         order[messageKey(key, message.id)] = message.sort
@@ -1042,7 +996,9 @@ class SessionDomainService(
         clearOverlay(key)
         flush.remove(key)?.cancel()
         messageLimit.remove(key)
-        db.appDatabaseQueries.deleteMessageCacheSession(server, sessionId)
+        scope?.launch(Dispatchers.IO) {
+            cache.deleteSessionMessages(server, sessionId)
+        }
         if (focusedKey == key) {
             focusedKey = active.keys.firstOrNull()
             local.value = local.value.copy(
