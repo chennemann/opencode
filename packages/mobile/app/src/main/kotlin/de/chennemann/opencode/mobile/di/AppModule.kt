@@ -4,9 +4,12 @@ import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
+import de.chennemann.opencode.mobile.domain.session.ConnectionGateway
+import de.chennemann.opencode.mobile.domain.session.MessageGateway
+import de.chennemann.opencode.mobile.domain.session.ProjectGateway
 import de.chennemann.opencode.mobile.domain.session.SessionDomainService
 import de.chennemann.opencode.mobile.domain.session.SessionEventReducer
-import de.chennemann.opencode.mobile.domain.session.SessionGateway
+import de.chennemann.opencode.mobile.domain.session.StreamGateway
 import de.chennemann.opencode.mobile.ui.conversation.ConversationViewModel
 import de.chennemann.opencode.mobile.data.MdnsService
 import de.chennemann.opencode.mobile.data.NetworkService
@@ -46,11 +49,15 @@ val appModule = module {
     single { MdnsService(get()) }
     single { NetworkService(get()) }
     single { ServerService(get(), get()) }
-    single<SessionGateway> { ServerRepository(get(), get(), get(), get()) }
+    single { ServerRepository(get(), get(), get(), get()) }
+    single<ConnectionGateway> { get<ServerRepository>() }
+    single<ProjectGateway> { get<ServerRepository>() }
+    single<MessageGateway> { get<ServerRepository>() }
+    single<StreamGateway> { get<ServerRepository>() }
     single { MessagePartParser() }
     single { MessageDecorator() }
     single { SessionEventReducer() }
-    single { SessionDomainService(get(), get(), get(), get(), get(), get()) }
+    single { SessionDomainService(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { ConversationViewModel(get()) }
     viewModel { ManageViewModel(get()) }
 }

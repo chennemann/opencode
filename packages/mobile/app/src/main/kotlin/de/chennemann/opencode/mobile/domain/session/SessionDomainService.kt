@@ -25,7 +25,10 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 
 class SessionDomainService(
-    private val repo: SessionGateway,
+    private val conn: ConnectionGateway,
+    private val proj: ProjectGateway,
+    private val msg: MessageGateway,
+    private val feed: StreamGateway,
     private val db: AppDatabase,
     private val network: NetworkService,
     private val parser: MessagePartParser,
@@ -46,12 +49,12 @@ class SessionDomainService(
         val message: String? = null,
     )
 
-    private val input = MutableStateFlow(repo.endpoint.value)
+    private val input = MutableStateFlow(conn.endpoint.value)
     private val local = MutableStateFlow(LocalState())
     private val debug = MutableStateFlow(DebugState())
     private val output = MutableStateFlow(
         HomeState(
-            url = repo.endpoint.value,
+            url = conn.endpoint.value,
             discovered = null,
             status = ServerState.Idle,
             projects = emptyList(),
@@ -111,9 +114,9 @@ class SessionDomainService(
         if (started) return
         started = true
         this.scope = scope
-        repo.start(scope)
+        conn.start(scope)
         scope.launch {
-            combine(input, repo.found, repo.status, local, debug) { url, discovered, status, local, debug ->
+            combine(input, conn.found, conn.status, local, debug) { url, discovered, status, local, debug ->
                 HomeState(
                     url = url,
                     discovered = discovered,
@@ -136,7 +139,7 @@ class SessionDomainService(
             }
         }
         scope.launch {
-            repo.endpoint.collect {
+            conn.endpoint.collect {
                 if (manual) return@collect
                 input.value = it
             }
@@ -163,7 +166,7 @@ class SessionDomainService(
     }
 
     fun useDiscovered() {
-        val value = repo.found.value ?: return
+        val value = conn.found.value ?: return
         manual = true
         input.value = value
     }
@@ -171,8 +174,8 @@ class SessionDomainService(
     fun refresh() {
         val scope = scope ?: return
         scope.launch {
-            repo.setUrl(input.value)
-            repo.refresh()
+            conn.setUrl(input.value)
+            conn.refresh()
         }
     }
 
@@ -180,7 +183,7 @@ class SessionDomainService(
         val scope = scope ?: return
         scope.launch {
             local.value = local.value.copy(loadingProjects = true, message = null)
-            val result = runCatching { repo.projects() }
+            val result = runCatching { proj.projects() }
             local.value = local.value.copy(loadingProjects = false)
             result.onSuccess { list ->
                 val projects = list
@@ -223,7 +226,7 @@ class SessionDomainService(
         val scope = scope ?: return
         scope.launch {
             local.value = local.value.copy(loadingSessions = true, message = null)
-            val result = runCatching { repo.createSession(worktree, "Mobile session") }
+            val result = runCatching { proj.createSession(worktree, "Mobile session") }
             local.value = local.value.copy(loadingSessions = false)
             result.onSuccess {
                 val session = SessionState(
@@ -250,7 +253,7 @@ class SessionDomainService(
         if (value.isBlank()) return
         val scope = scope ?: return
         val focused = local.value.focusedSession ?: return
-        val key = focusedKey ?: keyForSession(focused.id) ?: key(repo.endpoint.value, focused.id)
+        val key = focusedKey ?: keyForSession(focused.id) ?: key(conn.endpoint.value, focused.id)
         if (active[key] == null) {
             active[key] = focused
             focusedKey = key
@@ -276,7 +279,7 @@ class SessionDomainService(
         )
         scope.launch {
             val result = runCatching {
-                repo.sendMessage(focused.id, focused.directory, value)
+                msg.sendMessage(focused.id, focused.directory, value)
             }
             result.onSuccess {
                 scheduleSync(focused.id)
@@ -308,7 +311,7 @@ class SessionDomainService(
     }
 
     private fun focusSession(session: SessionState, project: String?) {
-        val server = if (manual) input.value else repo.endpoint.value
+        val server = if (manual) input.value else conn.endpoint.value
         val key = key(server, session.id)
         val previous = focusedKey
         if (previous != null && previous != key) {
@@ -344,7 +347,7 @@ class SessionDomainService(
     }
 
     private fun syncRemote(session: SessionState, more: Boolean = false) {
-        if (repo.status.value !is ConnectionState.Connected) return
+        if (conn.status.value !is ConnectionState.Connected) return
         val scope = scope ?: return
         scope.launch(Dispatchers.Default) {
             if (!beginSync(session.id)) return@launch
@@ -357,7 +360,7 @@ class SessionDomainService(
             }
             val key = keyForSession(session.id)
             val limit = key?.let { messageLimit[it] } ?: MessageSyncLimit
-            val result = runCatching { repo.messages(session.id, session.directory, limit) }
+            val result = runCatching { msg.messages(session.id, session.directory, limit) }
             if (more) {
                 local.value = local.value.copy(loadingMoreMessages = false)
             }
@@ -488,7 +491,7 @@ class SessionDomainService(
         val scope = scope ?: return
         scope.launch {
             local.value = local.value.copy(loadingSessions = true, message = null)
-            val result = runCatching { repo.sessions(worktree) }
+            val result = runCatching { proj.sessions(worktree) }
             local.value = local.value.copy(loadingSessions = false)
             result.onSuccess { list ->
                 local.value = local.value.copy(
@@ -529,8 +532,8 @@ class SessionDomainService(
         scope.launch {
             manual = true
             input.value = recent.first
-            repo.setUrl(recent.first)
-            repo.refresh(false)
+            conn.setUrl(recent.first)
+            conn.refresh(false)
             manual = false
             focusSession(recent.third, recent.second)
         }
@@ -540,15 +543,15 @@ class SessionDomainService(
         stream?.cancel()
         stream = scope.launch {
             var attempt = 0
-            var cursor = runCatching { repo.streamCursor() }.getOrNull()
+            var cursor = runCatching { feed.streamCursor() }.getOrNull()
             while (isActive) {
-                val endpoint = repo.endpoint.value
+                val endpoint = conn.endpoint.value
                 Log.d(LogTag, "sse connect attempt=${attempt + 1} endpoint=$endpoint cursor=$cursor")
                 pushSseLog("connect attempt=${attempt + 1} endpoint=$endpoint cursor=$cursor")
                 val result = runCatching {
                     sseConnected += 1
                     debug.value = debug.value.copy(sseConnected = sseConnected, lastStreamError = null)
-                    repo.streamEvents(cursor, { chunk ->
+                    feed.streamEvents(cursor, { chunk ->
                         sseRaw += 1
                         debug.value = debug.value.copy(sseRaw = sseRaw)
                         pushSseLog("raw ${chunk.replace("\n", "\\n")}")
@@ -559,7 +562,7 @@ class SessionDomainService(
                         )
                         if (!event.id.isNullOrBlank()) {
                             cursor = event.id
-                            runCatching { repo.setStreamCursor(cursor) }
+                            runCatching { feed.setStreamCursor(cursor) }
                         }
                         onEvent(event)
                     }
@@ -812,7 +815,7 @@ class SessionDomainService(
                 local.value.selectedProject
             }
             if (worktree.isNullOrBlank()) return@launch
-            val result = runCatching { repo.sessions(worktree) }
+            val result = runCatching { proj.sessions(worktree) }
             result.onFailure {
                 pushSseLog("resolve session failed id=$sessionId reason=${it.message}")
             }
@@ -1127,6 +1130,6 @@ private const val MessageSyncLimit = 400
 private const val ReconcileIntervalMs = 10000L
 private const val ReconcileKeepPasses = 1
 private const val OptimisticKeepPasses = 1
-private const val LogTag = "SessionService"
+private const val LogTag = "SessionDomainService"
 private const val SseLogLimit = 300
 private const val SessionResolveCooldownMs = 5000L
