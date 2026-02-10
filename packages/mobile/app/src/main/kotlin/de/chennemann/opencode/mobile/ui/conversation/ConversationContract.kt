@@ -1,12 +1,19 @@
 package de.chennemann.opencode.mobile.ui.conversation
 
-import de.chennemann.opencode.mobile.domain.session.MessageState
 import de.chennemann.opencode.mobile.domain.session.ServerState
+import de.chennemann.opencode.mobile.domain.session.ToolCallState
+
+data class ConversationTurnUiState(
+    val id: String,
+    val userText: String?,
+    val toolCalls: List<ToolCallState>,
+    val systemTexts: List<String>,
+)
 
 data class ConversationUiState(
     val title: String,
     val status: ServerState,
-    val focusedMessages: List<MessageState>,
+    val turns: List<ConversationTurnUiState>,
     val canLoadMoreMessages: Boolean,
     val loadingMoreMessages: Boolean,
     val scroll: Long,
