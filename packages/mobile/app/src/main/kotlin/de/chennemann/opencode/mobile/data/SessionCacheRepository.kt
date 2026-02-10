@@ -46,12 +46,14 @@ class SessionCacheRepository(
 
     override suspend fun listMessages(server: String, sessionId: String): List<MessageState> {
         return db.appDatabaseQueries
-            .listMessageCache(server, sessionId) { _, _, messageId, role, text, sortKey, _ ->
+            .listMessageCache(server, sessionId) { _, _, messageId, role, text, sortKey, createdAt, completedAt, _ ->
                 MessageState(
                     id = messageId,
                     role = role,
                     text = text,
                     sort = sortKey,
+                    createdAt = createdAt,
+                    completedAt = completedAt,
                 )
             }
             .executeAsList()
@@ -59,12 +61,14 @@ class SessionCacheRepository(
 
     override fun observeMessages(server: String, sessionId: String): Flow<List<MessageState>> {
         return db.appDatabaseQueries
-            .listMessageCache(server, sessionId) { _, _, messageId, role, text, sortKey, _ ->
+            .listMessageCache(server, sessionId) { _, _, messageId, role, text, sortKey, createdAt, completedAt, _ ->
                 MessageState(
                     id = messageId,
                     role = role,
                     text = text,
                     sort = sortKey,
+                    createdAt = createdAt,
+                    completedAt = completedAt,
                 )
             }
             .asFlow()
@@ -79,6 +83,8 @@ class SessionCacheRepository(
             message.role,
             message.text,
             message.sort,
+            message.createdAt,
+            message.completedAt,
             updatedAt,
         )
     }

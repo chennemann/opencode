@@ -3,6 +3,7 @@ package de.chennemann.opencode.mobile.domain.message
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -21,6 +22,17 @@ class MessagePartParserTest {
                 put("status", "completed")
                 put("title", "Run command")
                 put("output", "ok")
+                put("input", buildJsonObject {
+                    put("description", "Run tests")
+                    put("command", "./gradlew test")
+                })
+                put("metadata", buildJsonObject {
+                    put("command", "./gradlew test")
+                })
+                put("time", buildJsonObject {
+                    put("start", 123)
+                    put("end", 456)
+                })
             })
         }
 
@@ -32,6 +44,10 @@ class MessagePartParserTest {
         assertEquals("completed", value?.status)
         assertEquals("Run command", value?.title)
         assertEquals("ok", value?.output)
+        assertEquals("Run tests", value?.input?.get("description")?.jsonPrimitive?.content)
+        assertEquals("./gradlew test", value?.metadata?.get("command")?.jsonPrimitive?.content)
+        assertEquals(123L, value?.startedAt)
+        assertEquals(456L, value?.completedAt)
     }
 
     @Test

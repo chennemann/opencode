@@ -36,6 +36,10 @@ class SessionEventReducerTest {
                     put("id", "m1")
                     put("role", "assistant")
                     put("text", "hi")
+                    put("time", buildJsonObject {
+                        put("created", 100)
+                        put("completed", 200)
+                    })
                 })
             },
             id = null,
@@ -50,6 +54,8 @@ class SessionEventReducerTest {
         assertEquals("m1", value.messageId)
         assertEquals("assistant", value.role)
         assertEquals("hi", value.text)
+        assertEquals(100L, value.createdAt)
+        assertEquals(200L, value.completedAt)
     }
 
     @Test

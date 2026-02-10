@@ -8,6 +8,8 @@ data class ConversationTurnUiState(
     val userText: String?,
     val toolCalls: List<ToolCallState>,
     val systemTexts: List<String>,
+    val startedAt: Long? = null,
+    val completedAt: Long? = null,
 )
 
 data class ConversationUiState(

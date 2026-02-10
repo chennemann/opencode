@@ -92,4 +92,17 @@ class ConversationRenderMapperTest {
         assertEquals(listOf("t1", "t2"), value[0].toolCalls.map { it.id })
         assertEquals("u2", value[1].id)
     }
+
+    @Test
+    fun mapsTurnTimestamps() {
+        val messages = listOf(
+            MessageState(id = "u1", role = "user", text = "Question", sort = "1", createdAt = 1_000L),
+            MessageState(id = "a1", role = "assistant", text = "Done", sort = "2", completedAt = 7_000L),
+        )
+
+        val value = mapper.map(messages)
+
+        assertEquals(1_000L, value.single().startedAt)
+        assertEquals(7_000L, value.single().completedAt)
+    }
 }

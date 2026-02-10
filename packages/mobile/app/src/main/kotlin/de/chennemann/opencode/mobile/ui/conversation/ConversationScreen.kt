@@ -43,6 +43,7 @@ import de.chennemann.opencode.mobile.icons.Icons
 import de.chennemann.opencode.mobile.ui.components.ConversationHeader
 import de.chennemann.opencode.mobile.ui.components.MessageComposer
 import de.chennemann.opencode.mobile.ui.components.ToolCallCard
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -119,9 +120,10 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                         }
                     }
                 }
-                itemsIndexed(turns, key = { _, it -> it.id }) { _, turn ->
+                itemsIndexed(turns, key = { _, it -> it.id }) { index, turn ->
                     ConversationTurnItem(
                         turn = turn,
+                        active = index == turns.lastIndex,
                         stepOpen = state.stepOpen[turn.id] == true,
                         callOpen = state.callOpen,
                         onToggleSteps = { onEvent(ConversationEvent.ToggleSteps(turn.id)) },
@@ -170,6 +172,7 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
 @Composable
 private fun ConversationTurnItem(
     turn: ConversationTurnUiState,
+    active: Boolean,
     stepOpen: Boolean,
     callOpen: Map<String, Boolean>,
     onToggleSteps: () -> Unit,
@@ -198,6 +201,9 @@ private fun ConversationTurnItem(
             ToolCallsSection(
                 count = turn.toolCalls.size,
                 calls = turn.toolCalls,
+                startedAt = turn.startedAt,
+                completedAt = turn.completedAt,
+                active = active,
                 open = stepOpen,
                 callOpen = callOpen,
                 onToggleSteps = onToggleSteps,
@@ -220,11 +226,15 @@ private fun ConversationTurnItem(
 private fun ToolCallsSection(
     count: Int,
     calls: List<ToolCallState>,
+    startedAt: Long?,
+    completedAt: Long?,
+    active: Boolean,
     open: Boolean,
     callOpen: Map<String, Boolean>,
     onToggleSteps: () -> Unit,
     onToggleToolCall: (String) -> Unit,
 ) {
+    val duration = rememberTurnDuration(startedAt, completedAt, active)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -247,7 +257,13 @@ private fun ToolCallsSection(
                     if (open) Icons.ChevronUp else Icons.ChevronDown,
                     "Toggle steps",
                 )
-                Text(if (open) "Hide steps" else "Show steps")
+                Text(
+                    if (duration == null) {
+                        if (open) "Hide steps" else "Show steps"
+                    } else {
+                        if (open) "Hide steps - $duration" else "Show steps - $duration"
+                    }
+                )
             }
             Text("$count")
         }
@@ -275,6 +291,37 @@ private fun ToolCallsSection(
             }
         }
     }
+}
+
+@Composable
+private fun rememberTurnDuration(startedAt: Long?, completedAt: Long?, active: Boolean): String? {
+    if (startedAt == null) return null
+    if (completedAt != null) {
+        return formatTurnDuration(startedAt, completedAt)
+    }
+    if (!active) return null
+    var now by remember(startedAt, completedAt, active) { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(startedAt, completedAt, active) {
+        while (active) {
+            delay(1000)
+            now = System.currentTimeMillis()
+        }
+    }
+    return formatTurnDuration(startedAt, now)
+}
+
+private fun formatTurnDuration(startedAt: Long, completedAt: Long): String {
+    val totalSeconds = ((completedAt - startedAt).coerceAtLeast(0L) / 1000L)
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    if (hours > 0) {
+        return "${hours}h ${minutes.toString().padStart(2, '0')}m"
+    }
+    if (minutes > 0) {
+        return "${minutes}m ${seconds.toString().padStart(2, '0')}s"
+    }
+    return "${seconds}s"
 }
 
 @Composable

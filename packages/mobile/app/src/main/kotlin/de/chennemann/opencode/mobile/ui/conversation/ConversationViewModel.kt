@@ -2,22 +2,33 @@ package de.chennemann.opencode.mobile.ui.conversation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.SessionService
 import de.chennemann.opencode.mobile.navigation.NavEvent
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 
 class ConversationViewModel(
     private val service: SessionService,
 ) : ViewModel() {
     private val mapper = ConversationRenderMapper()
+
+    private data class GlobalRenderState(
+        val title: String,
+        val status: ServerState,
+        val turns: List<ConversationTurnUiState>,
+        val canLoadMoreMessages: Boolean,
+        val loadingMoreMessages: Boolean,
+    )
 
     private data class LocalState(
         val scroll: Long = 0,
@@ -31,11 +42,23 @@ class ConversationViewModel(
 
     val nav = navFlow.asSharedFlow()
 
-    val state: StateFlow<ConversationUiState> = combine(service.state, local) { global, local ->
+    private val global = service.state
+        .map {
+            GlobalRenderState(
+                title = it.focusedSession?.title ?: "No session selected",
+                status = it.status,
+                turns = mapper.map(it.focusedMessages),
+                canLoadMoreMessages = it.canLoadMoreMessages,
+                loadingMoreMessages = it.loadingMoreMessages,
+            )
+        }
+        .flowOn(Dispatchers.Default)
+
+    val state: StateFlow<ConversationUiState> = combine(global, local) { global, local ->
         ConversationUiState(
-            title = global.focusedSession?.title ?: "No session selected",
+            title = global.title,
             status = global.status,
-            turns = mapper.map(global.focusedMessages),
+            turns = global.turns,
             canLoadMoreMessages = global.canLoadMoreMessages,
             loadingMoreMessages = global.loadingMoreMessages,
             scroll = local.scroll,
@@ -43,21 +66,22 @@ class ConversationViewModel(
             stepOpen = local.stepOpen,
             callOpen = local.callOpen,
         )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = ConversationUiState(
-            title = "No session selected",
-            status = service.state.value.status,
-            turns = emptyList(),
-            canLoadMoreMessages = false,
-            loadingMoreMessages = false,
-            scroll = 0,
-            draft = "",
-            stepOpen = emptyMap(),
-            callOpen = emptyMap(),
-        ),
-    )
+    }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = ConversationUiState(
+                title = "No session selected",
+                status = service.state.value.status,
+                turns = emptyList(),
+                canLoadMoreMessages = false,
+                loadingMoreMessages = false,
+                scroll = 0,
+                draft = "",
+                stepOpen = emptyMap(),
+                callOpen = emptyMap(),
+            ),
+        )
 
     init {
         service.start(viewModelScope)

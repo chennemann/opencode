@@ -6,16 +6,30 @@ import de.chennemann.opencode.mobile.domain.message.MessagePart
 class FocusedMessageProjector(
     private val decorator: MessageDecorator,
 ) {
+    private data class CachedMessage(
+        val role: String,
+        val text: String,
+        val sort: String,
+        val createdAt: Long?,
+        val completedAt: Long?,
+        val parts: Map<String, MessagePart>?,
+        val message: MessageState,
+    )
+
+    private val cache = linkedMapOf<String, CachedMessage>()
+
+    @Synchronized
     fun project(
         key: String,
         base: List<MessageState>,
         staged: Map<String, MessageState>,
         pending: List<MessageState>?,
-        parts: Map<String, LinkedHashMap<String, MessagePart>>,
+        parts: Map<String, Map<String, MessagePart>>,
     ): List<MessageState> {
+        val prefix = "$key::"
         val merged = base.associateBy { it.id }.toMutableMap().apply {
             staged
-                .filterKeys { it.startsWith("$key::") }
+                .filterKeys { it.startsWith(prefix) }
                 .values
                 .forEach { this[it.id] = it }
         }.values.toList()
@@ -23,25 +37,57 @@ class FocusedMessageProjector(
                 if (pending.isNullOrEmpty()) it else it + pending
             }
 
+        val keep = linkedSetOf<String>()
         return merged
             .sortedBy { it.sort }
-            .map {
+            .map { message ->
+                val id = messageKey(key, message.id)
+                keep.add(id)
+                val messageParts = parts[id]
+                val cached = cache[id]
+                if (
+                    cached != null &&
+                    cached.role == message.role &&
+                    cached.text == message.text &&
+                    cached.sort == message.sort &&
+                    cached.createdAt == message.createdAt &&
+                    cached.completedAt == message.completedAt &&
+                    cached.parts === messageParts
+                ) {
+                    return@map cached.message
+                }
                 val rendered = decorator.decorate(
-                    it.role,
-                    it.text,
-                    parts[messageKey(key, it.id)]?.values?.toList() ?: emptyList(),
+                    message.role,
+                    message.text,
+                    messageParts?.values?.toList() ?: emptyList(),
                 )
-                it.copy(
+                val projected = message.copy(
                     text = rendered.text,
                     toolCalls = rendered.toolCalls.map { call ->
                         ToolCallState(
                             id = call.id,
                             title = call.title,
+                            subtitle = call.subtitle,
                             status = call.status,
                             details = call.details,
                         )
                     },
                 )
+                cache[id] = CachedMessage(
+                    role = message.role,
+                    text = message.text,
+                    sort = message.sort,
+                    createdAt = message.createdAt,
+                    completedAt = message.completedAt,
+                    parts = messageParts,
+                    message = projected,
+                )
+                projected
+            }
+            .also {
+                cache.keys
+                    .filter { it.startsWith(prefix) && !keep.contains(it) }
+                    .forEach(cache::remove)
             }
     }
 
