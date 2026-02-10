@@ -71,7 +71,7 @@ class MessageDecorator {
             "grep" -> input?.string("path") ?: input?.string("pattern")
             "webfetch" -> input?.string("url")
             "task" -> input?.string("description")
-            "bash" -> input?.string("description") ?: input?.string("command")
+            "bash" -> input?.string("command")
             "edit", "write" -> input?.string("filePath")?.filename()
             "apply_patch" -> {
                 val files = metadata?.array("files")?.size ?: 0
