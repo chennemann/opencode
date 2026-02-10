@@ -17,6 +17,8 @@ class ArchitectureBoundaryTest {
                 .filter { it.startsWith("import ") }
                 .collect(Collectors.toList())
             assertFalse(imports.any { it.contains("de.chennemann.opencode.mobile.data.") })
+            assertFalse(imports.any { it.contains("de.chennemann.opencode.mobile.ui.") })
+            assertFalse(imports.any { it.contains("de.chennemann.opencode.mobile.navigation.") })
             assertFalse(imports.any { it.contains("android.") })
         }
     }
