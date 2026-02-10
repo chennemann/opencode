@@ -38,6 +38,7 @@ Key collaborators:
 - `PassCounter` for optimistic/reconcile pass tracking
 - `PendingBuffer` for optimistic pending-message lifecycle (add/claim/trim/remove)
 - `SyncCoordinator` for scheduled sync and active-run guard
+- `ReconcileCoordinator` for periodic focused-session resync loop
 - `SessionResolver` for session resolve cooldown and deduplicated resolve attempts
 - `SessionDebugTracker` for stream/sync debug counters and debug log lines
 
