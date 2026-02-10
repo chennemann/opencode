@@ -1,5 +1,12 @@
 package de.chennemann.opencode.mobile.ui.conversation
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +44,7 @@ import de.chennemann.opencode.mobile.icons.Icons
 import de.chennemann.opencode.mobile.ui.components.ConversationHeader
 import de.chennemann.opencode.mobile.ui.components.DebugPanel
 import de.chennemann.opencode.mobile.ui.components.MessageComposer
+import de.chennemann.opencode.mobile.ui.components.ToolCallCard
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
@@ -155,6 +163,72 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                                     message.text,
                                     modifier = Modifier.padding(12.dp),
                                 )
+                            }
+                        }
+
+                        val nextUser = state.focusedMessages
+                            .subList(index + 1, state.focusedMessages.size)
+                            .indexOfFirst { it.role == "user" }
+                        val end = if (nextUser < 0) {
+                            state.focusedMessages.lastIndex
+                        } else {
+                            index + nextUser
+                        }
+                        val calls = state.focusedMessages
+                            .subList(index + 1, end + 1)
+                            .flatMap { it.toolCalls }
+                        if (calls.isNotEmpty()) {
+                            val open = state.stepOpen[message.id] == true
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp)
+                                    .animateContentSize(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onEvent(ConversationEvent.ToggleSteps(message.id)) }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            if (open) Icons.ChevronUp else Icons.ChevronDown,
+                                            "Toggle steps",
+                                        )
+                                        Text(if (open) "Hide steps" else "Show steps")
+                                    }
+                                    Text("${calls.size}")
+                                }
+                                AnimatedVisibility(
+                                    visible = open,
+                                    enter = expandVertically(
+                                        expandFrom = Alignment.Top,
+                                        animationSpec = tween(240),
+                                    ) + fadeIn(animationSpec = tween(180)),
+                                    exit = shrinkVertically(
+                                        shrinkTowards = Alignment.Top,
+                                        animationSpec = tween(240),
+                                    ),
+                                ) {
+                                    Column(
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        calls.forEach { call ->
+                                            ToolCallCard(
+                                                call = call,
+                                                expanded = state.callOpen[call.id] == true,
+                                                onToggle = { onEvent(ConversationEvent.ToggleToolCall(call.id)) },
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                         return@itemsIndexed

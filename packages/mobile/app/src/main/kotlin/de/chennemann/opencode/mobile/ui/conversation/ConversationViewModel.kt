@@ -20,6 +20,8 @@ class ConversationViewModel(
     private data class LocalState(
         val debugOpen: Boolean = false,
         val draft: String = "",
+        val stepOpen: Map<String, Boolean> = emptyMap(),
+        val callOpen: Map<String, Boolean> = emptyMap(),
     )
 
     private val local = MutableStateFlow(LocalState())
@@ -37,6 +39,8 @@ class ConversationViewModel(
             debug = global.debug,
             debugOpen = local.debugOpen,
             draft = local.draft,
+            stepOpen = local.stepOpen,
+            callOpen = local.callOpen,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -50,6 +54,8 @@ class ConversationViewModel(
             debug = service.state.value.debug,
             debugOpen = false,
             draft = "",
+            stepOpen = emptyMap(),
+            callOpen = emptyMap(),
         ),
     )
 
@@ -66,6 +72,22 @@ class ConversationViewModel(
 
             is ConversationEvent.ToggleDebug -> {
                 local.update { it.copy(debugOpen = !it.debugOpen) }
+            }
+
+            is ConversationEvent.ToggleSteps -> {
+                local.update {
+                    it.copy(
+                        stepOpen = it.stepOpen + (event.messageId to (it.stepOpen[event.messageId] != true)),
+                    )
+                }
+            }
+
+            is ConversationEvent.ToggleToolCall -> {
+                local.update {
+                    it.copy(
+                        callOpen = it.callOpen + (event.callId to (it.callOpen[event.callId] != true)),
+                    )
+                }
             }
 
             is ConversationEvent.DraftChanged -> {
