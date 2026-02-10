@@ -33,7 +33,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -44,9 +43,6 @@ import de.chennemann.opencode.mobile.icons.Icons
 import de.chennemann.opencode.mobile.ui.components.ConversationHeader
 import de.chennemann.opencode.mobile.ui.components.MessageComposer
 import de.chennemann.opencode.mobile.ui.components.ToolCallCard
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 @Composable
@@ -82,18 +78,12 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
             }
     }
 
-    LaunchedEffect(list) {
-        snapshotFlow { list.isScrollInProgress }
-            .map { !it }
-            .filter { it }
-            .distinctUntilChanged()
-            .collect {
-                follow = !list.canScrollForward
-            }
-    }
-
     LaunchedEffect(dragging) {
         if (dragging) follow = false
+    }
+
+    LaunchedEffect(state.scroll) {
+        follow = true
     }
 
     LaunchedEffect(
@@ -248,6 +238,7 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                 ) {
                     SmallFloatingActionButton(
                         onClick = {
+                            follow = false
                             val target = previous() ?: return@SmallFloatingActionButton
                             scope.launch {
                                 list.scrollToItem(target + offset)
@@ -258,16 +249,15 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                     }
                     SmallFloatingActionButton(
                         onClick = {
+                            follow = false
                             scope.launch {
                                 val target = next()
                                 if (target != null) {
-                                    follow = false
                                     list.scrollToItem(target + offset)
                                     return@launch
                                 }
                                 val count = state.focusedMessages.size + offset
                                 if (count <= 0) return@launch
-                                follow = true
                                 list.scrollToItem(count - 1)
                             }
                         },

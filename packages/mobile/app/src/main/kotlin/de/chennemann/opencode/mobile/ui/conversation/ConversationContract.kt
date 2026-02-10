@@ -9,6 +9,7 @@ data class ConversationUiState(
     val focusedMessages: List<MessageState>,
     val canLoadMoreMessages: Boolean,
     val loadingMoreMessages: Boolean,
+    val scroll: Long,
     val draft: String,
     val stepOpen: Map<String, Boolean>,
     val callOpen: Map<String, Boolean>,
