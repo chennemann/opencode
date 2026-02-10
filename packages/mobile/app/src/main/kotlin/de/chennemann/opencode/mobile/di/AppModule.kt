@@ -1,5 +1,6 @@
 package de.chennemann.opencode.mobile.di
 
+import de.chennemann.opencode.mobile.data.AndroidLogGateway
 import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
 import de.chennemann.opencode.mobile.data.SessionCacheRepository
@@ -13,6 +14,7 @@ import de.chennemann.opencode.mobile.domain.session.SessionCacheGateway
 import de.chennemann.opencode.mobile.domain.session.SessionDomainService
 import de.chennemann.opencode.mobile.domain.session.SessionEventReducer
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
+import de.chennemann.opencode.mobile.domain.session.LogGateway
 import de.chennemann.opencode.mobile.ui.conversation.ConversationViewModel
 import de.chennemann.opencode.mobile.data.MdnsService
 import de.chennemann.opencode.mobile.data.NetworkService
@@ -52,6 +54,7 @@ val appModule = module {
     single { MdnsService(get()) }
     single { NetworkService(get()) }
     single<ConnectivityGateway> { get<NetworkService>() }
+    single<LogGateway> { AndroidLogGateway() }
     single { ServerService(get(), get()) }
     single { ServerRepository(get(), get(), get(), get()) }
     single { SessionCacheRepository(get()) }
@@ -63,7 +66,7 @@ val appModule = module {
     single { MessagePartParser() }
     single { MessageDecorator() }
     single { SessionEventReducer() }
-    single { SessionDomainService(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { SessionDomainService(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { ConversationViewModel(get()) }
     viewModel { ManageViewModel(get()) }
 }
