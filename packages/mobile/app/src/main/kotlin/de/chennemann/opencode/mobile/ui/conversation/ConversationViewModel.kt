@@ -66,7 +66,6 @@ class ConversationViewModel(
     fun onEvent(event: ConversationEvent) {
         when (event) {
             is ConversationEvent.OpenManageTapped -> {
-                service.openManagement()
                 navFlow.tryEmit(NavEvent.ToManage)
             }
 

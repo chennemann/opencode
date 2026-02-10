@@ -98,6 +98,7 @@ Progress:
 - Tool-call sections and cards were reintroduced in conversation UI.
 - Expand/collapse state is managed in `ConversationViewModel` and driven via screen events.
 - Screen-facing state models were moved from `home` package and now live in `domain/session`, so UI consumes state from domain instead of owning shared app state models.
+- Removed legacy `managementOpen` shared state; manage screen visibility is now navigation-driven only.
 
 ### Phase 5: Navigation event handling
 
