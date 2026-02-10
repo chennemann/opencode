@@ -8,13 +8,18 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -22,7 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -38,9 +43,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -60,6 +67,7 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import de.chennemann.opencode.mobile.home.ServerState
 import de.chennemann.opencode.mobile.home.HomeViewModel
+import de.chennemann.opencode.mobile.home.ToolCallState
 import de.chennemann.opencode.mobile.icons.Adb
 import de.chennemann.opencode.mobile.icons.ChevronDown
 import de.chennemann.opencode.mobile.icons.ChevronUp
@@ -259,7 +267,7 @@ class MainActivity : ComponentActivity() {
                                                     }
                                                 }
                                             }
-                                            items(state.focusedMessages, key = { it.id }) { message ->
+                                            itemsIndexed(state.focusedMessages, key = { _, it -> it.id }) { index, message ->
                                                 val user = message.role == "user"
                                                 if (user) {
                                                     Card(
@@ -275,14 +283,86 @@ class MainActivity : ComponentActivity() {
                                                             )
                                                         }
                                                     }
-                                                    return@items
+
+                                                    val next = state.focusedMessages
+                                                        .subList(index + 1, state.focusedMessages.size)
+                                                        .indexOfFirst { it.role == "user" }
+                                                    val end = if (next < 0) {
+                                                        state.focusedMessages.lastIndex
+                                                    } else {
+                                                        index + next
+                                                    }
+                                                    val calls = state.focusedMessages
+                                                        .subList(index + 1, end + 1)
+                                                        .flatMap { it.toolCalls }
+                                                    if (calls.isNotEmpty()) {
+                                                        var open by remember(message.id) { mutableStateOf(false) }
+                                                        val expanded = remember(message.id) { mutableStateMapOf<String, Boolean>() }
+                                                        Column(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .padding(top = 4.dp)
+                                                                .animateContentSize(),
+                                                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                                                        ) {
+                                                            Row(
+                                                                modifier = Modifier
+                                                                    .fillMaxWidth()
+                                                                    .clickable { open = !open }
+                                                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                            ) {
+                                                                Row(
+                                                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                                    verticalAlignment = Alignment.CenterVertically,
+                                                                ) {
+                                                                    Icon(
+                                                                        if (open) Icons.ChevronUp else Icons.ChevronDown,
+                                                                        "Toggle steps",
+                                                                    )
+                                                                    Text(if (open) "Hide steps" else "Show steps")
+                                                                }
+                                                                Text("${calls.size}")
+                                                            }
+                                                            AnimatedVisibility(
+                                                                visible = open,
+                                                                enter = expandVertically(
+                                                                    expandFrom = Alignment.Top,
+                                                                    animationSpec = tween(240),
+                                                                ) + fadeIn(animationSpec = tween(180)),
+                                                                exit = shrinkVertically(
+                                                                    shrinkTowards = Alignment.Top,
+                                                                    animationSpec = tween(240),
+                                                                ),
+                                                            ) {
+                                                                Column(
+                                                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                                ) {
+                                                                    calls.forEach { call ->
+                                                                        ToolCallCard(
+                                                                            call = call,
+                                                                            expanded = expanded[call.id] == true,
+                                                                            onToggle = {
+                                                                                expanded[call.id] = expanded[call.id] != true
+                                                                            },
+                                                                        )
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    return@itemsIndexed
                                                 }
 
-                                                SelectionContainer {
-                                                    Text(
-                                                        message.text,
-                                                        modifier = Modifier.fillMaxWidth(),
-                                                    )
+                                                val showText = message.text.isNotBlank() && message.text != "(streaming...)"
+                                                if (showText) {
+                                                    SelectionContainer {
+                                                        Text(
+                                                            message.text,
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -325,9 +405,6 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             }
                                         }
-                                    }
-                                    state.message?.let {
-                                        SelectionContainer { Text(it) }
                                     }
                                     var draft by remember { mutableStateOf(TextFieldValue("")) }
                                     val connected = state.status is ServerState.Connected
@@ -459,6 +536,37 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToolCallCard(call: ToolCallState, expanded: Boolean, onToggle: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggle),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(call.title)
+                Text(call.status ?: "done")
+            }
+            if (expanded) {
+                call.details.forEach { line ->
+                    SelectionContainer { Text(line) }
+                }
             }
         }
     }
