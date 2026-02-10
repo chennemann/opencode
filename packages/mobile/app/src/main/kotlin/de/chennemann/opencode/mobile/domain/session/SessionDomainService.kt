@@ -14,8 +14,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 
@@ -84,9 +82,7 @@ class SessionDomainService(
     private var stream: Job? = null
     private var observe: Job? = null
     private var reconcile: Job? = null
-    private val sync = linkedMapOf<String, Job>()
-    private val syncActive = linkedSetOf<String>()
-    private val syncGuard = Mutex()
+    private val sync = SyncCoordinator()
     private val flush = linkedMapOf<String, Job>()
     private val sessionResolve = linkedMapOf<String, Long>()
     private val sseLog = ArrayDeque<String>()
@@ -761,11 +757,11 @@ class SessionDomainService(
 
     private fun scheduleSync(sessionId: String, burst: Boolean = false) {
         val scope = scope ?: return
-        sync[sessionId]?.cancel()
-        sync[sessionId] = scope.launch {
-            delay(if (burst) SyncBurstDelayMs else SyncDelayMs)
-            val entry = active.values.find { value -> value.id == sessionId } ?: return@launch
-            syncRemote(entry)
+        sync.schedule(scope, sessionId, if (burst) SyncBurstDelayMs else SyncDelayMs) {
+            val entry = active.values.find { value -> value.id == sessionId }
+            if (entry != null) {
+                syncRemote(entry)
+            }
         }
     }
 
@@ -972,17 +968,11 @@ class SessionDomainService(
     }
 
     private suspend fun beginSync(sessionId: String): Boolean {
-        return syncGuard.withLock {
-            if (syncActive.contains(sessionId)) return@withLock false
-            syncActive.add(sessionId)
-            true
-        }
+        return sync.begin(sessionId)
     }
 
     private suspend fun endSync(sessionId: String) {
-        syncGuard.withLock {
-            syncActive.remove(sessionId)
-        }
+        sync.end(sessionId)
     }
 
     private fun markSseApplied(type: String, sessionId: String?) {
@@ -1024,8 +1014,7 @@ class SessionDomainService(
         reconcile = null
         observe?.cancel()
         observe = null
-        sync.values.forEach { it.cancel() }
-        sync.clear()
+        sync.cancelAll()
         flush.values.forEach { it.cancel() }
         flush.clear()
     }
