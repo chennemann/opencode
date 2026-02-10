@@ -1,5 +1,9 @@
 # Mobile Architecture Migration Plan
 
+## Status
+
+Package-only migration target is complete. Ongoing work is incremental hardening and collaborator extraction within domain orchestration.
+
 ## Goal
 
 Move the app to a package-based layered architecture where:
