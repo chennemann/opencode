@@ -68,6 +68,7 @@ Progress:
 - `SessionDomainService` is now a concrete domain wrapper instead of a typealias.
 - Stream-event payload parsing/classification moved into `SessionEventReducer`.
 - `MessageDecorator` now returns domain render models and no longer depends on UI state types.
+- `SessionService` stream handler was split into focused action handlers (`handleMessageUpdated`, `handleMessageRemoved`, etc.) to reduce monolithic event logic.
 
 ### Phase 3: Data/domain contracts
 
