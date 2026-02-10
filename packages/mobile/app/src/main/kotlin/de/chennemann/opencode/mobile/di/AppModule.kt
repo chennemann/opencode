@@ -14,6 +14,7 @@ import de.chennemann.opencode.mobile.domain.session.ProjectGateway
 import de.chennemann.opencode.mobile.domain.session.SessionCacheGateway
 import de.chennemann.opencode.mobile.domain.session.SessionDomainService
 import de.chennemann.opencode.mobile.domain.session.SessionEventReducer
+import de.chennemann.opencode.mobile.domain.session.SessionStreamCoordinator
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
 import de.chennemann.opencode.mobile.domain.session.LogGateway
 import de.chennemann.opencode.mobile.ui.conversation.ConversationViewModel
@@ -68,6 +69,7 @@ val appModule = module {
     single { MessageDecorator() }
     single { FocusedMessageProjector(get()) }
     single { SessionEventReducer() }
+    single { SessionStreamCoordinator(get(), get(), get(), get()) }
     single { SessionDomainService(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { ConversationViewModel(get()) }
     viewModel { ManageViewModel(get()) }
