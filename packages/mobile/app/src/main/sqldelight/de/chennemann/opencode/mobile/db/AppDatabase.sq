@@ -27,6 +27,8 @@ CREATE TABLE message_cache (
   role TEXT NOT NULL,
   text TEXT NOT NULL,
   sort_key TEXT NOT NULL,
+  created_at INTEGER,
+  completed_at INTEGER,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (server_url, session_id, message_id)
 );
@@ -74,7 +76,7 @@ FROM session_cache
 WHERE server_url = ? AND session_id = ?;
 
 listMessageCache:
-SELECT server_url, session_id, message_id, role, text, sort_key, updated_at
+SELECT server_url, session_id, message_id, role, text, sort_key, created_at, completed_at, updated_at
 FROM message_cache
 WHERE server_url = ? AND session_id = ?
 ORDER BY sort_key ASC;
@@ -87,13 +89,17 @@ INSERT INTO message_cache(
   role,
   text,
   sort_key,
+  created_at,
+  completed_at,
   updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(server_url, session_id, message_id) DO UPDATE SET
   role = excluded.role,
   text = excluded.text,
   sort_key = excluded.sort_key,
+  created_at = excluded.created_at,
+  completed_at = excluded.completed_at,
   updated_at = excluded.updated_at;
 
 deleteMessageCache:

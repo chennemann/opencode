@@ -22,7 +22,10 @@ class SessionStreamCoordinator(
                 log.debug(SessionLogTag, "sse connect attempt=${attempt + 1} endpoint=$endpoint cursor=$cursor")
                 val result = runCatching {
                     feed.streamEvents(cursor, { chunk ->
-                        log.debug(SessionLogTag, "sse raw=${chunk.replace("\n", "\\n")}")
+                        log.debug(
+                            SessionLogTag,
+                            "sse raw len=${chunk.length} head=${chunk.take(140).replace("\n", "\\n")}",
+                        )
                     }) { event ->
                         log.debug(SessionLogTag, "sse event type=${event.type} dir=${event.directory} id=${event.id}")
                         if (!event.id.isNullOrBlank()) {

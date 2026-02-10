@@ -17,6 +17,8 @@ sealed interface SessionEventAction {
         val messageId: String,
         val role: String,
         val text: String?,
+        val createdAt: Long?,
+        val completedAt: Long?,
         val directory: String,
     ) : SessionEventAction
 
@@ -82,6 +84,16 @@ class SessionEventReducer {
                 messageId = messageId,
                 role = info["role"]?.jsonPrimitive?.contentOrNull ?: "assistant",
                 text = info["text"]?.jsonPrimitive?.contentOrNull?.trim(),
+                createdAt = (info["time"] as? JsonObject)
+                    ?.get("created")
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+                    ?.toLongOrNull(),
+                completedAt = (info["time"] as? JsonObject)
+                    ?.get("completed")
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+                    ?.toLongOrNull(),
                 directory = event.directory,
             )
         }

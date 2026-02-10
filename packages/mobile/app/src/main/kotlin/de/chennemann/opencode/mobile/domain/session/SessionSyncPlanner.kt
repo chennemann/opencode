@@ -4,6 +4,8 @@ data class IncomingMessage(
     val id: String,
     val role: String,
     val text: String,
+    val createdAt: Long? = null,
+    val completedAt: Long? = null,
 )
 
 data class SessionSyncPlan(
@@ -48,7 +50,9 @@ class SessionSyncPlanner {
                 cachedMessage == null ||
                 cachedMessage.role != message.role ||
                 cachedMessage.text != message.text ||
-                cachedMessage.sort != sort
+                cachedMessage.sort != sort ||
+                cachedMessage.createdAt != message.createdAt ||
+                cachedMessage.completedAt != message.completedAt
             ) {
                 upserts.add(
                     MessageState(
@@ -56,6 +60,8 @@ class SessionSyncPlanner {
                         role = message.role,
                         text = message.text,
                         sort = sort,
+                        createdAt = message.createdAt,
+                        completedAt = message.completedAt,
                     ),
                 )
             }

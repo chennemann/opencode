@@ -18,12 +18,15 @@ data class MessageState(
     val role: String,
     val text: String,
     val sort: String,
+    val createdAt: Long? = null,
+    val completedAt: Long? = null,
     val toolCalls: List<ToolCallState> = emptyList(),
 )
 
 data class ToolCallState(
     val id: String,
     val title: String,
+    val subtitle: String? = null,
     val status: String? = null,
     val details: List<String>,
 )

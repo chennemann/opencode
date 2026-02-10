@@ -52,6 +52,8 @@ data class SessionMessageInfo(
     val role: String,
     val text: String,
     val parts: List<JsonObject>,
+    val createdAt: Long? = null,
+    val completedAt: Long? = null,
 )
 
 data class GlobalStreamEvent(
@@ -181,6 +183,9 @@ class ServerService(
                 val info = row["info"]?.jsonObject ?: return@mapNotNull null
                 val id = info["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
                 val role = info["role"]?.jsonPrimitive?.contentOrNull ?: "assistant"
+                val time = info["time"] as? JsonObject
+                val createdAt = time?.get("created")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                val completedAt = time?.get("completed")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
                 val parts = row["parts"]?.jsonArray ?: return@mapNotNull null
                 val raw = parts.map { it.jsonObject }
                 val text = parts
@@ -206,6 +211,8 @@ class ServerService(
                     role = role,
                     text = value,
                     parts = raw,
+                    createdAt = createdAt,
+                    completedAt = completedAt,
                 )
             }
     }

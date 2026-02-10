@@ -3,7 +3,6 @@ package de.chennemann.opencode.mobile.domain.message
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 class MessagePartParser {
@@ -30,10 +29,13 @@ class MessagePartParser {
         }
         if (type == "tool") {
             val tool = part["tool"]?.jsonPrimitive?.contentOrNull ?: "tool"
-            val state = part["state"]?.jsonObject
+            val state = part.objectValue("state")
             val status = state?.get("status")?.jsonPrimitive?.contentOrNull ?: "running"
             val title = state?.get("title")?.jsonPrimitive?.contentOrNull
             val output = state?.get("output")?.jsonPrimitive?.contentOrNull
+            val input = state?.objectValue("input")
+            val metadata = state?.objectValue("metadata") ?: part.objectValue("metadata")
+            val time = state?.objectValue("time")
             val text = listOfNotNull(title?.line(), output?.line()).joinToString("\n")
             return MessagePart(
                 id = id,
@@ -43,6 +45,10 @@ class MessagePartParser {
                 status = status,
                 title = title,
                 output = output,
+                input = input,
+                metadata = metadata,
+                startedAt = time?.long("start"),
+                completedAt = time?.long("end"),
             )
         }
         if (type == "step-start") {
@@ -71,5 +77,13 @@ class MessagePartParser {
         val value = lineSequence().firstOrNull()?.trim().orEmpty()
         if (value.length <= 160) return value
         return value.take(157) + "..."
+    }
+
+    private fun JsonObject.long(key: String): Long? {
+        return get(key)?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+    }
+
+    private fun JsonObject.objectValue(key: String): JsonObject? {
+        return get(key) as? JsonObject
     }
 }
