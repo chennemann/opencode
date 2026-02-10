@@ -86,6 +86,7 @@ Progress:
 - `ServerRepository` now implements all gateway ports and `SessionDomainService` depends on those interfaces.
 - Added `ConnectivityGateway` so `SessionDomainService` depends on an interface instead of the concrete network service.
 - Added `SessionCacheGateway` with `SessionCacheRepository` so `SessionDomainService` no longer depends on SQLDelight/AppDatabase directly.
+- Added `LogGateway` with Android implementation so `SessionDomainService` no longer depends on `android.util.Log` directly.
 - Added domain session models (`SessionProject`, `SessionSummary`, `SessionMessage`, `SessionStreamEvent`) to stop leaking data-layer DTOs across the boundary.
 - Added domain `ConnectionState` and mapped it to UI state in `SessionDomainService`, removing domain-to-UI dependency from connection/data ports.
 
