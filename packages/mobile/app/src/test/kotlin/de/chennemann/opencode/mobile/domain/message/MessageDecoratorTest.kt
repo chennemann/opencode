@@ -38,7 +38,7 @@ class MessageDecoratorTest {
         assertEquals("final answer", value.text)
         assertEquals(1, value.toolCalls.size)
         assertEquals("Shell", value.toolCalls.first().title)
-        assertEquals("Run tests", value.toolCalls.first().subtitle)
+        assertEquals("./gradlew test", value.toolCalls.first().subtitle)
         assertTrue(value.toolCalls.first().details.any { it.startsWith("Command: ./gradlew test") })
     }
 

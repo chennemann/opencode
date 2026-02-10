@@ -61,17 +61,18 @@ class FocusedMessageProjector(
                     message.text,
                     messageParts?.values?.toList() ?: emptyList(),
                 )
+                val nextToolCalls = rendered.toolCalls.map { call ->
+                    ToolCallState(
+                        id = call.id,
+                        title = call.title,
+                        subtitle = call.subtitle,
+                        status = call.status,
+                        details = call.details,
+                    )
+                }
                 val projected = message.copy(
                     text = rendered.text,
-                    toolCalls = rendered.toolCalls.map { call ->
-                        ToolCallState(
-                            id = call.id,
-                            title = call.title,
-                            subtitle = call.subtitle,
-                            status = call.status,
-                            details = call.details,
-                        )
-                    },
+                    toolCalls = mergeToolCalls(cached?.message?.toolCalls, nextToolCalls),
                 )
                 cache[id] = CachedMessage(
                     role = message.role,
@@ -93,5 +94,14 @@ class FocusedMessageProjector(
 
     private fun messageKey(key: String, messageId: String): String {
         return "$key::$messageId"
+    }
+
+    private fun mergeToolCalls(previous: List<ToolCallState>?, current: List<ToolCallState>): List<ToolCallState> {
+        if (previous.isNullOrEmpty()) return current
+        if (current.isEmpty()) return previous
+        val merged = linkedMapOf<String, ToolCallState>()
+        previous.forEach { merged[it.id] = it }
+        current.forEach { merged[it.id] = it }
+        return merged.values.toList()
     }
 }
