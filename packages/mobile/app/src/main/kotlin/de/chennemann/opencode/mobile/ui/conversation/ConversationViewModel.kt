@@ -17,6 +17,8 @@ import kotlinx.coroutines.launch
 class ConversationViewModel(
     private val service: SessionService,
 ) : ViewModel() {
+    private val mapper = ConversationRenderMapper()
+
     private data class LocalState(
         val scroll: Long = 0,
         val draft: String = "",
@@ -33,7 +35,7 @@ class ConversationViewModel(
         ConversationUiState(
             title = global.focusedSession?.title ?: "No session selected",
             status = global.status,
-            focusedMessages = global.focusedMessages,
+            turns = mapper.map(global.focusedMessages),
             canLoadMoreMessages = global.canLoadMoreMessages,
             loadingMoreMessages = global.loadingMoreMessages,
             scroll = local.scroll,
@@ -47,7 +49,7 @@ class ConversationViewModel(
         initialValue = ConversationUiState(
             title = "No session selected",
             status = service.state.value.status,
-            focusedMessages = emptyList(),
+            turns = emptyList(),
             canLoadMoreMessages = false,
             loadingMoreMessages = false,
             scroll = 0,
