@@ -76,6 +76,11 @@ Progress:
 - Keep concrete implementations in `data` package.
 - Map API/db models to domain models in `data` mappers.
 
+Progress:
+
+- Added `SessionGateway` domain interface for session/server access.
+- `ServerRepository` now implements `SessionGateway` and `SessionService` depends on the interface.
+
 ### Phase 4: UI event-driven parity
 
 - Keep per-screen view models (`ConversationViewModel`, `ManageViewModel`).

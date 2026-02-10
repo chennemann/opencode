@@ -10,6 +10,7 @@ import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePart
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
+import de.chennemann.opencode.mobile.domain.session.SessionGateway
 import de.chennemann.opencode.mobile.home.HomeState
 import de.chennemann.opencode.mobile.home.MessageState
 import de.chennemann.opencode.mobile.home.ProjectState
@@ -36,7 +37,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.util.concurrent.atomic.AtomicLong
 
 class SessionService(
-    private val repo: ServerRepository,
+    private val repo: SessionGateway,
     private val db: AppDatabase,
     private val network: NetworkService,
     private val parser: MessagePartParser,
