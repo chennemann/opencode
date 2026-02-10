@@ -20,12 +20,12 @@ class SessionDomainService(
     private val conn: ConnectionGateway,
     private val proj: ProjectGateway,
     private val msg: MessageGateway,
-    private val feed: StreamGateway,
     private val cache: SessionCacheGateway,
     private val log: LogGateway,
     private val parser: MessagePartParser,
     private val decorator: MessageDecorator,
     private val projector: FocusedMessageProjector,
+    private val planner: SessionSyncPlanner,
     private val reducer: SessionEventReducer,
     private val streamer: SessionStreamCoordinator,
 ) {
@@ -345,14 +345,9 @@ class SessionDomainService(
                 val next = list
                     .sortedBy { it.id }
                 val complete = next.size < (messageLimit[key] ?: MessageSyncLimit)
-                val nextIds = next
-                    .map { it.id }
-                    .toHashSet()
                 val cached = withContext(Dispatchers.IO) { cache.listMessages(server, session.id) }
-                val cachedMap = cached.associateBy { it.id }
                 val sticky = stickySort[key]
-                var claimed = false
-                val upserts = mutableListOf<Array<String>>()
+                val incoming = mutableListOf<IncomingMessage>()
 
                 next.forEach {
                     val id = requireNotNull(it.id)
@@ -374,55 +369,49 @@ class SessionDomainService(
                         it.text
                     }
                     role[message] = messageRole
-                    val cachedMessage = cachedMap[id]
-                    val known = cachedMessage?.sort ?: order[message]
-                    val stickySort = sticky?.remove(id)
-                    val pendingSort = if (messageRole == "user") claimPendingSort(key, messageText) else null
-                    val sort = when {
-                        stickySort != null -> stickySort
-                        known != null -> known
-                        pendingSort != null -> pendingSort
-                        else -> sequence()
-                    }
-                    if (messageRole == "user" && known == null) {
-                        if (sort.startsWith("z-")) {
-                            claimed = true
-                        }
-                    }
-                    order[message] = sort
-                    if (cachedMessage == null || cachedMessage.role != messageRole || cachedMessage.text != messageText || cachedMessage.sort != sort) {
-                        upserts.add(arrayOf(id, messageRole, messageText, sort))
-                    }
+                    incoming.add(
+                        IncomingMessage(
+                            id = id,
+                            role = messageRole,
+                            text = messageText,
+                        ),
+                    )
+                }
+
+                val plan = planner.plan(
+                    incoming = incoming,
+                    cached = cached,
+                    sticky = sticky,
+                    knownSort = { order[messageKey(key, it)] },
+                    claimPendingSort = { claimPendingSort(key, it) },
+                    nextSort = { sequence() },
+                    retainRemoved = { retainPass.consume(key, it) },
+                    complete = complete,
+                )
+
+                plan.sorts.forEach { (id, sort) ->
+                    order[messageKey(key, id)] = sort
                 }
 
                 withContext(Dispatchers.IO) {
-                    upserts.forEach {
+                    plan.upserts.forEach {
                         cache.upsertMessage(
                             server,
                             session.id,
-                            MessageState(
-                                id = it[0],
-                                role = it[1],
-                                text = it[2],
-                                sort = it[3],
-                            ),
+                            it,
                             now,
                         )
                     }
                 }
 
                 if (complete) {
-                    val removed = mutableListOf<String>()
-                    cachedMap.keys.forEach { id ->
-                        if (nextIds.contains(id)) return@forEach
-                        if (retainPass.consume(key, id)) return@forEach
-                        removed.add(id)
+                    plan.removedIds.forEach { id ->
                         role.remove(messageKey(key, id))
                         part.remove(messageKey(key, id))
                         order.remove(messageKey(key, id))
                     }
                     withContext(Dispatchers.IO) {
-                        removed.forEach {
+                        plan.removedIds.forEach {
                             cache.deleteMessage(server, session.id, it)
                         }
                     }
@@ -431,7 +420,7 @@ class SessionDomainService(
                 clearOverlay(key)
                 trimPending(key)
                 if (focusedKey == key) {
-                    if (claimed) {
+                    if (plan.claimed) {
                         observeFocused()
                     }
                     local.value = local.value.copy(canLoadMoreMessages = !complete)
