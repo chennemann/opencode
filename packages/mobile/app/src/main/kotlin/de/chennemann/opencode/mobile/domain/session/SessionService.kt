@@ -66,7 +66,7 @@ class SessionService(
 
     private val active = linkedMapOf<String, SessionState>()
     private val sessionProject = linkedMapOf<String, String?>()
-    private val part = linkedMapOf<String, LinkedHashMap<String, MessagePart>>()
+    private val part = linkedMapOf<String, Map<String, MessagePart>>()
     private val role = linkedMapOf<String, String>()
     private val pending = PendingBuffer()
     private val retainPass = PassCounter()
@@ -78,6 +78,7 @@ class SessionService(
     private var stream: Job? = null
     private var observe: Job? = null
     private var reconcile: Job? = null
+    private var publish: Job? = null
     private val sync = SyncCoordinator()
     private val flush = linkedMapOf<String, Job>()
     private val resolver = SessionResolver(SessionResolveCooldownMs)
@@ -87,6 +88,7 @@ class SessionService(
     private var scope: CoroutineScope? = null
     private var started = false
     private var focusedKey: String? = null
+    private var publishToken = 0L
 
     val state: StateFlow<SessionUiState> = output.asStateFlow()
 
@@ -237,7 +239,8 @@ class SessionService(
             active[key] = focused
             focusedKey = key
         }
-        val id = "local-${System.currentTimeMillis()}"
+        val now = System.currentTimeMillis()
+        val id = "local-$now"
         val sort = sequence()
         pending.add(
             key,
@@ -246,6 +249,7 @@ class SessionService(
                 role = "user",
                 text = value,
                 sort = sort,
+                createdAt = now,
             ),
             OptimisticKeepPasses,
         )
@@ -255,6 +259,7 @@ class SessionService(
                 role = "user",
                 text = value,
                 sort = sort,
+                createdAt = now,
             )
         )
         scope.launch {
@@ -338,7 +343,14 @@ class SessionService(
                 val server = key.substringBefore("::")
                 val now = System.currentTimeMillis()
                 val next = list
-                    .sortedBy { it.id }
+                    .withIndex()
+                    .sortedWith(
+                        compareBy<IndexedValue<SessionMessage>>(
+                            { it.value.createdAt ?: Long.MAX_VALUE },
+                            { it.index },
+                        )
+                    )
+                    .map { it.value }
                 val complete = next.size < (messageLimit[key] ?: MessageSyncLimit)
                 val cached = withContext(Dispatchers.IO) { cache.listMessages(server, session.id) }
                 val sticky = stickySort[key]
@@ -369,6 +381,8 @@ class SessionService(
                             id = id,
                             role = messageRole,
                             text = messageText,
+                            createdAt = it.createdAt,
+                            completedAt = it.completedAt,
                         ),
                     )
                 }
@@ -563,6 +577,8 @@ class SessionService(
             action.role,
             if (!action.text.isNullOrBlank()) action.text else decorator.render(part[message]?.values),
             sort,
+            action.createdAt,
+            action.completedAt,
         )
         markSseApplied(type, action.sessionId)
         scheduleSync(action.sessionId, true)
@@ -603,8 +619,10 @@ class SessionService(
             return
         }
         val message = messageKey(key, action.messageId)
-        val parts = part.getOrPut(message) { linkedMapOf() }
-        parts[next.id] = next
+        val updated = LinkedHashMap(part[message] ?: emptyMap<String, MessagePart>()).apply {
+            this[next.id] = next
+        }
+        part[message] = updated
         retainPass.set(key, action.messageId, ReconcileKeepPasses)
         val sort = order[message] ?: sequence()
         stageMessage(
@@ -612,7 +630,7 @@ class SessionService(
             action.sessionId,
             action.messageId,
             role[message] ?: "assistant",
-            decorator.render(part[message]?.values),
+            overlay[message]?.text ?: focusedDb.firstOrNull { it.id == action.messageId }?.text ?: "(streaming...)",
             sort,
         )
         markSseApplied(type, action.sessionId)
@@ -627,11 +645,13 @@ class SessionService(
         }
         val key = entry.key
         val message = messageKey(key, action.messageId)
-        val parts = part[message] ?: return
-        parts.remove(action.partId)
-        if (parts.isEmpty()) {
+        val updated = LinkedHashMap(part[message] ?: return).apply {
+            remove(action.partId)
+        }
+        if (updated.isEmpty()) {
             part.remove(message)
         }
+        if (updated.isNotEmpty()) part[message] = updated
         val sessionId = key.substringAfter("::")
         val sort = order[message] ?: sequence()
         stageMessage(
@@ -639,7 +659,7 @@ class SessionService(
             sessionId,
             action.messageId,
             role[message] ?: "assistant",
-            decorator.render(part[message]?.values),
+            overlay[message]?.text ?: focusedDb.firstOrNull { it.id == action.messageId }?.text ?: "(streaming...)",
             sort,
         )
         markSseApplied(type, sessionId)
@@ -700,14 +720,26 @@ class SessionService(
         }
     }
 
-    private fun stageMessage(key: String, sessionId: String, messageId: String, role: String, text: String, sort: String) {
+    private fun stageMessage(
+        key: String,
+        sessionId: String,
+        messageId: String,
+        role: String,
+        text: String,
+        sort: String,
+        createdAt: Long? = null,
+        completedAt: Long? = null,
+    ) {
         val message = messageKey(key, messageId)
         order[message] = sort
+        val current = overlay[message] ?: focusedDb.firstOrNull { it.id == messageId }
         overlay[message] = MessageState(
             id = messageId,
             role = role,
             text = text,
             sort = sort,
+            createdAt = createdAt ?: current?.createdAt,
+            completedAt = completedAt ?: current?.completedAt,
         )
         overlayDirty.getOrPut(key) { linkedSetOf() }.add(message)
         if (focusedKey == key) {
@@ -772,9 +804,21 @@ class SessionService(
 
     private fun publishFocused(key: String) {
         if (focusedKey != key) return
-        local.value = local.value.copy(
-            focusedMessages = projector.project(key, focusedDb, overlay, pending.list(key), part),
-        )
+        val scope = scope ?: return
+        val prefix = "$key::"
+        val base = focusedDb
+        val staged = overlay.filterKeys { it.startsWith(prefix) }
+        val queued = pending.list(key)
+        val parts = part.filterKeys { it.startsWith(prefix) }
+        val token = ++publishToken
+        publish?.cancel()
+        publish = scope.launch(Dispatchers.Default) {
+            val next = projector.project(key, base, staged, queued, parts)
+            withContext(Dispatchers.Main.immediate) {
+                if (focusedKey != key || token != publishToken) return@withContext
+                local.value = local.value.copy(focusedMessages = next)
+            }
+        }
     }
 
     private fun keyForSession(sessionId: String): String? {
@@ -860,6 +904,8 @@ class SessionService(
         reconcile = null
         observe?.cancel()
         observe = null
+        publish?.cancel()
+        publish = null
         sync.cancelAll()
         flush.values.forEach { it.cancel() }
         flush.clear()

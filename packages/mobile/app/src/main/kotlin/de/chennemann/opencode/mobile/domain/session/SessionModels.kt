@@ -20,6 +20,8 @@ data class SessionMessage(
     val role: String,
     val text: String,
     val parts: List<JsonObject>,
+    val createdAt: Long? = null,
+    val completedAt: Long? = null,
 )
 
 data class SessionStreamEvent(

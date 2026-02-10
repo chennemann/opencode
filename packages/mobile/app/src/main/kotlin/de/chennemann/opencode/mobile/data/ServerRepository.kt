@@ -110,6 +110,8 @@ class ServerRepository(
                 role = it.role,
                 text = it.text,
                 parts = it.parts,
+                createdAt = it.createdAt,
+                completedAt = it.completedAt,
             )
         }
     }
