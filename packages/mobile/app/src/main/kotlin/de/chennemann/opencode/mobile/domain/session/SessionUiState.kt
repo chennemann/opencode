@@ -4,6 +4,7 @@ data class ProjectState(
     val id: String,
     val worktree: String,
     val name: String,
+    val sandboxes: List<String> = emptyList(),
     val favorite: Boolean = false,
 )
 
@@ -19,6 +20,7 @@ data class SessionState(
     val version: String,
     val directory: String,
     val updatedAt: Long? = null,
+    val archivedAt: Long? = null,
 )
 
 data class MessageState(

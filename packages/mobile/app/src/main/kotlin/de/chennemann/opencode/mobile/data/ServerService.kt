@@ -37,6 +37,7 @@ data class ProjectInfo(
     val id: String,
     val worktree: String,
     val name: String,
+    val sandboxes: List<String> = emptyList(),
 )
 
 data class SessionInfo(
@@ -45,6 +46,7 @@ data class SessionInfo(
     val version: String,
     val directory: String,
     val updatedAt: Long? = null,
+    val archivedAt: Long? = null,
 )
 
 data class SessionMessageInfo(
@@ -124,10 +126,15 @@ class ServerService(
                 val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
                 val worktree = obj["worktree"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
                 val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: worktree
+                val sandboxes = obj["sandboxes"]
+                    ?.jsonArray
+                    ?.mapNotNull { sandbox -> sandbox.jsonPrimitive.contentOrNull }
+                    ?: emptyList()
                 ProjectInfo(
                     id = id,
                     worktree = worktree,
                     name = name,
+                    sandboxes = sandboxes,
                 )
             }
     }
@@ -151,12 +158,18 @@ class ServerService(
                     ?.jsonPrimitive
                     ?.contentOrNull
                     ?.toLongOrNull()
+                val archivedAt = (obj["time"] as? JsonObject)
+                    ?.get("archived")
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+                    ?.toLongOrNull()
                 SessionInfo(
                     id = id,
                     title = title,
                     version = version,
                     directory = directory,
                     updatedAt = updatedAt,
+                    archivedAt = archivedAt,
                 )
             }
     }

@@ -4,8 +4,14 @@ import de.chennemann.opencode.mobile.domain.session.ProjectState
 import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.SessionState
 
-data class SessionSectionState(
+data class WorkspaceOptionState(
+    val directory: String,
     val title: String,
+    val local: Boolean,
+)
+
+data class SessionSectionState(
+    val workspace: WorkspaceOptionState,
     val sessions: List<SessionState>,
 )
 
@@ -23,7 +29,9 @@ data class ManageUiState(
     val selectedProjectName: String?,
     val sessionScroll: Long,
     val loadingSessions: Boolean,
-    val sessionRecentOnly: Boolean,
+    val workspaceOptions: List<WorkspaceOptionState>,
+    val selectedWorkspace: String?,
+    val selectedWorkspaceName: String?,
     val sessionSections: List<SessionSectionState>,
     val message: String?,
 )
@@ -47,9 +55,9 @@ sealed interface ManageEvent {
 
     data class ProjectFavoriteToggled(val worktree: String) : ManageEvent
 
-    data object CreateSessionTapped : ManageEvent
+    data class WorkspaceSelected(val directory: String) : ManageEvent
 
-    data object LoadMoreSessionsTapped : ManageEvent
+    data object CreateSessionTapped : ManageEvent
 
     data class OpenSessionTapped(val session: SessionState) : ManageEvent
 

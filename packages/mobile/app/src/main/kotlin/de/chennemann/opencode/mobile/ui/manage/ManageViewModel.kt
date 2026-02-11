@@ -15,8 +15,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.time.LocalDate
-import java.time.ZoneId
 
 class ManageViewModel(
     private val service: SessionService,
@@ -25,6 +23,7 @@ class ManageViewModel(
         val projectPath: String,
         val projectQuery: String,
         val projectsExpanded: Boolean,
+        val selectedWorkspace: String?,
         val sessionScroll: Long,
     )
 
@@ -33,6 +32,7 @@ class ManageViewModel(
             projectPath = service.state.value.selectedProject.orEmpty(),
             projectQuery = "",
             projectsExpanded = false,
+            selectedWorkspace = service.state.value.selectedProject,
             sessionScroll = 0L,
         )
     )
@@ -43,6 +43,8 @@ class ManageViewModel(
     val state: StateFlow<ManageUiState> = combine(service.state, local) { global, local ->
         val listed = global.projects.map(::displayProject)
         val projects = filterProjects(listed, local.projectQuery)
+        val workspaces = workspaceOptions(global.projects, global.selectedProject)
+        val selectedWorkspace = selectedWorkspace(workspaces, local.selectedWorkspace)
         ManageUiState(
             url = global.url,
             discovered = global.discovered,
@@ -57,8 +59,10 @@ class ManageViewModel(
             selectedProjectName = selectedProjectName(listed, global.selectedProject),
             sessionScroll = local.sessionScroll,
             loadingSessions = global.loadingSessions,
-            sessionRecentOnly = global.sessionRecentOnly,
-            sessionSections = sessionSections(global.sessions),
+            workspaceOptions = workspaces,
+            selectedWorkspace = selectedWorkspace?.directory,
+            selectedWorkspaceName = selectedWorkspace?.title,
+            sessionSections = sessionSections(global.sessions, workspaces),
             message = global.message,
         )
     }.stateIn(
@@ -78,7 +82,9 @@ class ManageViewModel(
             selectedProjectName = null,
             sessionScroll = 0L,
             loadingSessions = false,
-            sessionRecentOnly = true,
+            workspaceOptions = emptyList(),
+            selectedWorkspace = null,
+            selectedWorkspaceName = null,
             sessionSections = emptyList(),
             message = null,
         ),
@@ -111,6 +117,7 @@ class ManageViewModel(
                 service.selectProject(worktree)
                 local.value = local.value.copy(
                     projectPath = worktree,
+                    selectedWorkspace = worktree,
                     sessionScroll = local.value.sessionScroll + 1,
                 )
             }
@@ -118,6 +125,7 @@ class ManageViewModel(
             is ManageEvent.ProjectSelected -> {
                 local.value = local.value.copy(
                     projectPath = event.worktree,
+                    selectedWorkspace = event.worktree,
                     sessionScroll = local.value.sessionScroll + 1,
                 )
                 service.selectProject(event.worktree)
@@ -127,16 +135,19 @@ class ManageViewModel(
                 service.toggleProjectFavorite(event.worktree)
             }
 
+            is ManageEvent.WorkspaceSelected -> {
+                local.value = local.value.copy(selectedWorkspace = event.directory)
+            }
+
             is ManageEvent.CreateSessionTapped -> {
                 viewModelScope.launch {
-                    if (service.createSessionAndFocus()) {
+                    val workspaces = workspaceOptions(service.state.value.projects, service.state.value.selectedProject)
+                    val selected = selectedWorkspace(workspaces, local.value.selectedWorkspace)
+                    val directory = selected?.directory ?: return@launch
+                    if (service.createSessionAndFocus(directory)) {
                         navFlow.tryEmit(NavEvent.ToConversation)
                     }
                 }
-            }
-
-            is ManageEvent.LoadMoreSessionsTapped -> {
-                service.loadMoreSessions()
             }
 
             is ManageEvent.OpenSessionTapped -> {
@@ -164,7 +175,40 @@ class ManageViewModel(
 
     private fun selectedProjectName(projects: List<ProjectState>, selected: String?): String? {
         if (selected.isNullOrBlank()) return null
-        return projects.firstOrNull { it.worktree == selected }?.name ?: folderName(selected)
+        val id = workspaceId(selected)
+        return projects.firstOrNull { workspaceId(it.worktree) == id }?.name ?: folderName(selected)
+    }
+
+    private fun workspaceOptions(projects: List<ProjectState>, selected: String?): List<WorkspaceOptionState> {
+        if (selected.isNullOrBlank()) return emptyList()
+        val id = workspaceId(selected)
+        val project = projects.firstOrNull { workspaceId(it.worktree) == id }
+        val directories = if (project == null) {
+            listOf(selected)
+        } else {
+            listOf(project.worktree) + project.sandboxes
+        }
+        return directories
+            .map(::workspaceId)
+            .distinct()
+            .map {
+                WorkspaceOptionState(
+                    directory = it,
+                    title = if (it == id) {
+                        "Local: ${folderName(it)}"
+                    } else {
+                        "Workspace: ${folderName(it)}"
+                    },
+                    local = it == id,
+                )
+            }
+    }
+
+    private fun selectedWorkspace(options: List<WorkspaceOptionState>, selected: String?): WorkspaceOptionState? {
+        if (options.isEmpty()) return null
+        if (selected.isNullOrBlank()) return options.firstOrNull()
+        val id = workspaceId(selected)
+        return options.firstOrNull { workspaceId(it.directory) == id } ?: options.firstOrNull()
     }
 
     private fun folderName(path: String): String {
@@ -179,26 +223,26 @@ class ManageViewModel(
         return name
     }
 
-    private fun sessionSections(sessions: List<SessionState>): List<SessionSectionState> {
-        if (sessions.isEmpty()) return emptyList()
-        val zone = ZoneId.systemDefault()
-        val today = LocalDate.now(zone)
-        val todayStart = today.atStartOfDay(zone).toInstant().toEpochMilli()
-        val yesterdayStart = today.minusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        val todaySessions = sessions.filter { (it.updatedAt ?: 0L) >= todayStart }
-        val yesterdaySessions = sessions.filter {
-            val updatedAt = it.updatedAt ?: return@filter false
-            updatedAt >= yesterdayStart && updatedAt < todayStart
-        }
-        val olderSessions = sessions.filter {
-            val updatedAt = it.updatedAt
-            if (updatedAt == null) return@filter true
-            updatedAt < yesterdayStart
-        }
-        return buildList {
-            if (todaySessions.isNotEmpty()) add(SessionSectionState("Today", todaySessions))
-            if (yesterdaySessions.isNotEmpty()) add(SessionSectionState("Yesterday", yesterdaySessions))
-            if (olderSessions.isNotEmpty()) add(SessionSectionState("Older", olderSessions))
+    private fun sessionSections(sessions: List<SessionState>, options: List<WorkspaceOptionState>): List<SessionSectionState> {
+        if (sessions.isEmpty() || options.isEmpty()) return emptyList()
+        return options.mapNotNull { option ->
+            val list = sessions
+                .filter { workspaceId(it.directory) == workspaceId(option.directory) }
+                .sortedWith(
+                    compareByDescending<SessionState> { it.updatedAt ?: 0L }
+                        .thenByDescending { it.id }
+                )
+                .take(WorkspaceSessionLimit)
+            if (list.isEmpty()) return@mapNotNull null
+            SessionSectionState(workspace = option, sessions = list)
         }
     }
+
+    private fun workspaceId(path: String): String {
+        val value = path.trimEnd('/', '\\')
+        if (value.isBlank()) return path
+        return value
+    }
 }
+
+private const val WorkspaceSessionLimit = 3
