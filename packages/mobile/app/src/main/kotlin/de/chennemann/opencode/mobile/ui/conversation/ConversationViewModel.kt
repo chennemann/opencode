@@ -2,6 +2,7 @@ package de.chennemann.opencode.mobile.ui.conversation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import de.chennemann.opencode.mobile.domain.session.CommandState
 import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.SessionService
 import de.chennemann.opencode.mobile.navigation.NavEvent
@@ -32,6 +33,7 @@ class ConversationViewModel(
         val title: String,
         val status: ServerState,
         val turns: List<ConversationTurnUiState>,
+        val commands: List<CommandState>,
         val canLoadMoreMessages: Boolean,
         val loadingMoreMessages: Boolean,
     )
@@ -39,6 +41,7 @@ class ConversationViewModel(
     private data class LocalState(
         val scroll: Long = 0,
         val draft: String = "",
+        val commandOpen: Boolean = false,
         val stepOpen: Map<String, Boolean> = emptyMap(),
         val callOpen: Map<String, Boolean> = emptyMap(),
     )
@@ -54,6 +57,7 @@ class ConversationViewModel(
                 title = it.focusedSession?.title ?: "No session selected",
                 status = it.status,
                 turns = splitActiveTools(mapper.map(it.focusedMessages)),
+                commands = mergeCommands(it.commands),
                 canLoadMoreMessages = it.canLoadMoreMessages,
                 loadingMoreMessages = it.loadingMoreMessages,
             )
@@ -69,6 +73,8 @@ class ConversationViewModel(
             loadingMoreMessages = global.loadingMoreMessages,
             scroll = local.scroll,
             draft = local.draft,
+            slashSuggestions = slashSuggestions(local.draft, global.commands, local.commandOpen),
+            commandOpen = local.commandOpen,
             stepOpen = local.stepOpen,
             callOpen = local.callOpen,
         )
@@ -84,6 +90,8 @@ class ConversationViewModel(
                 loadingMoreMessages = false,
                 scroll = 0,
                 draft = "",
+                slashSuggestions = emptyList(),
+                commandOpen = false,
                 stepOpen = emptyMap(),
                 callOpen = emptyMap(),
             ),
@@ -116,14 +124,31 @@ class ConversationViewModel(
             }
 
             is ConversationEvent.DraftChanged -> {
-                local.update { it.copy(draft = event.value) }
+                local.update {
+                    it.copy(
+                        draft = event.value,
+                        commandOpen = it.commandOpen && (event.value.isBlank() || event.value.startsWith("/")),
+                    )
+                }
+            }
+
+            is ConversationEvent.SlashCommandSelected -> {
+                local.update { it.copy(draft = "/${event.name} ", commandOpen = false) }
+            }
+
+            is ConversationEvent.CommandListToggled -> {
+                local.update { it.copy(commandOpen = !it.commandOpen) }
+            }
+
+            is ConversationEvent.CommandListDismissed -> {
+                local.update { it.copy(commandOpen = false) }
             }
 
             is ConversationEvent.SendTapped -> {
                 val value = local.value.draft
                 service.send(value)
                 if (value.isNotBlank()) {
-                    local.update { it.copy(draft = "", scroll = it.scroll + 1) }
+                    local.update { it.copy(draft = "", scroll = it.scroll + 1, commandOpen = false) }
                 }
             }
 
@@ -135,6 +160,26 @@ class ConversationViewModel(
                 service.loadMoreMessages()
             }
         }
+    }
+
+    private fun slashSuggestions(
+        draft: String,
+        commands: List<CommandState>,
+        open: Boolean,
+    ): List<CommandState> {
+        val match = SlashRegex.matchEntire(draft)
+        if (match == null && !open) return emptyList()
+        val query = match?.groupValues?.get(1)?.trim()?.lowercase().orEmpty()
+        return commands
+            .filter {
+                if (query.isBlank()) return@filter true
+                it.name.lowercase().contains(query) || it.description?.lowercase()?.contains(query) == true
+            }
+    }
+
+    private fun mergeCommands(commands: List<CommandState>): List<CommandState> {
+        return (BuiltinCommands + commands)
+            .distinctBy { it.name.lowercase() }
     }
 
     private fun splitActiveTools(turns: List<ConversationTurnUiState>): List<ConversationTurnUiState> {
@@ -186,3 +231,12 @@ class ConversationViewModel(
         )
     }
 }
+
+private val SlashRegex = Regex("^/(\\S*)$")
+private val BuiltinCommands = listOf(
+    CommandState(
+        name = "new",
+        description = "Create a new session",
+        source = "builtin",
+    ),
+)

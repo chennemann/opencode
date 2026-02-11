@@ -27,7 +27,7 @@ fun AppNavHost() {
                     LaunchedEffect(model) {
                         model.nav.collect {
                             if (it is NavEvent.ToManage) {
-                                stack.add(ManageRoute)
+                                stack.add(ManageProjectsRoute)
                             }
                         }
                     }
@@ -37,13 +37,19 @@ fun AppNavHost() {
                     )
                 }
 
-                is ManageRoute -> NavEntry(key) {
+                is ManageProjectsRoute -> NavEntry(key) {
                     val model: ManageViewModel = koinViewModel()
                     val state by model.state.collectAsStateWithLifecycle()
                     LaunchedEffect(model) {
                         model.nav.collect {
                             if (it is NavEvent.Back) {
                                 stack.removeLastOrNull()
+                            }
+                            if (it is NavEvent.ToConversation) {
+                                while (stack.isNotEmpty() && stack.lastOrNull() !is ConversationRoute) {
+                                    stack.removeLastOrNull()
+                                }
+                                if (stack.isEmpty()) stack.add(ConversationRoute)
                             }
                         }
                     }
