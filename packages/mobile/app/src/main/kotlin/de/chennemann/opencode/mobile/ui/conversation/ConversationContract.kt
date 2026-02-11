@@ -1,5 +1,6 @@
 package de.chennemann.opencode.mobile.ui.conversation
 
+import de.chennemann.opencode.mobile.domain.session.CommandState
 import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.ToolCallState
 
@@ -22,6 +23,8 @@ data class ConversationUiState(
     val loadingMoreMessages: Boolean,
     val scroll: Long,
     val draft: String,
+    val slashSuggestions: List<CommandState>,
+    val commandOpen: Boolean,
     val stepOpen: Map<String, Boolean>,
     val callOpen: Map<String, Boolean>,
 )
@@ -34,6 +37,12 @@ sealed interface ConversationEvent {
     data class ToggleToolCall(val callId: String) : ConversationEvent
 
     data class DraftChanged(val value: String) : ConversationEvent
+
+    data class SlashCommandSelected(val name: String) : ConversationEvent
+
+    data object CommandListToggled : ConversationEvent
+
+    data object CommandListDismissed : ConversationEvent
 
     data object SendTapped : ConversationEvent
 

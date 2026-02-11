@@ -1,7 +1,6 @@
 package de.chennemann.opencode.mobile.data
 
 import de.chennemann.opencode.mobile.api.apis.DefaultApi
-import de.chennemann.opencode.mobile.api.models.SessionCreateRequest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.plugins.sse.SSE
@@ -45,6 +44,7 @@ data class SessionInfo(
     val title: String,
     val version: String,
     val directory: String,
+    val updatedAt: Long? = null,
 )
 
 data class SessionMessageInfo(
@@ -54,6 +54,12 @@ data class SessionMessageInfo(
     val parts: List<JsonObject>,
     val createdAt: Long? = null,
     val completedAt: Long? = null,
+)
+
+data class CommandInfo(
+    val name: String,
+    val description: String?,
+    val source: String?,
 )
 
 data class GlobalStreamEvent(
@@ -126,8 +132,8 @@ class ServerService(
             }
     }
 
-    suspend fun sessions(baseUrl: String, worktree: String): List<SessionInfo> {
-        val res = client(baseUrl).sessionList(worktree, true, null, null, null)
+    suspend fun sessions(baseUrl: String, worktree: String, limit: Int?): List<SessionInfo> {
+        val res = client(baseUrl).sessionList(worktree, true, null, null, limit?.let(::BigDecimal))
         if (!res.success) {
             throw IllegalStateException("Server returned ${res.status}")
         }
@@ -140,24 +146,35 @@ class ServerService(
                 val title = obj["title"]?.jsonPrimitive?.contentOrNull ?: "Session"
                 val version = obj["version"]?.jsonPrimitive?.contentOrNull ?: "unknown"
                 val directory = obj["directory"]?.jsonPrimitive?.contentOrNull ?: ""
+                val updatedAt = (obj["time"] as? JsonObject)
+                    ?.get("updated")
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+                    ?.toLongOrNull()
                 SessionInfo(
                     id = id,
                     title = title,
                     version = version,
                     directory = directory,
+                    updatedAt = updatedAt,
                 )
             }
     }
 
     suspend fun createSession(baseUrl: String, worktree: String, title: String): SessionInfo {
-        val res = client(baseUrl).sessionCreate(
-            worktree,
-            SessionCreateRequest(title = title),
-        )
-        if (!res.success) {
+        val res = http.post("$baseUrl/session") {
+            parameter("directory", worktree)
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("title", title)
+                }.toString()
+            )
+        }
+        if (res.status.value !in 200..299) {
             throw IllegalStateException("Server returned ${res.status}")
         }
-        val obj = json.parseToJsonElement(res.response.bodyAsText()).jsonObject
+        val obj = json.parseToJsonElement(res.bodyAsText()).jsonObject
         val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: throw IllegalStateException("Invalid session payload")
         val value = obj["title"]?.jsonPrimitive?.contentOrNull ?: "Session"
         val version = obj["version"]?.jsonPrimitive?.contentOrNull ?: "unknown"
@@ -168,6 +185,27 @@ class ServerService(
             version = version,
             directory = directory,
         )
+    }
+
+    suspend fun commands(baseUrl: String, directory: String): List<CommandInfo> {
+        val res = client(baseUrl).commandList(directory)
+        if (!res.success) {
+            throw IllegalStateException("Server returned ${res.status}")
+        }
+        return json
+            .parseToJsonElement(res.response.bodyAsText())
+            .jsonArray
+            .mapNotNull {
+                val obj = it.jsonObject
+                val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val description = obj["description"]?.jsonPrimitive?.contentOrNull
+                val source = obj["source"]?.jsonPrimitive?.contentOrNull
+                CommandInfo(
+                    name = name,
+                    description = description,
+                    source = source,
+                )
+            }
     }
 
     suspend fun sessionMessages(baseUrl: String, sessionId: String, directory: String, limit: Int?): List<SessionMessageInfo> {
@@ -276,6 +314,22 @@ class ServerService(
                             )
                         }
                     )
+                }.toString()
+            )
+        }
+        if (res.status.value !in 200..299) {
+            throw IllegalStateException("Server returned ${res.status}")
+        }
+    }
+
+    suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String) {
+        val res = http.post("$baseUrl/session/$sessionId/command") {
+            parameter("directory", directory)
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("command", name)
+                    put("arguments", arguments)
                 }.toString()
             )
         }

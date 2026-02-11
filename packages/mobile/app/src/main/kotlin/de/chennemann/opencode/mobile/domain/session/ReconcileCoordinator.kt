@@ -12,8 +12,8 @@ class ReconcileCoordinator(
     fun start(scope: CoroutineScope, block: suspend () -> Unit): Job {
         return scope.launch {
             while (isActive) {
-                delay(interval)
                 block()
+                delay(interval)
             }
         }
     }
