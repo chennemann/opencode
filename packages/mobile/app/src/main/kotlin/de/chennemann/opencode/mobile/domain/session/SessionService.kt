@@ -479,14 +479,6 @@ class SessionService(
                 val server = key.substringBefore("::")
                 val now = System.currentTimeMillis()
                 val next = list
-                    .withIndex()
-                    .sortedWith(
-                        compareBy<IndexedValue<SessionMessage>>(
-                            { it.value.createdAt ?: Long.MAX_VALUE },
-                            { it.index },
-                        )
-                    )
-                    .map { it.value }
                 val complete = next.size < (messageLimit[key] ?: MessageSyncLimit)
                 val cached = withContext(Dispatchers.IO) { cache.listMessages(server, session.id) }
                 val sticky = stickySort[key]
@@ -529,9 +521,9 @@ class SessionService(
                     incoming = incoming,
                     cached = cached,
                     sticky = sticky,
+                    remoteSort = ::remoteSort,
                     knownSort = { order[messageKey(key, it)] },
                     claimPendingSort = { claimPendingSort(key, it) },
-                    nextSort = { sequence() },
                     retainRemoved = { retainPass.consume(key, it) },
                     complete = complete,
                 )
@@ -1068,6 +1060,10 @@ class SessionService(
 
     private fun sequence(): String {
         return "z-${seq.incrementAndGet().toString().padStart(20, '0')}"
+    }
+
+    private fun remoteSort(index: Int): String {
+        return "r-${index.toString().padStart(20, '0')}"
     }
 
     private fun claimPendingSort(key: String, text: String): String? {

@@ -20,9 +20,9 @@ class SessionSyncPlanner {
         incoming: List<IncomingMessage>,
         cached: List<MessageState>,
         sticky: MutableMap<String, String>?,
+        remoteSort: (Int) -> String,
         knownSort: (String) -> String?,
         claimPendingSort: (String) -> String?,
-        nextSort: () -> String,
         retainRemoved: (String) -> Boolean,
         complete: Boolean,
     ): SessionSyncPlan {
@@ -31,16 +31,15 @@ class SessionSyncPlanner {
         val upserts = mutableListOf<MessageState>()
         val sorts = linkedMapOf<String, String>()
 
-        incoming.forEach { message ->
+        incoming.forEachIndexed { index, message ->
             val cachedMessage = cache[message.id]
             val known = cachedMessage?.sort ?: knownSort(message.id)
             val stickySort = sticky?.remove(message.id)
             val pendingSort = if (message.role == "user") claimPendingSort(message.text) else null
             val sort = when {
                 stickySort != null -> stickySort
-                known != null -> known
-                pendingSort != null -> pendingSort
-                else -> nextSort()
+                pendingSort != null && known == null -> pendingSort
+                else -> remoteSort(index)
             }
             if (message.role == "user" && known == null && sort.startsWith("z-")) {
                 claimed = true

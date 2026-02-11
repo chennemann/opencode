@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -139,104 +140,112 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
             onOpenManage = { onEvent(ConversationEvent.OpenManageTapped) },
         )
 
-        Box(modifier = Modifier.weight(1f)) {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .onGloballyPositioned {
-                        viewportTop = it.positionInRoot().y.roundToInt()
-                        viewportBottom = (it.positionInRoot().y + it.size.height).roundToInt()
-                    },
-                state = list,
-            ) {
-                if (state.canLoadMoreMessages || state.loadingMoreMessages) {
-                    item("load-more") {
-                        Button(
-                            onClick = { onEvent(ConversationEvent.LoadMoreMessagesTapped) },
-                            enabled = !state.loadingMoreMessages,
-                        ) {
-                            val label = if (state.loadingMoreMessages) {
-                                "Loading older messages..."
-                            } else {
-                                "Load older messages"
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .imePadding(),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onGloballyPositioned {
+                            viewportTop = it.positionInRoot().y.roundToInt()
+                            viewportBottom = (it.positionInRoot().y + it.size.height).roundToInt()
+                        },
+                    state = list,
+                ) {
+                    if (state.canLoadMoreMessages || state.loadingMoreMessages) {
+                        item("load-more") {
+                            Button(
+                                onClick = { onEvent(ConversationEvent.LoadMoreMessagesTapped) },
+                                enabled = !state.loadingMoreMessages,
+                            ) {
+                                val label = if (state.loadingMoreMessages) {
+                                    "Loading older messages..."
+                                } else {
+                                    "Load older messages"
+                                }
+                                Text(label)
                             }
-                            Text(label)
                         }
                     }
+                    itemsIndexed(turns, key = { _, it -> it.id }) { index, turn ->
+                        ConversationTurnItem(
+                            turn = turn,
+                            active = index == turns.lastIndex,
+                            stepOpen = state.stepOpen[turn.id] == true,
+                            callOpen = state.callOpen,
+                            onToggleSteps = { onEvent(ConversationEvent.ToggleSteps(turn.id)) },
+                            onToggleToolCall = { onEvent(ConversationEvent.ToggleToolCall(it)) },
+                            onEnsureToolVisible = { toolId ->
+                                follow = false
+                                scope.launch {
+                                    ensureToolVisible(
+                                        list = list,
+                                        toolId = toolId,
+                                        tools = tools,
+                                        viewportTop = viewportTop,
+                                        viewportBottom = viewportBottom,
+                                    )
+                                }
+                            },
+                            onToolLayout = { toolId, top, bottom ->
+                                tools[toolId] = ToolPosition(top = top, bottom = bottom)
+                            },
+                        )
+                    }
                 }
-                itemsIndexed(turns, key = { _, it -> it.id }) { index, turn ->
-                    ConversationTurnItem(
-                        turn = turn,
-                        active = index == turns.lastIndex,
-                        stepOpen = state.stepOpen[turn.id] == true,
-                        callOpen = state.callOpen,
-                        onToggleSteps = { onEvent(ConversationEvent.ToggleSteps(turn.id)) },
-                        onToggleToolCall = { onEvent(ConversationEvent.ToggleToolCall(it)) },
-                        onEnsureToolVisible = { toolId ->
-                            follow = false
-                            scope.launch {
-                                ensureToolVisible(
-                                    list = list,
-                                    toolId = toolId,
-                                    tools = tools,
-                                    viewportTop = viewportTop,
-                                    viewportBottom = viewportBottom,
-                                )
+
+                NavigationButtons(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = 8.dp),
+                    following = follow,
+                    onPrevious = {
+                        follow = false
+                        val target = previous() ?: return@NavigationButtons
+                        scope.launch {
+                            list.scrollToItem(target + offset)
+                        }
+                    },
+                    onNext = {
+                        scope.launch {
+                            if (!follow) {
+                                val target = nextUser()
+                                if (target != null) {
+                                    list.animateScrollToItem(target + offset)
+                                    if (isAtEnd(list, turns.size + offset)) {
+                                        follow = true
+                                    }
+                                    return@launch
+                                }
                             }
-                        },
-                        onToolLayout = { toolId, top, bottom ->
-                            tools[toolId] = ToolPosition(top = top, bottom = bottom)
-                        },
-                    )
-                }
+                            follow = true
+                            val count = turns.size + offset
+                            if (count <= 0) return@launch
+                            ensureEndVisible(list, count - 1)
+                        }
+                    },
+                )
             }
 
-            NavigationButtons(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(bottom = 8.dp),
-                following = follow,
-                onPrevious = {
-                    follow = false
-                    val target = previous() ?: return@NavigationButtons
-                    scope.launch {
-                        list.scrollToItem(target + offset)
-                    }
-                },
-                onNext = {
-                    scope.launch {
-                        if (!follow) {
-                            val target = nextUser()
-                            if (target != null) {
-                                list.animateScrollToItem(target + offset)
-                                if (isAtEnd(list, turns.size + offset)) {
-                                    follow = true
-                                }
-                                return@launch
-                            }
-                        }
-                        follow = true
-                        val count = turns.size + offset
-                        if (count <= 0) return@launch
-                        ensureEndVisible(list, count - 1)
-                    }
-                },
+            MessageComposer(
+                draft = state.draft,
+                connected = state.status is ServerState.Connected,
+                suggestions = state.slashSuggestions,
+                commandOpen = state.commandOpen,
+                onDraftChange = { onEvent(ConversationEvent.DraftChanged(it)) },
+                onSend = { onEvent(ConversationEvent.SendTapped) },
+                onReload = { onEvent(ConversationEvent.ReloadTapped) },
+                onCommandSelect = { onEvent(ConversationEvent.SlashCommandSelected(it.name)) },
+                onCommandToggle = { onEvent(ConversationEvent.CommandListToggled) },
+                onCommandDismiss = { onEvent(ConversationEvent.CommandListDismissed) },
             )
         }
-
-        MessageComposer(
-            draft = state.draft,
-            connected = state.status is ServerState.Connected,
-            suggestions = state.slashSuggestions,
-            commandOpen = state.commandOpen,
-            onDraftChange = { onEvent(ConversationEvent.DraftChanged(it)) },
-            onSend = { onEvent(ConversationEvent.SendTapped) },
-            onReload = { onEvent(ConversationEvent.ReloadTapped) },
-            onCommandSelect = { onEvent(ConversationEvent.SlashCommandSelected(it.name)) },
-            onCommandToggle = { onEvent(ConversationEvent.CommandListToggled) },
-            onCommandDismiss = { onEvent(ConversationEvent.CommandListDismissed) },
-        )
     }
 }
 
