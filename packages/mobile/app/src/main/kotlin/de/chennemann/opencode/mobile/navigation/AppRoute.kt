@@ -7,4 +7,4 @@ import kotlinx.serialization.Serializable
 data object ConversationRoute : NavKey
 
 @Serializable
-data object ManageRoute : NavKey
+data object ManageProjectsRoute : NavKey

@@ -2,6 +2,8 @@ package de.chennemann.opencode.mobile.data
 
 import android.util.Log
 import de.chennemann.opencode.mobile.db.AppDatabase
+import de.chennemann.opencode.mobile.domain.session.CommandGateway
+import de.chennemann.opencode.mobile.domain.session.CommandState
 import de.chennemann.opencode.mobile.domain.session.ConnectionGateway
 import de.chennemann.opencode.mobile.domain.session.MessageGateway
 import de.chennemann.opencode.mobile.domain.session.ProjectGateway
@@ -24,7 +26,7 @@ class ServerRepository(
     private val mdns: MdnsService,
     private val service: ServerService,
     private val network: NetworkService,
-) : ConnectionGateway, ProjectGateway, MessageGateway, StreamGateway {
+) : ConnectionGateway, ProjectGateway, MessageGateway, StreamGateway, CommandGateway {
     private val state = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     private val url = MutableStateFlow(DefaultUrl)
     private val discovered = MutableStateFlow<String?>(null)
@@ -82,13 +84,14 @@ class ServerRepository(
         }
     }
 
-    override suspend fun sessions(worktree: String): List<SessionSummary> {
-        return service.sessions(url.value, worktree).map {
+    override suspend fun sessions(worktree: String, limit: Int?): List<SessionSummary> {
+        return service.sessions(url.value, worktree, limit).map {
             SessionSummary(
                 id = it.id,
                 title = it.title,
                 version = it.version,
                 directory = it.directory,
+                updatedAt = it.updatedAt,
             )
         }
     }
@@ -101,6 +104,16 @@ class ServerRepository(
             version = created.version,
             directory = created.directory,
         )
+    }
+
+    override suspend fun commands(directory: String): List<CommandState> {
+        return service.commands(url.value, directory).map {
+            CommandState(
+                name = it.name,
+                description = it.description,
+                source = it.source,
+            )
+        }
     }
 
     override suspend fun messages(sessionId: String, directory: String, limit: Int?): List<SessionMessage> {
@@ -132,6 +145,10 @@ class ServerRepository(
 
     override suspend fun sendMessage(sessionId: String, directory: String, text: String) {
         service.sendMessage(url.value, sessionId, directory, text)
+    }
+
+    override suspend fun sendCommand(sessionId: String, directory: String, name: String, arguments: String) {
+        service.sendCommand(url.value, sessionId, directory, name, arguments)
     }
 
     override suspend fun streamCursor(): String? {

@@ -6,6 +6,7 @@ import de.chennemann.opencode.mobile.data.ServerService
 import de.chennemann.opencode.mobile.data.SessionCacheRepository
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
+import de.chennemann.opencode.mobile.domain.session.CommandGateway
 import de.chennemann.opencode.mobile.domain.session.ConnectivityGateway
 import de.chennemann.opencode.mobile.domain.session.ConnectionGateway
 import de.chennemann.opencode.mobile.domain.session.FocusedMessageProjector
@@ -64,6 +65,7 @@ val appModule = module {
     single { SessionCacheRepository(get()) }
     single<ConnectionGateway> { get<ServerRepository>() }
     single<ProjectGateway> { get<ServerRepository>() }
+    single<CommandGateway> { get<ServerRepository>() }
     single<MessageGateway> { get<ServerRepository>() }
     single<StreamGateway> { get<ServerRepository>() }
     single<SessionCacheGateway> { get<SessionCacheRepository>() }
@@ -74,7 +76,7 @@ val appModule = module {
     single { SessionEventReducer() }
     single { SessionStreamCoordinator(get(), get(), get(), get()) }
     single { ReconcileCoordinator() }
-    single { SessionService(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { SessionService(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { ConversationViewModel(get()) }
     viewModel { ManageViewModel(get()) }
 }
