@@ -13,6 +13,10 @@ interface SessionCacheGateway {
 
     fun recentSession(): RecentSessionCache?
 
+    fun projectFavorites(server: String): Set<String>
+
+    suspend fun setProjectFavorite(server: String, worktree: String, favorite: Boolean)
+
     suspend fun listMessages(server: String, sessionId: String): List<MessageState>
 
     fun observeMessages(server: String, sessionId: String): Flow<List<MessageState>>
