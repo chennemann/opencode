@@ -1,17 +1,22 @@
 package de.chennemann.opencode.mobile.ui.manage
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -20,6 +25,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -31,6 +40,10 @@ import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.icons.Heart
 import de.chennemann.opencode.mobile.icons.HeartOutline
 import de.chennemann.opencode.mobile.icons.Icons
+import de.chennemann.opencode.mobile.icons.Add
+import de.chennemann.opencode.mobile.icons.ChevronDown
+import de.chennemann.opencode.mobile.icons.ChevronUp
+import de.chennemann.opencode.mobile.icons.FilterList
 import de.chennemann.opencode.mobile.icons.Star
 import de.chennemann.opencode.mobile.icons.StarOutline
 import java.time.Instant
@@ -40,7 +53,9 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun ManageScreen(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
     val projects = state.favoriteProjects + state.otherProjects
-    val selected = projects.firstOrNull { it.worktree == state.selectedProject }
+    val selected = projects.firstOrNull {
+        workspaceId(it.worktree) == workspaceId(state.selectedProject.orEmpty())
+    }
     val selectedWorktree = state.selectedProject
     val selectedName = state.selectedProjectName ?: selectedWorktree
     val selectedFavorite = selected?.favorite == true
@@ -64,9 +79,6 @@ fun ManageScreen(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
         }
         item("server") {
             ServerCard(state, onEvent)
-        }
-        item("project-input") {
-            ProjectInputCard(state, onEvent)
         }
         item("projects") {
             ProjectListCard(state, onEvent)
@@ -108,6 +120,16 @@ fun ManageScreen(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
 
 @Composable
 private fun ServerCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
+    val connected = state.status is ServerState.Connected
+    var expanded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(connected) {
+        if (!connected) return@LaunchedEffect
+        expanded = false
+    }
+
+    val shown = !connected || expanded
+
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -118,17 +140,34 @@ private fun ServerCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = connected) {
+                        expanded = !expanded
+                    }
+                    .heightIn(min = 48.dp)
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("Server", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    text = statusLabel(state.status),
-                    color = statusColor(state.status),
-                    style = MaterialTheme.typography.labelLarge,
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = statusLabel(state.status),
+                        color = statusColor(state.status),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Icon(
+                        imageVector = if (shown) Icons.ChevronUp else Icons.ChevronDown,
+                        contentDescription = if (shown) "Collapse server" else "Expand server",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
+            if (!shown) return@Column
             TextField(
                 value = state.url,
                 onValueChange = { onEvent(ManageEvent.UrlChanged(it)) },
@@ -159,45 +198,83 @@ private fun ServerCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
 }
 
 @Composable
-private fun ProjectInputCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
-    Card {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text("Project Access", style = MaterialTheme.typography.titleMedium)
-            TextField(
-                value = state.projectPath,
-                onValueChange = { onEvent(ManageEvent.ProjectPathChanged(it)) },
-                label = { Text("Open project path") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Button(
-                onClick = { onEvent(ManageEvent.OpenProjectTapped) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Open path")
-            }
-            TextField(
-                value = state.projectQuery,
-                onValueChange = { onEvent(ManageEvent.ProjectQueryChanged(it)) },
-                label = { Text("Search projects") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-}
-
-@Composable
 private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
+    var filterOpen by remember { mutableStateOf(state.projectQuery.isNotBlank()) }
+    var pathOpen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.projectQuery) {
+        if (state.projectQuery.isBlank()) return@LaunchedEffect
+        filterOpen = true
+    }
+
     Card {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Projects", style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Projects", style = MaterialTheme.typography.titleMedium)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = { filterOpen = !filterOpen }) {
+                        Icon(
+                            imageVector = Icons.FilterList,
+                            contentDescription = "Filter projects",
+                            tint = if (filterOpen) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                    IconButton(onClick = { pathOpen = !pathOpen }) {
+                        Icon(
+                            imageVector = Icons.Add,
+                            contentDescription = "Add project path",
+                            tint = if (pathOpen) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                }
+            }
+
+            if (filterOpen) {
+                TextField(
+                    value = state.projectQuery,
+                    onValueChange = { onEvent(ManageEvent.ProjectQueryChanged(it)) },
+                    label = { Text("Search projects") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            if (pathOpen) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextField(
+                        value = state.projectPath,
+                        onValueChange = { onEvent(ManageEvent.ProjectPathChanged(it)) },
+                        label = { Text("Open project path") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Button(
+                        onClick = { onEvent(ManageEvent.OpenProjectTapped) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Open path")
+                    }
+                }
+            }
+
             if (state.favoriteProjects.isEmpty() && state.otherProjects.isEmpty()) {
                 Text(
                     text = if (state.loadingProjects) "Loading projects..." else "No projects found",
@@ -205,43 +282,72 @@ private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit
                 )
                 return@Column
             }
+
             if (state.favoriteProjects.isNotEmpty()) {
-                Text("Favorites", style = MaterialTheme.typography.labelLarge)
-                state.favoriteProjects.forEach {
-                    ProjectRow(
-                        project = it,
-                        selected = state.selectedProject == it.worktree,
-                        onFavoriteToggle = { onEvent(ManageEvent.ProjectFavoriteToggled(it.worktree)) },
-                        onSelect = { onEvent(ManageEvent.ProjectSelected(it.worktree)) },
-                    )
+                state.favoriteProjects.chunked(2).forEach { row ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        row.forEach { project ->
+                            ProjectCard(
+                                project = project,
+                                selected = workspaceId(state.selectedProject.orEmpty()) == workspaceId(project.worktree),
+                                compact = true,
+                                modifier = Modifier.weight(1f),
+                                onFavoriteToggle = { onEvent(ManageEvent.ProjectFavoriteToggled(project.worktree)) },
+                                onSelect = { onEvent(ManageEvent.ProjectSelected(project.worktree)) },
+                            )
+                        }
+                        if (row.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
                 }
             }
+
             if (state.otherProjects.isEmpty()) {
                 return@Column
             }
+
+            val count = state.otherProjects.size
+            val suffix = if (count == 1) "project" else "projects"
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onEvent(ManageEvent.ProjectListToggleTapped) }
+                    .heightIn(min = 48.dp)
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Other Projects", style = MaterialTheme.typography.labelLarge)
-                OutlinedButton(onClick = { onEvent(ManageEvent.ProjectListToggleTapped) }) {
-                    Text(if (state.projectsExpanded) "Collapse" else "Expand")
-                }
-            }
-            if (!state.projectsExpanded) {
-                val count = state.otherProjects.size
-                val suffix = if (count == 1) "project" else "projects"
                 Text(
-                    text = "$count $suffix hidden. Tap Expand to show.",
+                    text = if (state.projectsExpanded) {
+                        "Hide $count $suffix"
+                    } else {
+                        "$count $suffix hidden"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                return@Column
+                Icon(
+                    imageVector = if (state.projectsExpanded) Icons.ChevronUp else Icons.ChevronDown,
+                    contentDescription = if (state.projectsExpanded) {
+                        "Collapse other projects"
+                    } else {
+                        "Expand other projects"
+                    },
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
+            if (!state.projectsExpanded) return@Column
+
             state.otherProjects.forEach {
-                ProjectRow(
+                ProjectCard(
                     project = it,
-                    selected = state.selectedProject == it.worktree,
+                    selected = workspaceId(state.selectedProject.orEmpty()) == workspaceId(it.worktree),
+                    compact = false,
+                    modifier = Modifier.fillMaxWidth(),
                     onFavoriteToggle = { onEvent(ManageEvent.ProjectFavoriteToggled(it.worktree)) },
                     onSelect = { onEvent(ManageEvent.ProjectSelected(it.worktree)) },
                 )
@@ -251,13 +357,16 @@ private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit
 }
 
 @Composable
-private fun ProjectRow(
+private fun ProjectCard(
     project: ProjectState,
     selected: Boolean,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
     onFavoriteToggle: () -> Unit,
     onSelect: () -> Unit,
 ) {
     Card(
+        modifier = modifier.clickable(onClick = onSelect),
         colors = CardDefaults.cardColors(
             containerColor = if (selected) {
                 MaterialTheme.colorScheme.secondaryContainer
@@ -269,16 +378,32 @@ private fun ProjectRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(10.dp),
+                .padding(if (compact) 8.dp else 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = if (compact) Alignment.CenterVertically else Alignment.Top,
         ) {
-            Text(
-                text = project.name,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            Column(
                 modifier = Modifier.weight(1f),
-            )
+                verticalArrangement = if (compact) Arrangement.Center else Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = project.name,
+                    style = if (compact) {
+                        MaterialTheme.typography.labelLarge
+                    } else {
+                        MaterialTheme.typography.bodyLarge
+                    },
+                    maxLines = if (compact) 2 else 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!compact) {
+                    Text(
+                        text = project.worktree,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             IconButton(onClick = onFavoriteToggle) {
                 Icon(
                     imageVector = if (project.favorite) Icons.Star else Icons.StarOutline,
@@ -289,12 +414,6 @@ private fun ProjectRow(
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
-            }
-            OutlinedButton(
-                onClick = onSelect,
-                modifier = Modifier.width(92.dp),
-            ) {
-                Text(if (selected) "Selected" else "Open")
             }
         }
     }
@@ -308,6 +427,7 @@ private fun SessionCard(
     selectedFavorite: Boolean,
     onEvent: (ManageEvent) -> Unit,
 ) {
+    var workspaceMenu by remember { mutableStateOf(false) }
     Card {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -351,6 +471,43 @@ private fun SessionCard(
             if (selectedWorktree == null) {
                 return@Column
             }
+            if (state.loadingSessions) {
+                Text(
+                    text = "Loading sessions...",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (state.sessionSections.isEmpty() && !state.loadingSessions) {
+                Text(
+                    text = "No sessions found for this project",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                state.sessionSections.forEach { section ->
+                    Text(section.workspace.title, style = MaterialTheme.typography.labelLarge)
+                    section.sessions.forEach { session ->
+                        OutlinedButton(
+                            onClick = { onEvent(ManageEvent.OpenSessionTapped(session)) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    text = session.title,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = sessionSubtitle(session, selectedWorktree),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -361,50 +518,35 @@ private fun SessionCard(
                 ) {
                     Text(if (state.loadingSessions) "Creating..." else "New session")
                 }
-                OutlinedButton(
-                    onClick = { onEvent(ManageEvent.LoadMoreSessionsTapped) },
-                    enabled = !state.loadingSessions,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(if (state.sessionRecentOnly) "Load older" else "Load more")
-                }
-            }
-            if (state.loadingSessions) {
-                Text(
-                    text = "Loading sessions...",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (state.sessionSections.isEmpty() && !state.loadingSessions) {
-                Text(
-                    text = if (state.sessionRecentOnly) {
-                        "No sessions updated today or yesterday"
-                    } else {
-                        "No sessions found for this project"
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                return@Column
-            }
-            state.sessionSections.forEach { section ->
-                Text(section.title, style = MaterialTheme.typography.labelLarge)
-                section.sessions.forEach { session ->
+                Box(modifier = Modifier.weight(1f)) {
                     OutlinedButton(
-                        onClick = { onEvent(ManageEvent.OpenSessionTapped(session)) },
+                        onClick = { workspaceMenu = true },
+                        enabled = !state.loadingSessions && state.workspaceOptions.isNotEmpty(),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                text = session.title,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = sessionSubtitle(session),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                        Text(
+                            text = "Create in: ${state.selectedWorkspaceName ?: "Local"}",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = workspaceMenu,
+                        onDismissRequest = { workspaceMenu = false },
+                    ) {
+                        state.workspaceOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = option.title,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                                onClick = {
+                                    workspaceMenu = false
+                                    onEvent(ManageEvent.WorkspaceSelected(option.directory))
+                                },
                             )
                         }
                     }
@@ -433,13 +575,25 @@ private fun statusColor(state: ServerState): Color {
     }
 }
 
-private fun sessionSubtitle(session: SessionState): String {
+private fun sessionSubtitle(session: SessionState, selectedWorktree: String?): String {
     val updated = session.updatedAt?.let {
         val value = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
         "Updated ${SessionFormatter.format(value)}"
     } ?: "Updated unknown"
-    return "$updated | ${session.version}"
+    val workspace = if (selectedWorktree.isNullOrBlank()) {
+        false
+    } else {
+        workspaceId(session.directory) != workspaceId(selectedWorktree)
+    }
+    val prefix = if (workspace) "Workspace session • " else ""
+    return "$prefix$updated | ${session.version}"
+}
+
+private fun workspaceId(path: String): String {
+    val value = path.trimEnd('/', '\\')
+    if (value.isBlank()) return path
+    return value
 }
 
 private val SessionFormatter = DateTimeFormatter.ofPattern("MMM d HH:mm")
-private const val SessionsItemIndex = 4
+private const val SessionsItemIndex = 3

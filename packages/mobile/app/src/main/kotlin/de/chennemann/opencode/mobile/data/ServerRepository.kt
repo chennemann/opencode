@@ -80,6 +80,7 @@ class ServerRepository(
                 id = it.id,
                 worktree = it.worktree,
                 name = it.name,
+                sandboxes = it.sandboxes,
             )
         }
     }
@@ -92,6 +93,7 @@ class ServerRepository(
                 version = it.version,
                 directory = it.directory,
                 updatedAt = it.updatedAt,
+                archivedAt = it.archivedAt,
             )
         }
     }
