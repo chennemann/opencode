@@ -13,6 +13,7 @@ data class SessionSummary(
     val title: String,
     val version: String,
     val directory: String,
+    val updatedAt: Long? = null,
 )
 
 data class SessionMessage(

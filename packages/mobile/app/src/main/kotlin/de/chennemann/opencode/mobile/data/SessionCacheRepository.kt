@@ -44,6 +44,35 @@ class SessionCacheRepository(
         ).executeAsOneOrNull()
     }
 
+    override fun projectFavorites(server: String): Set<String> {
+        return db.appDatabaseQueries
+            .selectSetting(projectFavoriteKey(server))
+            .executeAsOneOrNull()
+            ?.split(ProjectFavoriteSeparator)
+            ?.map(String::trim)
+            ?.filter(String::isNotEmpty)
+            ?.toSet()
+            ?: emptySet()
+    }
+
+    override suspend fun setProjectFavorite(server: String, worktree: String, favorite: Boolean) {
+        val key = projectFavoriteKey(server)
+        val next = projectFavorites(server)
+            .toMutableSet()
+            .also {
+                if (favorite) it.add(worktree) else it.remove(worktree)
+            }
+            .toList()
+            .sorted()
+
+        if (next.isEmpty()) {
+            db.appDatabaseQueries.deleteSetting(key)
+            return
+        }
+
+        db.appDatabaseQueries.upsertSetting(key, next.joinToString(ProjectFavoriteSeparator))
+    }
+
     override suspend fun listMessages(server: String, sessionId: String): List<MessageState> {
         return db.appDatabaseQueries
             .listMessageCache(server, sessionId) { _, _, messageId, role, text, sortKey, createdAt, completedAt, _ ->
@@ -96,4 +125,10 @@ class SessionCacheRepository(
     override suspend fun deleteSessionMessages(server: String, sessionId: String) {
         db.appDatabaseQueries.deleteMessageCacheSession(server, sessionId)
     }
+}
+
+private const val ProjectFavoriteSeparator = "\n"
+
+private fun projectFavoriteKey(server: String): String {
+    return "project_favorite:$server"
 }
