@@ -4,6 +4,13 @@ data class ProjectState(
     val id: String,
     val worktree: String,
     val name: String,
+    val favorite: Boolean = false,
+)
+
+data class CommandState(
+    val name: String,
+    val description: String? = null,
+    val source: String? = null,
 )
 
 data class SessionState(
@@ -11,6 +18,7 @@ data class SessionState(
     val title: String,
     val version: String,
     val directory: String,
+    val updatedAt: Long? = null,
 )
 
 data class MessageState(
@@ -37,6 +45,7 @@ data class SessionUiState(
     val status: ServerState,
     val projects: List<ProjectState>,
     val selectedProject: String?,
+    val commands: List<CommandState>,
     val sessions: List<SessionState>,
     val activeSessions: List<SessionState>,
     val focusedSession: SessionState?,
@@ -45,5 +54,6 @@ data class SessionUiState(
     val loadingMoreMessages: Boolean,
     val loadingProjects: Boolean,
     val loadingSessions: Boolean,
+    val sessionRecentOnly: Boolean,
     val message: String?,
 )
