@@ -13,11 +13,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicLong
 
 class SessionService(
     private val conn: ConnectionGateway,
     private val proj: ProjectGateway,
+    private val cmd: CommandGateway,
     private val msg: MessageGateway,
     private val cache: SessionCacheGateway,
     private val log: LogGateway,
@@ -31,7 +34,9 @@ class SessionService(
 ) {
     private data class LocalState(
         val projects: List<ProjectState> = emptyList(),
+        val favoriteProjects: Set<String> = emptySet(),
         val selectedProject: String? = null,
+        val commands: List<CommandState> = emptyList(),
         val sessions: List<SessionState> = emptyList(),
         val activeSessions: List<SessionState> = emptyList(),
         val focusedSession: SessionState? = null,
@@ -40,6 +45,8 @@ class SessionService(
         val loadingMoreMessages: Boolean = false,
         val loadingProjects: Boolean = false,
         val loadingSessions: Boolean = false,
+        val sessionRecentOnly: Boolean = true,
+        val sessionLimit: Int = InitialSessionLimit,
         val message: String? = null,
     )
 
@@ -52,6 +59,7 @@ class SessionService(
             status = ServerState.Idle,
             projects = emptyList(),
             selectedProject = null,
+            commands = emptyList(),
             sessions = emptyList(),
             activeSessions = emptyList(),
             focusedSession = null,
@@ -60,6 +68,7 @@ class SessionService(
             loadingMoreMessages = false,
             loadingProjects = false,
             loadingSessions = false,
+            sessionRecentOnly = true,
             message = null,
         )
     )
@@ -84,6 +93,7 @@ class SessionService(
     private val resolver = SessionResolver(SessionResolveCooldownMs)
     private val overlay = linkedMapOf<String, MessageState>()
     private val overlayDirty = linkedMapOf<String, LinkedHashSet<String>>()
+    private val mapLock = Any()
     private var focusedDb = emptyList<MessageState>()
     private var scope: CoroutineScope? = null
     private var started = false
@@ -105,6 +115,7 @@ class SessionService(
                     status = status.toUi(),
                     projects = local.projects,
                     selectedProject = local.selectedProject,
+                    commands = local.commands,
                     sessions = local.sessions,
                     activeSessions = local.activeSessions,
                     focusedSession = local.focusedSession,
@@ -113,6 +124,7 @@ class SessionService(
                     loadingMoreMessages = local.loadingMoreMessages,
                     loadingProjects = local.loadingProjects,
                     loadingSessions = local.loadingSessions,
+                    sessionRecentOnly = local.sessionRecentOnly,
                     message = local.message,
                 )
             }.collect {
@@ -123,6 +135,12 @@ class SessionService(
             conn.endpoint.collect {
                 if (manual) return@collect
                 input.value = it
+            }
+        }
+        scope.launch {
+            conn.status.collect {
+                if (it !is ConnectionState.Connected) return@collect
+                loadProjects()
             }
         }
         scope.launch {
@@ -162,20 +180,24 @@ class SessionService(
 
     fun loadProjects() {
         val scope = scope ?: return
+        if (local.value.loadingProjects) return
         scope.launch {
             local.value = local.value.copy(loadingProjects = true, message = null)
+            val server = serverForCache()
+            val favorites = runCatching { cache.projectFavorites(server) }.getOrDefault(emptySet())
             val result = runCatching { proj.projects() }
             local.value = local.value.copy(loadingProjects = false)
             result.onSuccess { list ->
-                val projects = list
-                    .map {
+                val projects = mergeProjects(
+                    list.map {
                         ProjectState(
                             id = it.id,
                             worktree = it.worktree,
-                            name = it.name,
+                            name = if (it.name.isBlank()) projectName(it.worktree) else it.name,
                         )
-                    }
-                    .sortedBy { it.name.lowercase() }
+                    },
+                    favorites,
+                )
                 val current = local.value.selectedProject
                 val next = if (current != null && projects.any { it.worktree == current }) {
                     current
@@ -184,11 +206,16 @@ class SessionService(
                 }
                 local.value = local.value.copy(
                     projects = projects,
+                    favoriteProjects = favorites,
                     selectedProject = next,
+                    commands = if (next == null) emptyList() else local.value.commands,
                     sessions = if (next == null) emptyList() else local.value.sessions,
+                    sessionRecentOnly = true,
+                    sessionLimit = InitialSessionLimit,
                 )
                 if (next == null) return@onSuccess
                 loadSessions(next)
+                loadCommands(next)
             }
             result.onFailure {
                 local.value = local.value.copy(message = it.message ?: "Failed to load projects")
@@ -197,32 +224,87 @@ class SessionService(
     }
 
     fun selectProject(worktree: String) {
-        if (local.value.selectedProject == worktree) return
-        local.value = local.value.copy(selectedProject = worktree)
+        local.value = local.value.copy(
+            selectedProject = worktree,
+            commands = emptyList(),
+            sessions = emptyList(),
+            sessionRecentOnly = true,
+            sessionLimit = InitialSessionLimit,
+        )
+        loadSessions(worktree)
+        loadCommands(worktree)
+    }
+
+    fun toggleProjectFavorite(worktree: String) {
+        val value = worktree.trim()
+        if (value.isBlank()) return
+        val scope = scope ?: return
+        val server = serverForCache()
+        val current = local.value.favoriteProjects
+        val next = if (current.contains(value)) {
+            current - value
+        } else {
+            current + value
+        }
+
+        local.value = local.value.copy(
+            projects = mergeProjects(local.value.projects, next),
+            favoriteProjects = next,
+        )
+
+        scope.launch {
+            runCatching {
+                cache.setProjectFavorite(server, value, next.contains(value))
+            }.onFailure {
+                local.value = local.value.copy(
+                    projects = mergeProjects(local.value.projects, current),
+                    favoriteProjects = current,
+                    message = it.message ?: "Failed to update project favorite",
+                )
+            }
+        }
+    }
+
+    fun loadMoreSessions() {
+        val worktree = local.value.selectedProject ?: return
+        val limit = if (local.value.sessionRecentOnly) {
+            InitialSessionLimit + SessionLimitStep
+        } else {
+            local.value.sessionLimit + SessionLimitStep
+        }
+        local.value = local.value.copy(
+            sessionRecentOnly = false,
+            sessionLimit = limit,
+        )
         loadSessions(worktree)
     }
 
     fun createSession() {
-        val worktree = local.value.selectedProject ?: return
         val scope = scope ?: return
         scope.launch {
-            local.value = local.value.copy(loadingSessions = true, message = null)
-            val result = runCatching { proj.createSession(worktree, "Mobile session") }
-            local.value = local.value.copy(loadingSessions = false)
-            result.onSuccess {
-                val session = SessionState(
-                    id = it.id,
-                    title = it.title,
-                    version = it.version,
-                    directory = it.directory,
-                )
-                focusSession(session, worktree)
-                loadSessions(worktree)
-            }
-            result.onFailure {
-                local.value = local.value.copy(message = it.message ?: "Failed to create session")
-            }
+            createSessionAndFocus()
         }
+    }
+
+    suspend fun createSessionAndFocus(): Boolean {
+        val worktree = local.value.selectedProject ?: return false
+        local.value = local.value.copy(loadingSessions = true, message = null)
+        val result = runCatching { proj.createSession(worktree, "Mobile session") }
+        local.value = local.value.copy(loadingSessions = false)
+        result.onFailure {
+            local.value = local.value.copy(message = it.message ?: "Failed to create session")
+        }
+        val created = result.getOrNull() ?: return false
+        val session = SessionState(
+            id = created.id,
+            title = created.title,
+            version = created.version,
+            directory = created.directory,
+            updatedAt = created.updatedAt,
+        )
+        focusSession(session, worktree)
+        loadSessions(worktree)
+        return true
     }
 
     fun openSession(session: SessionState) {
@@ -232,8 +314,28 @@ class SessionService(
     fun send(text: String) {
         val value = text.trim()
         if (value.isBlank()) return
+        val builtin = resolveBuiltin(value)
+        if (builtin == "new") {
+            createSession()
+            return
+        }
         val scope = scope ?: return
         val focused = local.value.focusedSession ?: return
+        val command = resolveCommand(value)
+        if (command != null) {
+            scope.launch {
+                val result = runCatching {
+                    msg.sendCommand(focused.id, focused.directory, command.first.name, command.second)
+                }
+                result.onSuccess {
+                    scheduleSync(focused.id)
+                }
+                result.onFailure {
+                    local.value = local.value.copy(message = it.message ?: "Failed to run command")
+                }
+            }
+            return
+        }
         val key = focusedKey ?: keyForSession(focused.id) ?: key(conn.endpoint.value, focused.id)
         if (active[key] == null) {
             active[key] = focused
@@ -277,6 +379,24 @@ class SessionService(
         }
     }
 
+    private fun resolveBuiltin(value: String): String? {
+        if (!value.startsWith("/")) return null
+        val parts = value.split(Regex("\\s+"), limit = 2)
+        val name = parts.firstOrNull()?.removePrefix("/")?.trim().orEmpty()
+        if (name.equals("new", true)) return "new"
+        return null
+    }
+
+    private fun resolveCommand(value: String): Pair<CommandState, String>? {
+        if (!value.startsWith("/")) return null
+        val parts = value.split(Regex("\\s+"), limit = 2)
+        val name = parts.firstOrNull()?.removePrefix("/")?.trim().orEmpty()
+        if (name.isBlank()) return null
+        val match = local.value.commands.firstOrNull { it.name == name } ?: return null
+        val args = if (parts.size > 1) parts[1].trim() else ""
+        return match to args
+    }
+
     fun loadMoreMessages() {
         val focused = local.value.focusedSession ?: return
         val key = focusedKey ?: keyForSession(focused.id) ?: return
@@ -290,13 +410,27 @@ class SessionService(
         focusedKey = entry.key
         local.value = local.value.copy(
             focusedSession = entry.value,
+            focusedMessages = emptyList(),
+            canLoadMoreMessages = false,
+            loadingMoreMessages = false,
         )
         observeFocused()
     }
 
-    private fun focusSession(session: SessionState, project: String?) {
+    private fun upsertActiveSession(session: SessionState, project: String?): String {
         val server = if (manual) input.value else conn.endpoint.value
         val key = key(server, session.id)
+        active[key] = session
+        sessionProject[key] = project
+        messageLimit[key] = messageLimit[key] ?: MessageSyncLimit
+        scope?.launch {
+            cache.upsertSession(server, sessionProject[key], session)
+        }
+        return key
+    }
+
+    private fun focusSession(session: SessionState, project: String?) {
+        val key = upsertActiveSession(session, project)
         val previous = focusedKey
         if (previous != null && previous != key) {
             flush.remove(previous)?.cancel()
@@ -305,18 +439,16 @@ class SessionService(
                 flushStaged(previous, sessionId)
             }
         }
-        active[key] = session
-        sessionProject[key] = project
-        messageLimit[key] = messageLimit[key] ?: MessageSyncLimit
         focusedKey = key
         local.value = local.value.copy(
             focusedSession = session,
             activeSessions = active.values.sortedByDescending { it.id },
+            focusedMessages = emptyList(),
             canLoadMoreMessages = false,
             loadingMoreMessages = false,
         )
-        scope?.launch {
-            cache.upsertSession(server, sessionProject[key], session)
+        if (!project.isNullOrBlank()) {
+            loadCommands(project)
         }
         observeFocused()
         syncRemote(session)
@@ -361,17 +493,19 @@ class SessionService(
                     val message = messageKey(key, id)
                     val messageRole = it.role
                     val parsed = parser.parseParts(it.parts)
-                    if (parsed.isEmpty()) {
-                        part.remove(message)
-                    } else {
-                        val map = linkedMapOf<String, MessagePart>()
-                        parsed.forEach { item ->
-                            map[item.id] = item
+                    synchronized(mapLock) {
+                        if (parsed.isEmpty()) {
+                            part.remove(message)
+                        } else {
+                            val map = linkedMapOf<String, MessagePart>()
+                            parsed.forEach { item ->
+                                map[item.id] = item
+                            }
+                            part[message] = map
                         }
-                        part[message] = map
                     }
                     val messageText = if (messageRole == "assistant") {
-                        decorator.render(part[message]?.values)
+                        decorator.render(synchronized(mapLock) { part[message]?.values })
                     } else {
                         it.text
                     }
@@ -398,8 +532,10 @@ class SessionService(
                     complete = complete,
                 )
 
-                plan.sorts.forEach { (id, sort) ->
-                    order[messageKey(key, id)] = sort
+                synchronized(mapLock) {
+                    plan.sorts.forEach { (id, sort) ->
+                        order[messageKey(key, id)] = sort
+                    }
                 }
 
                 withContext(Dispatchers.IO) {
@@ -414,10 +550,12 @@ class SessionService(
                 }
 
                 if (complete) {
-                    plan.removedIds.forEach { id ->
-                        role.remove(messageKey(key, id))
-                        part.remove(messageKey(key, id))
-                        order.remove(messageKey(key, id))
+                    synchronized(mapLock) {
+                        plan.removedIds.forEach { id ->
+                            role.remove(messageKey(key, id))
+                            part.remove(messageKey(key, id))
+                            order.remove(messageKey(key, id))
+                        }
                     }
                     withContext(Dispatchers.IO) {
                         plan.removedIds.forEach {
@@ -450,9 +588,12 @@ class SessionService(
         val scope = scope ?: return
         scope.launch {
             local.value = local.value.copy(loadingSessions = true, message = null)
-            val result = runCatching { proj.sessions(worktree) }
+            val recentOnly = local.value.sessionRecentOnly
+            val limit = local.value.sessionLimit
+            val result = runCatching { proj.sessions(worktree, limit) }
             local.value = local.value.copy(loadingSessions = false)
             result.onSuccess { list ->
+                val updatedAfter = startOfYesterday()
                 local.value = local.value.copy(
                     sessions = list
                         .map {
@@ -461,13 +602,40 @@ class SessionService(
                                 title = it.title,
                                 version = it.version,
                                 directory = it.directory,
+                                updatedAt = it.updatedAt,
                             )
                         }
-                        .sortedByDescending { it.id },
+                        .sortedWith(
+                            compareByDescending<SessionState> { it.updatedAt ?: 0L }
+                                .thenByDescending { it.id }
+                        )
+                        .let {
+                            if (recentOnly) {
+                                it.filter { item -> (item.updatedAt ?: 0L) >= updatedAfter }
+                            } else {
+                                it
+                            }
+                        },
                 )
             }
             result.onFailure {
-                local.value = local.value.copy(message = it.message ?: "Failed to load sessions")
+                local.value = local.value.copy(
+                    sessions = emptyList(),
+                    message = it.message ?: "Failed to load sessions",
+                )
+            }
+        }
+    }
+
+    private fun loadCommands(worktree: String) {
+        val scope = scope ?: return
+        scope.launch {
+            val result = runCatching { cmd.commands(worktree) }
+            result.onSuccess { list ->
+                local.value = local.value.copy(commands = list)
+            }
+            result.onFailure {
+                log.warn(LogTag, "commands failed worktree=$worktree reason=${it.message}")
             }
         }
     }
@@ -493,6 +661,9 @@ class SessionService(
     private fun reconcile(scope: CoroutineScope) {
         reconcile?.cancel()
         reconcile = reconciler.start(scope) {
+            if (conn.status.value !is ConnectionState.Connected) {
+                conn.refresh(false)
+            }
             val focused = local.value.focusedSession ?: return@start
             syncRemote(focused)
         }
@@ -596,10 +767,12 @@ class SessionService(
             cache.deleteMessage(server, action.sessionId, action.messageId)
         }
         role.remove(messageKey(key, action.messageId))
-        part.remove(messageKey(key, action.messageId))
-        order.remove(messageKey(key, action.messageId))
-        overlay.remove(messageKey(key, action.messageId))
-        overlayDirty[key]?.remove(messageKey(key, action.messageId))
+        synchronized(mapLock) {
+            part.remove(messageKey(key, action.messageId))
+            order.remove(messageKey(key, action.messageId))
+            overlay.remove(messageKey(key, action.messageId))
+            overlayDirty[key]?.remove(messageKey(key, action.messageId))
+        }
         if (focusedKey == key) {
             publishFocused(key)
         }
@@ -619,18 +792,24 @@ class SessionService(
             return
         }
         val message = messageKey(key, action.messageId)
-        val updated = LinkedHashMap(part[message] ?: emptyMap<String, MessagePart>()).apply {
-            this[next.id] = next
+        val updated = synchronized(mapLock) {
+            LinkedHashMap(part[message] ?: emptyMap<String, MessagePart>()).apply {
+                this[next.id] = next
+            }
         }
-        part[message] = updated
+        synchronized(mapLock) {
+            part[message] = updated
+        }
         retainPass.set(key, action.messageId, ReconcileKeepPasses)
-        val sort = order[message] ?: sequence()
+        val sort = synchronized(mapLock) { order[message] } ?: sequence()
         stageMessage(
             key,
             action.sessionId,
             action.messageId,
             role[message] ?: "assistant",
-            overlay[message]?.text ?: focusedDb.firstOrNull { it.id == action.messageId }?.text ?: "(streaming...)",
+            synchronized(mapLock) { overlay[message]?.text }
+                ?: focusedDb.firstOrNull { it.id == action.messageId }?.text
+                ?: "(streaming...)",
             sort,
         )
         markSseApplied(type, action.sessionId)
@@ -645,21 +824,27 @@ class SessionService(
         }
         val key = entry.key
         val message = messageKey(key, action.messageId)
-        val updated = LinkedHashMap(part[message] ?: return).apply {
-            remove(action.partId)
+        val updated = synchronized(mapLock) {
+            LinkedHashMap(part[message] ?: return).apply {
+                remove(action.partId)
+            }
         }
-        if (updated.isEmpty()) {
-            part.remove(message)
+        synchronized(mapLock) {
+            if (updated.isEmpty()) {
+                part.remove(message)
+            }
+            if (updated.isNotEmpty()) part[message] = updated
         }
-        if (updated.isNotEmpty()) part[message] = updated
         val sessionId = key.substringAfter("::")
-        val sort = order[message] ?: sequence()
+        val sort = synchronized(mapLock) { order[message] } ?: sequence()
         stageMessage(
             key,
             sessionId,
             action.messageId,
             role[message] ?: "assistant",
-            overlay[message]?.text ?: focusedDb.firstOrNull { it.id == action.messageId }?.text ?: "(streaming...)",
+            synchronized(mapLock) { overlay[message]?.text }
+                ?: focusedDb.firstOrNull { it.id == action.messageId }?.text
+                ?: "(streaming...)",
             sort,
         )
         markSseApplied(type, sessionId)
@@ -713,9 +898,11 @@ class SessionService(
                 title = found.title,
                 version = found.version,
                 directory = found.directory,
+                updatedAt = found.updatedAt,
             )
-            log.debug(LogTag, "resolve session id=$sessionId switch=${session.title}")
-            focusSession(session, worktree)
+            log.debug(LogTag, "resolve session id=$sessionId track=${session.title}")
+            upsertActiveSession(session, worktree)
+            local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
             scheduleSync(sessionId)
         }
     }
@@ -731,17 +918,19 @@ class SessionService(
         completedAt: Long? = null,
     ) {
         val message = messageKey(key, messageId)
-        order[message] = sort
-        val current = overlay[message] ?: focusedDb.firstOrNull { it.id == messageId }
-        overlay[message] = MessageState(
-            id = messageId,
-            role = role,
-            text = text,
-            sort = sort,
-            createdAt = createdAt ?: current?.createdAt,
-            completedAt = completedAt ?: current?.completedAt,
-        )
-        overlayDirty.getOrPut(key) { linkedSetOf() }.add(message)
+        synchronized(mapLock) {
+            order[message] = sort
+            val current = overlay[message] ?: focusedDb.firstOrNull { it.id == messageId }
+            overlay[message] = MessageState(
+                id = messageId,
+                role = role,
+                text = text,
+                sort = sort,
+                createdAt = createdAt ?: current?.createdAt,
+                completedAt = completedAt ?: current?.completedAt,
+            )
+            overlayDirty.getOrPut(key) { linkedSetOf() }.add(message)
+        }
         if (focusedKey == key) {
             publishFocused(key)
         }
@@ -758,12 +947,12 @@ class SessionService(
     }
 
     private suspend fun flushStaged(key: String, sessionId: String) {
-        val staged = overlayDirty.remove(key)?.toList() ?: return
+        val staged = synchronized(mapLock) { overlayDirty.remove(key)?.toList() } ?: return
         val server = key.substringBefore("::")
         val now = System.currentTimeMillis()
         withContext(Dispatchers.IO) {
             staged.forEach {
-                val message = overlay[it] ?: return@forEach
+                val message = synchronized(mapLock) { overlay[it] } ?: return@forEach
                 cache.upsertMessage(
                     server,
                     sessionId,
@@ -775,10 +964,12 @@ class SessionService(
     }
 
     private fun clearOverlay(key: String) {
-        overlay.keys
-            .filter { it.startsWith("$key::") }
-            .forEach(overlay::remove)
-        overlayDirty.remove(key)
+        synchronized(mapLock) {
+            overlay.keys
+                .filter { it.startsWith("$key::") }
+                .forEach(overlay::remove)
+            overlayDirty.remove(key)
+        }
         if (focusedKey == key) {
             publishFocused(key)
         }
@@ -807,9 +998,16 @@ class SessionService(
         val scope = scope ?: return
         val prefix = "$key::"
         val base = focusedDb
-        val staged = overlay.filterKeys { it.startsWith(prefix) }
-        val queued = pending.list(key)
-        val parts = part.filterKeys { it.startsWith(prefix) }
+        val snapshot = synchronized(mapLock) {
+            Triple(
+                overlay.filterKeys { it.startsWith(prefix) },
+                pending.list(key),
+                part.filterKeys { it.startsWith(prefix) },
+            )
+        }
+        val staged = snapshot.first
+        val queued = snapshot.second
+        val parts = snapshot.third
         val token = ++publishToken
         publish?.cancel()
         publish = scope.launch(Dispatchers.Default) {
@@ -877,6 +1075,48 @@ class SessionService(
         local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
     }
 
+    private fun serverForCache(): String {
+        return if (manual) input.value else conn.endpoint.value
+    }
+
+    private fun mergeProjects(projects: List<ProjectState>, favorites: Set<String>): List<ProjectState> {
+        val next = projects.map {
+            it.copy(favorite = favorites.contains(it.worktree))
+        }
+        val known = next.map { it.worktree }.toSet()
+        val missing = favorites
+            .filterNot(known::contains)
+            .map {
+                ProjectState(
+                    id = "favorite:$it",
+                    worktree = it,
+                    name = projectName(it),
+                    favorite = true,
+                )
+            }
+
+        return sortProjects(next + missing)
+    }
+
+    private fun sortProjects(projects: List<ProjectState>): List<ProjectState> {
+        return projects.sortedWith(
+            compareByDescending<ProjectState> { it.favorite }
+                .thenBy { it.name.lowercase() }
+        )
+    }
+
+    private fun projectName(worktree: String): String {
+        val value = worktree.trimEnd('/', '\\')
+        if (value.isBlank()) return worktree
+        val slash = value.lastIndexOf('/')
+        val backslash = value.lastIndexOf('\\')
+        val index = maxOf(slash, backslash)
+        if (index < 0) return value
+        val name = value.substring(index + 1)
+        if (name.isBlank()) return value
+        return name
+    }
+
     private fun key(server: String, sessionId: String): String {
         return "$server::$sessionId"
     }
@@ -922,3 +1162,13 @@ private const val ReconcileKeepPasses = 1
 private const val OptimisticKeepPasses = 1
 private const val LogTag = "SessionService"
 private const val SessionResolveCooldownMs = 5000L
+private const val InitialSessionLimit = 50
+private const val SessionLimitStep = 50
+
+private fun startOfYesterday(): Long {
+    return LocalDate.now()
+        .minusDays(1)
+        .atStartOfDay(ZoneId.systemDefault())
+        .toInstant()
+        .toEpochMilli()
+}
