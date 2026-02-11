@@ -13,8 +13,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.time.LocalDate
-import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicLong
 
 class SessionService(
@@ -45,7 +43,7 @@ class SessionService(
         val loadingMoreMessages: Boolean = false,
         val loadingProjects: Boolean = false,
         val loadingSessions: Boolean = false,
-        val sessionRecentOnly: Boolean = true,
+        val sessionRecentOnly: Boolean = false,
         val sessionLimit: Int = InitialSessionLimit,
         val message: String? = null,
     )
@@ -68,7 +66,7 @@ class SessionService(
             loadingMoreMessages = false,
             loadingProjects = false,
             loadingSessions = false,
-            sessionRecentOnly = true,
+            sessionRecentOnly = false,
             message = null,
         )
     )
@@ -194,6 +192,7 @@ class SessionService(
                             id = it.id,
                             worktree = it.worktree,
                             name = if (it.name.isBlank()) projectName(it.worktree) else it.name,
+                            sandboxes = it.sandboxes,
                         )
                     },
                     favorites,
@@ -210,7 +209,7 @@ class SessionService(
                     selectedProject = next,
                     commands = if (next == null) emptyList() else local.value.commands,
                     sessions = if (next == null) emptyList() else local.value.sessions,
-                    sessionRecentOnly = true,
+                    sessionRecentOnly = false,
                     sessionLimit = InitialSessionLimit,
                 )
                 if (next == null) return@onSuccess
@@ -228,7 +227,7 @@ class SessionService(
             selectedProject = worktree,
             commands = emptyList(),
             sessions = emptyList(),
-            sessionRecentOnly = true,
+            sessionRecentOnly = false,
             sessionLimit = InitialSessionLimit,
         )
         loadSessions(worktree)
@@ -287,7 +286,11 @@ class SessionService(
     }
 
     suspend fun createSessionAndFocus(): Boolean {
-        val worktree = local.value.selectedProject ?: return false
+        val worktree = local.value.focusedSession?.directory ?: local.value.selectedProject ?: return false
+        return createSessionAndFocus(worktree)
+    }
+
+    suspend fun createSessionAndFocus(worktree: String): Boolean {
         local.value = local.value.copy(loadingSessions = true, message = null)
         val result = runCatching { proj.createSession(worktree, "Mobile session") }
         local.value = local.value.copy(loadingSessions = false)
@@ -301,14 +304,15 @@ class SessionService(
             version = created.version,
             directory = created.directory,
             updatedAt = created.updatedAt,
+            archivedAt = created.archivedAt,
         )
-        focusSession(session, worktree)
-        loadSessions(worktree)
+        focusSession(session, session.directory)
+        loadSessions(local.value.selectedProject ?: worktree)
         return true
     }
 
     fun openSession(session: SessionState) {
-        focusSession(session, local.value.selectedProject)
+        focusSession(session, session.directory)
     }
 
     fun send(text: String) {
@@ -588,34 +592,34 @@ class SessionService(
         val scope = scope ?: return
         scope.launch {
             local.value = local.value.copy(loadingSessions = true, message = null)
-            val recentOnly = local.value.sessionRecentOnly
-            val limit = local.value.sessionLimit
-            val result = runCatching { proj.sessions(worktree, limit) }
+            var partialFailure = false
+            val directories = workspaceDirectoriesForProject(worktree)
+            val result = runCatching {
+                directories
+                    .flatMap { directory ->
+                        runCatching { proj.sessions(directory, SessionFetchLimit) }
+                            .onFailure {
+                                partialFailure = true
+                                log.warn(LogTag, "sessions failed worktree=$directory reason=${it.message}")
+                            }
+                            .getOrDefault(emptyList())
+                            .map {
+                                SessionState(
+                                    id = it.id,
+                                    title = it.title,
+                                    version = it.version,
+                                    directory = workspaceId(if (it.directory.isBlank()) directory else it.directory),
+                                    updatedAt = it.updatedAt,
+                                    archivedAt = it.archivedAt,
+                                )
+                            }
+                    }
+            }
             local.value = local.value.copy(loadingSessions = false)
             result.onSuccess { list ->
-                val updatedAfter = startOfYesterday()
                 local.value = local.value.copy(
-                    sessions = list
-                        .map {
-                            SessionState(
-                                id = it.id,
-                                title = it.title,
-                                version = it.version,
-                                directory = it.directory,
-                                updatedAt = it.updatedAt,
-                            )
-                        }
-                        .sortedWith(
-                            compareByDescending<SessionState> { it.updatedAt ?: 0L }
-                                .thenByDescending { it.id }
-                        )
-                        .let {
-                            if (recentOnly) {
-                                it.filter { item -> (item.updatedAt ?: 0L) >= updatedAfter }
-                            } else {
-                                it
-                            }
-                        },
+                    sessions = limitSessionsPerWorkspace(list, WorkspaceSessionDisplayLimit),
+                    message = if (partialFailure) "Some workspaces failed to load sessions" else null,
                 )
             }
             result.onFailure {
@@ -625,6 +629,40 @@ class SessionService(
                 )
             }
         }
+    }
+
+    private fun workspaceDirectoriesForProject(worktree: String): List<String> {
+        val selected = workspaceId(worktree)
+        val project = local.value.projects.firstOrNull { workspaceId(it.worktree) == selected }
+        if (project == null) {
+            return listOf(selected)
+        }
+        return (listOf(project.worktree) + project.sandboxes)
+            .map(::workspaceId)
+            .distinct()
+    }
+
+    private fun limitSessionsPerWorkspace(sessions: List<SessionState>, limit: Int): List<SessionState> {
+        return sessions
+            .filter { it.archivedAt == null }
+            .groupBy { workspaceId(it.directory) }
+            .values
+            .flatMap {
+                it.sortedWith(
+                    compareByDescending<SessionState> { item -> item.updatedAt ?: 0L }
+                        .thenByDescending { item -> item.id }
+                ).take(limit)
+            }
+            .sortedWith(
+                compareByDescending<SessionState> { it.updatedAt ?: 0L }
+                    .thenByDescending { it.id }
+            )
+    }
+
+    private fun workspaceId(path: String): String {
+        val value = path.trimEnd('/', '\\')
+        if (value.isBlank()) return path
+        return value
     }
 
     private fun loadCommands(worktree: String) {
@@ -719,7 +757,7 @@ class SessionService(
     private fun handleSessionChanged(action: SessionEventAction.SessionChanged) {
         markSseApplied(action.type, null)
         val selected = local.value.selectedProject
-        if (!selected.isNullOrBlank() && action.directory == selected) {
+        if (!selected.isNullOrBlank() && workspaceDirectoriesForProject(selected).contains(workspaceId(action.directory))) {
             loadSessions(selected)
         }
         action.deletedSessionId?.let(::removeSession)
@@ -899,6 +937,7 @@ class SessionService(
                 version = found.version,
                 directory = found.directory,
                 updatedAt = found.updatedAt,
+                archivedAt = found.archivedAt,
             )
             log.debug(LogTag, "resolve session id=$sessionId track=${session.title}")
             upsertActiveSession(session, worktree)
@@ -1164,11 +1203,5 @@ private const val LogTag = "SessionService"
 private const val SessionResolveCooldownMs = 5000L
 private const val InitialSessionLimit = 50
 private const val SessionLimitStep = 50
-
-private fun startOfYesterday(): Long {
-    return LocalDate.now()
-        .minusDays(1)
-        .atStartOfDay(ZoneId.systemDefault())
-        .toInstant()
-        .toEpochMilli()
-}
+private const val SessionFetchLimit = 50
+private const val WorkspaceSessionDisplayLimit = 3

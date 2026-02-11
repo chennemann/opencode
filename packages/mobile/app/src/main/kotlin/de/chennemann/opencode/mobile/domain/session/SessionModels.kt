@@ -6,6 +6,7 @@ data class SessionProject(
     val id: String,
     val worktree: String,
     val name: String,
+    val sandboxes: List<String> = emptyList(),
 )
 
 data class SessionSummary(
@@ -14,6 +15,7 @@ data class SessionSummary(
     val version: String,
     val directory: String,
     val updatedAt: Long? = null,
+    val archivedAt: Long? = null,
 )
 
 data class SessionMessage(
