@@ -123,4 +123,30 @@ class StreamingMarkdownTextTest {
         assertEquals("a *b* c", text.text)
         assertEquals(0, text.spanStyles.size)
     }
+
+    @Test
+    fun renders_markdown_links_and_adds_url_annotation() {
+        val text = toAnnotatedString(
+            runs = listOf(
+                MarkdownRun(MarkdownKind.TEXT, "visit [site](https://example.com) now"),
+            ),
+        )
+
+        assertEquals("visit site now", text.text)
+        val annotation = text.getStringAnnotations(tag = "URL", start = 0, end = text.length).single()
+        assertEquals("https://example.com", annotation.item)
+    }
+
+    @Test
+    fun renders_autolinks_and_adds_url_annotation() {
+        val text = toAnnotatedString(
+            runs = listOf(
+                MarkdownRun(MarkdownKind.TEXT, "open https://example.com/path"),
+            ),
+        )
+
+        assertEquals("open https://example.com/path", text.text)
+        val annotation = text.getStringAnnotations(tag = "URL", start = 0, end = text.length).single()
+        assertEquals("https://example.com/path", annotation.item)
+    }
 }
