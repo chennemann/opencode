@@ -1,5 +1,6 @@
 package de.chennemann.opencode.mobile.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -22,11 +24,13 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,111 +55,155 @@ fun MessageComposer(
     onCommandDismiss: () -> Unit,
     onQuickSwitch: (String) -> Unit,
 ) {
-    val slashInteraction = remember { MutableInteractionSource() }
-    val slashPressed by slashInteraction.collectIsPressedAsState()
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Bottom,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        FilledTonalIconButton(
-            onClick = {
-                if (commandOpen) {
-                    onCommandDismiss()
-                    return@FilledTonalIconButton
-                }
-                onCommandToggle()
-            },
-            interactionSource = slashInteraction,
-            modifier = Modifier
-                .align(Alignment.Bottom)
-                .focusProperties { canFocus = false },
-            colors = if (commandOpen) {
-                IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            } else {
-                IconButtonDefaults.filledTonalIconButtonColors()
-            },
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.Bottom,
         ) {
-            Text("/")
-        }
-        Box(modifier = Modifier.weight(1f)) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(modifier = Modifier.weight(1f)) {
                 TextField(
                     value = draft,
                     onValueChange = onDraftChange,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Message") },
+                    placeholder = { Text("Message") },
+                    maxLines = 12,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        disabledContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    ),
                 )
-                if (quickSwitches.isNotEmpty()) {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(quickSwitches, key = { it.key }) { item ->
-                            FilledTonalIconButton(
-                                onClick = { onQuickSwitch(item.session.id) },
-                                shape = CircleShape,
-                                modifier = Modifier.size(36.dp),
-                            ) {
-                                Text(item.label)
-                            }
+
+                if (draft.isEmpty()) {
+                    DropdownMenu(
+                        expanded = commandOpen && suggestions.isNotEmpty(),
+                        onDismissRequest = {
+                            onCommandDismiss()
+                        },
+                        properties = PopupProperties(focusable = false),
+                        modifier = Modifier
+                            .fillMaxWidth(0.95f)
+                            .heightIn(max = 280.dp),
+                    ) {
+                        suggestions.forEach { command ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(
+                                            text = "/${command.name}",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (!command.description.isNullOrBlank()) {
+                                            Text(
+                                                text = command.description,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = { onCommandSelect(command) },
+                            )
+                        }
+                    }
+
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(bottom = 4.dp)
+                    ) {
+                        FilledTonalIconButton(
+                            onClick = {
+                                when {
+                                    commandOpen -> onCommandDismiss()
+                                    else -> onCommandToggle()
+                                }
+                            },
+                            modifier = Modifier
+                                .focusProperties { canFocus = false },
+                            colors = if (commandOpen) {
+                                IconButtonDefaults.filledTonalIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            } else {
+                                IconButtonDefaults.filledTonalIconButtonColors()
+                            },
+                        ) {
+                            Text("/")
                         }
                     }
                 }
             }
-            DropdownMenu(
-                expanded = commandOpen && suggestions.isNotEmpty(),
-                onDismissRequest = {
-                    if (!slashPressed) {
-                        onCommandDismiss()
+
+            if (connected) {
+                Box(
+                    Modifier
+                        .align(Alignment.Bottom)
+                        .padding(bottom = 4.dp)
+                ) {
+                    IconButton(
+                        onClick = onSend,
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = MaterialTheme.colorScheme.primary,
+                        ),
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(Icons.Send, "")
                     }
-                },
-                properties = PopupProperties(focusable = false),
-                modifier = Modifier
-                    .fillMaxWidth(0.95f)
-                    .heightIn(max = 280.dp),
-            ) {
-                suggestions.forEach { command ->
-                    DropdownMenuItem(
-                        text = {
-                            Column {
-                                Text(
-                                    text = "/${command.name}",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (!command.description.isNullOrBlank()) {
-                                    Text(
-                                        text = command.description,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        },
-                        onClick = { onCommandSelect(command) },
-                    )
+                }
+            } else {
+                Button(
+                    onClick = onReload,
+                    modifier = Modifier.align(Alignment.Bottom),
+                ) {
+                    Text("Reload")
                 }
             }
         }
-        if (connected) {
-            IconButton(
-                onClick = onSend,
-                colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = MaterialTheme.colorScheme.primary,
-                ),
-                modifier = Modifier.align(Alignment.Bottom),
-            ) {
-                Icon(Icons.Send, "")
-            }
-        } else {
-            Button(
-                onClick = onReload,
-                modifier = Modifier.align(Alignment.Bottom),
-            ) {
-                Text("Reload")
+
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (quickSwitches.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    items(quickSwitches, key = { it.key }) { item ->
+                        FilledTonalIconButton(
+                            onClick = { onQuickSwitch(item.session.id) },
+                            shape = CircleShape,
+                            modifier = Modifier.size(36.dp),
+                            colors = if (item.active) {
+                                IconButtonDefaults.filledTonalIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                                )
+                            } else {
+                                IconButtonDefaults.filledTonalIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                        ) {
+                            Text(item.label)
+                        }
+                    }
+                }
             }
         }
     }
