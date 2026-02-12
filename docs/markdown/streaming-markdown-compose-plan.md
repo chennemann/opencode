@@ -45,8 +45,8 @@
 
 - [x] Replace assistant message body rendering with `StreamingMarkdownText`.
 - [x] Keep user message and tool call rendering unchanged for first rollout.
-- [ ] Verify streaming updates preserve list follow and scroll behavior.
-- [ ] Verify rendered assistant text still supports expected selection and copy behavior.
+- [x] Verify streaming updates preserve list follow and scroll behavior.
+- [x] Verify rendered assistant text still supports expected selection and copy behavior.
 - [x] Keep parser and adapter wiring isolated from screen-specific business logic.
 
 ## 7) Add automated tests
