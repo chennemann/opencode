@@ -106,4 +106,53 @@ class StreamingMarkdownParserTest {
             parser.end(),
         )
     }
+
+    @Test
+    fun supports_escaped_backticks_without_toggling_inline_mode() {
+        val parser = StreamingMarkdownParser()
+
+        parser.start()
+        parser.write("foo \\`bar\\` baz")
+
+        assertEquals(
+            listOf(
+                MarkdownRun(MarkdownKind.TEXT, "foo `bar` baz"),
+            ),
+            parser.end(),
+        )
+    }
+
+    @Test
+    fun supports_multi_backtick_delimiters() {
+        val parser = StreamingMarkdownParser()
+
+        parser.start()
+        parser.write("foo ``bar`` baz")
+
+        assertEquals(
+            listOf(
+                MarkdownRun(MarkdownKind.TEXT, "foo "),
+                MarkdownRun(MarkdownKind.INLINE_CODE, "bar"),
+                MarkdownRun(MarkdownKind.TEXT, " baz"),
+            ),
+            parser.end(),
+        )
+    }
+
+    @Test
+    fun keeps_non_matching_backticks_inside_code() {
+        val parser = StreamingMarkdownParser()
+
+        parser.start()
+        parser.write("foo ``bar`baz`` end")
+
+        assertEquals(
+            listOf(
+                MarkdownRun(MarkdownKind.TEXT, "foo "),
+                MarkdownRun(MarkdownKind.INLINE_CODE, "bar`baz"),
+                MarkdownRun(MarkdownKind.TEXT, " end"),
+            ),
+            parser.end(),
+        )
+    }
 }

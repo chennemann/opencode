@@ -43,8 +43,8 @@
 
 ## 6) Integrate in conversation UI
 
-- [ ] Replace assistant message body rendering with `StreamingMarkdownText`.
-- [ ] Keep user message and tool call rendering unchanged for first rollout.
+- [x] Replace assistant message body rendering with `StreamingMarkdownText`.
+- [x] Keep user message and tool call rendering unchanged for first rollout.
 - [ ] Verify streaming updates preserve list follow and scroll behavior.
 - [ ] Verify rendered assistant text still supports expected selection and copy behavior.
 - [x] Keep parser and adapter wiring isolated from screen-specific business logic.
@@ -74,12 +74,12 @@
 - [x] Run `./gradlew ktlintFormat` in `packages/mobile`.
 - [x] Run `./gradlew ktlintCheck` in `packages/mobile`.
 - [x] Run `./gradlew clean build` in `packages/mobile`.
-- [ ] Resolve failures and rerun gates until all pass.
+- [x] Resolve failures and rerun gates until all pass.
 
 ## 10) Track post-v1 follow-ups
 
-- [ ] Add escaped backtick handling.
-- [ ] Add multi-backtick delimiter support.
+- [x] Add escaped backtick handling.
+- [x] Add multi-backtick delimiter support.
 - [ ] Add emphasis and strong token streaming support.
 - [ ] Add fenced code block streaming state support.
 - [ ] Add link and autolink token support.
