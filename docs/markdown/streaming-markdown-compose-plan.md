@@ -64,7 +64,7 @@
 
 ## 8) Validate runtime behavior
 
-- [ ] Add benchmark or timing test for incremental append path versus full reparse path.
+- [x] Add benchmark or timing test for incremental append path versus full reparse path.
 - [x] Validate long message streams with many small chunks for latency and jank.
 - [x] Validate multiline mixed plain/code streams for rendering correctness.
 - [x] Validate memory remains bounded during prolonged streaming sessions.
