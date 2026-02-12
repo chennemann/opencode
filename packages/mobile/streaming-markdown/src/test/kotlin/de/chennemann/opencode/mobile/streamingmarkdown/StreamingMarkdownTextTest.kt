@@ -95,4 +95,32 @@ class StreamingMarkdownTextTest {
         assertTrue(runs.any { it.kind == MarkdownKind.INLINE_CODE })
         assertFalse(runs.isEmpty())
     }
+
+    @Test
+    fun renders_emphasis_and_strong_segments_from_plain_text_runs() {
+        val text = toAnnotatedString(
+            runs = listOf(
+                MarkdownRun(MarkdownKind.TEXT, "a *b* **c** d"),
+            ),
+        )
+
+        assertEquals("a b c d", text.text)
+        assertEquals(2, text.spanStyles.size)
+        assertEquals(2, text.spanStyles[0].start)
+        assertEquals(3, text.spanStyles[0].end)
+        assertEquals(4, text.spanStyles[1].start)
+        assertEquals(5, text.spanStyles[1].end)
+    }
+
+    @Test
+    fun keeps_escaped_asterisks_as_literal_text() {
+        val text = toAnnotatedString(
+            runs = listOf(
+                MarkdownRun(MarkdownKind.TEXT, "a \\*b\\* c"),
+            ),
+        )
+
+        assertEquals("a *b* c", text.text)
+        assertEquals(0, text.spanStyles.size)
+    }
 }
