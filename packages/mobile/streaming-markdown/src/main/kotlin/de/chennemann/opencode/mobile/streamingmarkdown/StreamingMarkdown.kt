@@ -12,7 +12,9 @@ data class MarkdownRun(
 
 class StreamingMarkdownParser {
     private val runs = mutableListOf<MarkdownRun>()
-    private var code = false
+    private var open = 0
+    private var ticks = 0
+    private var slash = false
 
     fun start(): List<MarkdownRun> {
         reset()
@@ -20,30 +22,83 @@ class StreamingMarkdownParser {
     }
 
     fun write(chunk: String): List<MarkdownRun> {
-        val normalized = chunk.replace("\r\n", "\n").replace('\r', '\n')
-        normalized.forEach { char ->
-            if (char == '`') {
-                code = !code
-                return@forEach
-            }
-            if (char == '\n') {
-                code = false
-                add(MarkdownKind.TEXT, "\n")
-                return@forEach
-            }
-            add(if (code) MarkdownKind.INLINE_CODE else MarkdownKind.TEXT, char.toString())
-        }
+        chunk
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .forEach { char -> step(char) }
         return snapshot()
     }
 
-    fun end(): List<MarkdownRun> = snapshot()
+    fun end(): List<MarkdownRun> {
+        flush(true)
+        if (!slash) return snapshot()
+        add(kind(), "\\")
+        slash = false
+        return snapshot()
+    }
 
     fun reset() {
         runs.clear()
-        code = false
+        open = 0
+        ticks = 0
+        slash = false
     }
 
     fun snapshot(): List<MarkdownRun> = runs.toList()
+
+    private fun step(char: Char) {
+        if (ticks > 0 && char != '`') {
+            flush(false)
+        }
+        if (slash) {
+            if (char == '`') {
+                add(kind(), "`")
+                slash = false
+                return
+            }
+            add(kind(), "\\")
+            slash = false
+        }
+        if (char == '\\') {
+            slash = true
+            return
+        }
+        if (char == '`') {
+            ticks += 1
+            return
+        }
+        if (char == '\n') {
+            if (ticks > 0) {
+                flush(false)
+            }
+            open = 0
+            add(MarkdownKind.TEXT, "\n")
+            return
+        }
+        add(kind(), char.toString())
+    }
+
+    private fun flush(end: Boolean) {
+        if (ticks == 0) return
+        if (open == 0) {
+            if (end) {
+                ticks = 0
+                return
+            }
+            open = ticks
+            ticks = 0
+            return
+        }
+        if (ticks == open) {
+            open = 0
+            ticks = 0
+            return
+        }
+        add(MarkdownKind.INLINE_CODE, "`".repeat(ticks))
+        ticks = 0
+    }
+
+    private fun kind() = if (open > 0) MarkdownKind.INLINE_CODE else MarkdownKind.TEXT
 
     private fun add(kind: MarkdownKind, value: String) {
         if (value.isEmpty()) return
