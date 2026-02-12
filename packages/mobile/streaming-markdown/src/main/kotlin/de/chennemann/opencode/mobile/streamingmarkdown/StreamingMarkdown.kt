@@ -5,11 +5,13 @@ enum class MarkdownKind {
     INLINE_CODE,
     EMPHASIS,
     STRONG,
+    LINK,
 }
 
 data class MarkdownRun(
     val kind: MarkdownKind,
     val value: String,
+    val href: String? = null,
 )
 
 class StreamingMarkdownParser {
