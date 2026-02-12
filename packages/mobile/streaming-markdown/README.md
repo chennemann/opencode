@@ -11,7 +11,7 @@ Compose-specific streaming markdown rendering module for mobile.
 ## Non-goals (v1)
 
 - Full markdown specification support.
-- Fenced code blocks, links, tables, and nested markdown structures.
+- Tables and nested markdown structures.
 - Rich text editor behavior.
 
 ## Planned API shape
@@ -27,3 +27,14 @@ Compose-specific streaming markdown rendering module for mobile.
 - Add new token kinds in an additive way only.
 - Keep parser lifecycle methods stable (`start`, `write`, `end`, `reset`).
 - Keep default inline-code behavior line-scoped until a versioned parser mode is introduced.
+
+## Publish locally
+
+From `packages/mobile`:
+
+- `./gradlew :streaming-markdown:publishReleasePublicationToMavenLocal`
+
+Publication coordinates are configured in `packages/mobile/gradle.properties`:
+
+- `streamingMarkdownGroup`
+- `streamingMarkdownVersion`
