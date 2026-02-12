@@ -1,9 +1,8 @@
 package de.chennemann.opencode.mobile.ui.conversation
 
-import androidx.compose.ui.test.assertDoesNotExist
-import androidx.compose.ui.test.assertExists
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.ToolCallState
@@ -44,7 +43,7 @@ class ConversationScreenStreamingMarkdownTest {
             )
         }
 
-        compose.onNodeWithText("hello code world").assertExists()
-        compose.onNodeWithText("hello `code` world").assertDoesNotExist()
+        compose.onAllNodesWithText("hello code world").assertCountEquals(1)
+        compose.onAllNodesWithText("hello `code` world").assertCountEquals(0)
     }
 }
