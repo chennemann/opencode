@@ -6,6 +6,7 @@ enum class MarkdownKind {
     EMPHASIS,
     STRONG,
     LINK,
+    BLOCK_CODE,
 }
 
 data class MarkdownRun(
@@ -124,4 +125,54 @@ fun parseMarkdown(content: String): List<MarkdownRun> {
     parser.start()
     parser.write(content)
     return parser.end()
+}
+
+fun parseMarkdownDocument(content: String): List<MarkdownRun> {
+    val runs = mutableListOf<MarkdownRun>()
+    var block = false
+    val normalized = content
+        .replace("\r\n", "\n")
+        .replace('\r', '\n')
+    val lines = normalized.split('\n')
+    lines.forEachIndexed { index, line ->
+            if (line.trimStart().startsWith("```")) {
+                block = !block
+                return@forEachIndexed
+            }
+            val text = if (index == lines.lastIndex) {
+                line
+            } else {
+                "$line\n"
+            }
+            if (text.isEmpty()) {
+                return@forEachIndexed
+            }
+            if (block) {
+                appendRun(runs, MarkdownKind.BLOCK_CODE, text)
+                return@forEachIndexed
+            }
+            parseMarkdown(text).forEach { run ->
+                appendRun(runs, run.kind, run.value, run.href)
+            }
+        }
+    return runs
+}
+
+private fun appendRun(
+    runs: MutableList<MarkdownRun>,
+    kind: MarkdownKind,
+    value: String,
+    href: String? = null,
+) {
+    if (value.isEmpty()) return
+    val run = runs.lastOrNull()
+    if (run == null) {
+        runs += MarkdownRun(kind = kind, value = value, href = href)
+        return
+    }
+    if (run.kind != kind || run.href != href) {
+        runs += MarkdownRun(kind = kind, value = value, href = href)
+        return
+    }
+    runs[runs.lastIndex] = run.copy(value = run.value + value)
 }

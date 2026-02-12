@@ -149,4 +149,32 @@ class StreamingMarkdownTextTest {
         val annotation = text.getStringAnnotations(tag = "URL", start = 0, end = text.length).single()
         assertEquals("https://example.com/path", annotation.item)
     }
+
+    @Test
+    fun parses_fenced_code_blocks_without_rendering_fence_delimiters() {
+        val runs = parseMarkdownDocument("a\n```kotlin\nval x = 1\n```\nb")
+
+        assertEquals(
+            listOf(
+                MarkdownRun(MarkdownKind.TEXT, "a\n"),
+                MarkdownRun(MarkdownKind.BLOCK_CODE, "val x = 1\n"),
+                MarkdownRun(MarkdownKind.TEXT, "b"),
+            ),
+            runs,
+        )
+    }
+
+    @Test
+    fun uses_document_parser_for_streaming_state_when_fence_exists() {
+        val state = StreamingMarkdownState(streaming = true)
+
+        val runs = state.update("```\ncode\n```")
+
+        assertEquals(
+            listOf(
+                MarkdownRun(MarkdownKind.BLOCK_CODE, "code\n"),
+            ),
+            runs,
+        )
+    }
 }

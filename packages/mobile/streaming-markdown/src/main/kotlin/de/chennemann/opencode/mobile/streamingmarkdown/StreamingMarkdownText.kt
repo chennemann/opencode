@@ -38,6 +38,10 @@ fun StreamingMarkdownText(
         color = Color(0xFF1565C0),
         textDecoration = TextDecoration.Underline,
     ),
+    blockCode: SpanStyle = SpanStyle(
+        fontFamily = FontFamily.Monospace,
+        background = Color(0x1A7A7A7A),
+    ),
 ) {
     val model = remember(streaming) {
         StreamingMarkdownState(streaming = streaming)
@@ -45,13 +49,14 @@ fun StreamingMarkdownText(
     val runs = remember(content, model) {
         model.update(content)
     }
-    val text = remember(runs, inlineCode, emphasis, strong, link) {
+    val text = remember(runs, inlineCode, emphasis, strong, link, blockCode) {
         toAnnotatedString(
             runs = runs,
             inlineCode = inlineCode,
             emphasis = emphasis,
             strong = strong,
             link = link,
+            blockCode = blockCode,
         )
     }
     BasicText(
@@ -78,6 +83,10 @@ fun toAnnotatedString(
     link: SpanStyle = SpanStyle(
         color = Color(0xFF1565C0),
         textDecoration = TextDecoration.Underline,
+    ),
+    blockCode: SpanStyle = SpanStyle(
+        fontFamily = FontFamily.Monospace,
+        background = Color(0x1A7A7A7A),
     ),
 ): AnnotatedString = buildAnnotatedString {
     linkify(decorate(runs)).forEach { run ->
@@ -117,6 +126,12 @@ fun toAnnotatedString(
                     end = length,
                 )
             }
+            return@forEach
+        }
+        if (run.kind == MarkdownKind.BLOCK_CODE) {
+            pushStyle(blockCode)
+            append(run.value)
+            pop()
             return@forEach
         }
         pushStyle(link)
@@ -253,11 +268,16 @@ class StreamingMarkdownState(private val streaming: Boolean) {
 
     fun update(content: String): List<MarkdownRun> {
         if (!streaming) {
-            runs = parseMarkdown(content)
+            runs = parseMarkdownDocument(content)
             previous = content
             return runs
         }
         if (content == previous) return runs
+        if (content.contains("```")) {
+            runs = parseMarkdownDocument(content)
+            previous = content
+            return runs
+        }
         if (content.startsWith(previous)) {
             parser.write(content.substring(previous.length))
             previous = content
