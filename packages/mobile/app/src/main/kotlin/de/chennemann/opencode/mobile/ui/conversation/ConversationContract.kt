@@ -1,6 +1,7 @@
 package de.chennemann.opencode.mobile.ui.conversation
 
 import de.chennemann.opencode.mobile.domain.session.CommandState
+import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.ToolCallState
 
@@ -25,8 +26,16 @@ data class ConversationUiState(
     val draft: String,
     val slashSuggestions: List<CommandState>,
     val commandOpen: Boolean,
+    val quickSwitches: List<QuickSwitchState>,
     val stepOpen: Map<String, Boolean>,
     val callOpen: Map<String, Boolean>,
+)
+
+data class QuickSwitchState(
+    val key: String,
+    val label: String,
+    val project: String,
+    val session: SessionState,
 )
 
 sealed interface ConversationEvent {
@@ -43,6 +52,8 @@ sealed interface ConversationEvent {
     data object CommandListToggled : ConversationEvent
 
     data object CommandListDismissed : ConversationEvent
+
+    data class QuickSwitchTapped(val sessionId: String) : ConversationEvent
 
     data object SendTapped : ConversationEvent
 
