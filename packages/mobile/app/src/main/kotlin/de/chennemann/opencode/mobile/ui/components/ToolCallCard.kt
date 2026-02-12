@@ -1,5 +1,10 @@
 package de.chennemann.opencode.mobile.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -87,9 +92,15 @@ fun ToolCallCard(call: ToolCallState, expanded: Boolean, onToggle: () -> Unit) {
                 Spacer(modifier = Modifier.width(8.dp))
                 StatusDot(call.status)
             }
-            if (expanded) {
-                call.details.forEach { line ->
-                    SelectionContainer { Text(line) }
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(animationSpec = tween(200)) + fadeIn(animationSpec = tween(160)),
+                exit = shrinkVertically(animationSpec = tween(200)),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    call.details.forEach { line ->
+                        SelectionContainer { Text(line) }
+                    }
                 }
             }
         }

@@ -9,7 +9,6 @@ data class ConversationTurnUiState(
     val id: String,
     val userText: String?,
     val toolCalls: List<ToolCallState>,
-    val activeTool: ToolCallState? = null,
     val answerWriting: Boolean = false,
     val systemTexts: List<String>,
     val startedAt: Long? = null,

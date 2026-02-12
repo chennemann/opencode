@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -116,9 +119,8 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
         turns.lastOrNull()?.systemTexts?.lastOrNull()?.length,
         turns.lastOrNull()?.toolCalls?.size,
         turns.lastOrNull()?.toolCalls?.sumOf { it.details.size },
-        turns.lastOrNull()?.activeTool?.id,
-        turns.lastOrNull()?.activeTool?.status,
-        turns.lastOrNull()?.activeTool?.details?.size,
+        turns.lastOrNull()?.toolCalls?.lastOrNull()?.id,
+        turns.lastOrNull()?.toolCalls?.lastOrNull()?.details?.size,
         turns.lastOrNull()?.userText?.length,
         state.stepOpen[turns.lastOrNull()?.id],
         state.callOpen,
@@ -181,7 +183,7 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                             callOpen = state.callOpen,
                             onToggleSteps = { onEvent(ConversationEvent.ToggleSteps(turn.id)) },
                             onToggleToolCall = { onEvent(ConversationEvent.ToggleToolCall(it)) },
-                            onEnsureToolVisible = { toolId ->
+                            onEnsureToolVisible = { toolId, alignTop, topCompensation ->
                                 follow = false
                                 scope.launch {
                                     ensureToolVisible(
@@ -190,6 +192,8 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                                         tools = tools,
                                         viewportTop = viewportTop,
                                         viewportBottom = viewportBottom,
+                                        alignTop = alignTop,
+                                        topCompensation = topCompensation,
                                     )
                                 }
                             },
@@ -197,6 +201,9 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                                 tools[toolId] = ToolPosition(top = top, bottom = bottom)
                             },
                         )
+                    }
+                    item("bottom-spacer") {
+                        Spacer(modifier = Modifier.height(24.dp))
                     }
                 }
 
@@ -256,7 +263,7 @@ private fun ConversationTurnItem(
     callOpen: Map<String, Boolean>,
     onToggleSteps: () -> Unit,
     onToggleToolCall: (String) -> Unit,
-    onEnsureToolVisible: (String) -> Unit,
+    onEnsureToolVisible: (String, Boolean, Int) -> Unit,
     onToolLayout: (String, Int, Int) -> Unit,
 ) {
     Column(
@@ -278,10 +285,10 @@ private fun ConversationTurnItem(
             }
         }
 
-        if (turn.userText != null || turn.toolCalls.isNotEmpty() || turn.activeTool != null) {
+        if (turn.userText != null || turn.toolCalls.isNotEmpty()) {
             ToolCallsSection(
                 calls = turn.toolCalls,
-                activeTool = turn.activeTool,
+                answerWriting = turn.answerWriting,
                 startedAt = turn.startedAt,
                 completedAt = turn.completedAt,
                 active = active,
@@ -308,7 +315,7 @@ private fun ConversationTurnItem(
 @Composable
 private fun ToolCallsSection(
     calls: List<ToolCallState>,
-    activeTool: ToolCallState?,
+    answerWriting: Boolean,
     startedAt: Long?,
     completedAt: Long?,
     active: Boolean,
@@ -316,16 +323,30 @@ private fun ToolCallsSection(
     callOpen: Map<String, Boolean>,
     onToggleSteps: () -> Unit,
     onToggleToolCall: (String) -> Unit,
-    onEnsureToolVisible: (String) -> Unit,
+    onEnsureToolVisible: (String, Boolean, Int) -> Unit,
     onToolLayout: (String, Int, Int) -> Unit,
 ) {
-    val duration = rememberTurnDuration(startedAt, completedAt, active)
-    val count = calls.size + if (activeTool == null) 0 else 1
-    val shown = if (open) {
-        calls + listOfNotNull(activeTool)
-    } else {
-        listOfNotNull(activeTool)
+    var lifted by remember { mutableStateOf<String?>(null) }
+    val position = remember { mutableStateMapOf<String, ToolPosition>() }
+    val collapsed = remember { mutableStateMapOf<String, Int>() }
+    val activeCall = if (active && !answerWriting) calls.lastOrNull() else null
+    val selected = lifted?.takeIf { id -> calls.any { it.id == id } }
+    val card = remember {
+        movableContentOf<ToolCallState, Boolean, () -> Unit> { call, expanded, onToggle ->
+            ToolCallCard(
+                call = call,
+                expanded = expanded,
+                onToggle = onToggle,
+            )
+        }
     }
+    LaunchedEffect(calls.size, calls.lastOrNull()?.id) {
+        if (lifted != null && selected == null) {
+            lifted = null
+        }
+    }
+    val duration = rememberTurnDuration(startedAt, completedAt, active)
+    val count = calls.size
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -335,7 +356,12 @@ private fun ToolCallsSection(
         androidx.compose.foundation.layout.Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onToggleSteps)
+                .clickable {
+                    if (open) {
+                        lifted = null
+                    }
+                    onToggleSteps()
+                }
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
@@ -354,8 +380,35 @@ private fun ToolCallsSection(
                 Text(duration)
             }
         }
+        if (!open && activeCall != null) {
+            val expanded = callOpen[activeCall.id] == true
+            Box(
+                modifier = Modifier.onGloballyPositioned {
+                    val top = it.positionInRoot().y.roundToInt()
+                    val bottom = (it.positionInRoot().y + it.size.height).roundToInt()
+                    val height = bottom - top
+                    position[activeCall.id] = ToolPosition(top, bottom)
+                    if (!expanded) {
+                        collapsed[activeCall.id] = height
+                    }
+                    onToolLayout(activeCall.id, top, bottom)
+                },
+            ) {
+                card(
+                    activeCall,
+                    expanded,
+                ) {
+                    lifted = activeCall.id
+                    onToggleSteps()
+                    if (!expanded) {
+                        onToggleToolCall(activeCall.id)
+                    }
+                    onEnsureToolVisible(activeCall.id, true, 0)
+                }
+            }
+        }
         AnimatedVisibility(
-            visible = shown.isNotEmpty(),
+            visible = open && calls.isNotEmpty(),
             enter = expandVertically(
                 expandFrom = Alignment.Top,
                 animationSpec = tween(240),
@@ -368,25 +421,49 @@ private fun ToolCallsSection(
             Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                shown.forEach { call ->
+                calls.forEach { call ->
+                    val expanded = callOpen[call.id] == true
                     Box(
                         modifier = Modifier.onGloballyPositioned {
                             val top = it.positionInRoot().y.roundToInt()
                             val bottom = (it.positionInRoot().y + it.size.height).roundToInt()
+                            val height = bottom - top
+                            position[call.id] = ToolPosition(top, bottom)
+                            if (!expanded) {
+                                collapsed[call.id] = height
+                            }
                             onToolLayout(call.id, top, bottom)
                         },
                     ) {
-                        val expanded = callOpen[call.id] == true
-                        ToolCallCard(
-                            call = call,
-                            expanded = expanded,
-                            onToggle = {
-                                onToggleToolCall(call.id)
-                                if (!expanded) {
-                                    onEnsureToolVisible(call.id)
-                                }
-                            },
-                        )
+                        val previous = callOpen.entries.firstOrNull { it.value }?.key
+                        val topCompensation = if (previous != null && previous != call.id && !expanded) {
+                            val selectedPosition = position[previous]
+                            val nextPosition = position[call.id]
+                            val collapsedHeight = collapsed[previous]
+                            if (
+                                selectedPosition != null &&
+                                nextPosition != null &&
+                                collapsedHeight != null &&
+                                selectedPosition.top < nextPosition.top
+                            ) {
+                                (selectedPosition.bottom - selectedPosition.top - collapsedHeight).coerceAtLeast(0)
+                            } else {
+                                0
+                            }
+                        } else {
+                            0
+                        }
+                        val toggle = {
+                            onToggleToolCall(call.id)
+                            if (!expanded) {
+                                onEnsureToolVisible(call.id, true, topCompensation)
+                            }
+                        }
+                        if (call.id == selected) {
+                            card(call, expanded, toggle)
+                            return@Box
+                        }
+                        ToolCallCard(call = call, expanded = expanded, onToggle = toggle)
                     }
                 }
             }
@@ -457,14 +534,32 @@ private suspend fun ensureToolVisible(
     tools: Map<String, ToolPosition>,
     viewportTop: Int,
     viewportBottom: Int,
+    alignTop: Boolean,
+    topCompensation: Int,
 ) {
     if (viewportBottom <= viewportTop) return
+    if (alignTop && topCompensation > 0) {
+        delay(16)
+        val before = tools[toolId] ?: return
+        val predicted = (before.top - viewportTop - topCompensation).toFloat()
+        if (predicted != 0f) {
+            list.animateScrollBy(predicted)
+        }
+        delay(220)
+        val settled = tools[toolId] ?: return
+        val correction = (settled.top - viewportTop).toFloat()
+        if (correction != 0f) {
+            list.animateScrollBy(correction)
+        }
+        return
+    }
     repeat(8) {
         delay(16)
         val tool = tools[toolId] ?: return
         val height = tool.bottom - tool.top
         val viewportHeight = viewportBottom - viewportTop
         val delta = when {
+            alignTop -> (tool.top - viewportTop - topCompensation).toFloat()
             height >= viewportHeight -> (tool.top - viewportTop).toFloat()
             tool.bottom > viewportBottom -> (tool.bottom - viewportBottom).toFloat()
             tool.top < viewportTop -> (tool.top - viewportTop).toFloat()

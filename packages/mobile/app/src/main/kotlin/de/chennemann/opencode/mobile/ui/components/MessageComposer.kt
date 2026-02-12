@@ -33,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
@@ -55,6 +57,8 @@ fun MessageComposer(
 ) {
     var commandOpen by remember { mutableStateOf(false) }
     var dismissedAt by remember { mutableLongStateOf(0L) }
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -171,6 +175,8 @@ fun MessageComposer(
                             onSend()
                             if (draft.isNotBlank()) {
                                 commandOpen = false
+                                focus.clearFocus()
+                                keyboard?.hide()
                             }
                         },
                         colors = IconButtonDefaults.iconButtonColors(
