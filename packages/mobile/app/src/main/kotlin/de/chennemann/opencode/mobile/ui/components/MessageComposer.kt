@@ -1,13 +1,10 @@
 package de.chennemann.opencode.mobile.ui.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -27,7 +24,9 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -45,16 +44,15 @@ fun MessageComposer(
     draft: String,
     connected: Boolean,
     suggestions: List<CommandState>,
-    commandOpen: Boolean,
     quickSwitches: List<QuickSwitchState>,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onReload: () -> Unit,
     onCommandSelect: (CommandState) -> Unit,
-    onCommandToggle: () -> Unit,
-    onCommandDismiss: () -> Unit,
     onQuickSwitch: (String) -> Unit,
 ) {
+    var commandOpen by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -67,7 +65,10 @@ fun MessageComposer(
             Box(modifier = Modifier.weight(1f)) {
                 TextField(
                     value = draft,
-                    onValueChange = onDraftChange,
+                    onValueChange = {
+                        onDraftChange(it)
+                        commandOpen = commandOpen && (it.isBlank() || it.startsWith("/"))
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("Message") },
                     maxLines = 12,
@@ -84,9 +85,7 @@ fun MessageComposer(
                 if (draft.isEmpty()) {
                     DropdownMenu(
                         expanded = commandOpen && suggestions.isNotEmpty(),
-                        onDismissRequest = {
-                            onCommandDismiss()
-                        },
+                        onDismissRequest = { commandOpen = false },
                         properties = PopupProperties(focusable = false),
                         modifier = Modifier
                             .fillMaxWidth(0.95f)
@@ -112,7 +111,10 @@ fun MessageComposer(
                                         }
                                     }
                                 },
-                                onClick = { onCommandSelect(command) },
+                                onClick = {
+                                    onCommandSelect(command)
+                                    commandOpen = false
+                                },
                             )
                         }
                     }
@@ -124,10 +126,7 @@ fun MessageComposer(
                     ) {
                         FilledTonalIconButton(
                             onClick = {
-                                when {
-                                    commandOpen -> onCommandDismiss()
-                                    else -> onCommandToggle()
-                                }
+                                commandOpen = !commandOpen
                             },
                             modifier = Modifier
                                 .focusProperties { canFocus = false },
@@ -153,7 +152,12 @@ fun MessageComposer(
                         .padding(bottom = 4.dp)
                 ) {
                     IconButton(
-                        onClick = onSend,
+                        onClick = {
+                            onSend()
+                            if (draft.isNotBlank()) {
+                                commandOpen = false
+                            }
+                        },
                         colors = IconButtonDefaults.iconButtonColors(
                             contentColor = MaterialTheme.colorScheme.primary,
                         ),

@@ -25,7 +25,6 @@ data class ConversationUiState(
     val scroll: Long,
     val draft: String,
     val slashSuggestions: List<CommandState>,
-    val commandOpen: Boolean,
     val quickSwitches: List<QuickSwitchState>,
     val stepOpen: Map<String, Boolean>,
     val callOpen: Map<String, Boolean>,
@@ -49,10 +48,6 @@ sealed interface ConversationEvent {
     data class DraftChanged(val value: String) : ConversationEvent
 
     data class SlashCommandSelected(val name: String) : ConversationEvent
-
-    data object CommandListToggled : ConversationEvent
-
-    data object CommandListDismissed : ConversationEvent
 
     data class QuickSwitchTapped(val sessionId: String) : ConversationEvent
 
