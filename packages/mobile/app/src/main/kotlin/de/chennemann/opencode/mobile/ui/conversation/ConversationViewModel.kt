@@ -34,6 +34,7 @@ class ConversationViewModel(
     private data class GlobalRenderState(
         val title: String,
         val status: ServerState,
+        val focusedSession: SessionState?,
         val turns: List<ConversationTurnUiState>,
         val commands: List<CommandState>,
         val projects: List<ProjectState>,
@@ -60,6 +61,7 @@ class ConversationViewModel(
             GlobalRenderState(
                 title = it.focusedSession?.title ?: "No session selected",
                 status = it.status,
+                focusedSession = it.focusedSession,
                 turns = splitActiveTools(mapper.map(it.focusedMessages)),
                 commands = mergeCommands(it.commands),
                 projects = it.projects,
@@ -81,7 +83,7 @@ class ConversationViewModel(
             draft = local.draft,
             slashSuggestions = slashSuggestions(local.draft, global.commands, local.commandOpen),
             commandOpen = local.commandOpen,
-            quickSwitches = quickSwitches(global.projects, global.activeSessions),
+            quickSwitches = quickSwitches(global.projects, global.activeSessions, global.focusedSession),
             stepOpen = local.stepOpen,
             callOpen = local.callOpen,
         )
@@ -194,8 +196,13 @@ class ConversationViewModel(
             .distinctBy { it.name.lowercase() }
     }
 
-    private fun quickSwitches(projects: List<ProjectState>, sessions: List<SessionState>): List<QuickSwitchState> {
+    private fun quickSwitches(
+        projects: List<ProjectState>,
+        sessions: List<SessionState>,
+        focusedSession: SessionState?,
+    ): List<QuickSwitchState> {
         val cutoff = System.currentTimeMillis() - QuickSwitchWindowMs
+        val focused = focusedSession?.let { workspaceId(it.directory) }
         return sessions
             .groupBy { workspaceId(it.directory) }
             .mapNotNull { (directory, list) ->
@@ -205,11 +212,13 @@ class ConversationViewModel(
                 val session = list.maxWithOrNull(compareBy<SessionState>({ it.updatedAt ?: 0L }, { it.id }))
                     ?: return@mapNotNull null
                 val project = projectName(projects, directory)
+                val active = focusedSession?.id == session.id || focused == directory
                 QuickSwitchState(
                     key = directory,
                     label = projectInitial(project),
                     project = project,
                     session = session,
+                    active = active,
                 )
             }
             .sortedWith(compareByDescending<QuickSwitchState> { it.session.updatedAt ?: 0L }.thenByDescending { it.session.id })
