@@ -56,6 +56,7 @@ import de.chennemann.opencode.mobile.icons.Icons
 import de.chennemann.opencode.mobile.ui.components.ConversationHeader
 import de.chennemann.opencode.mobile.ui.components.MessageComposer
 import de.chennemann.opencode.mobile.ui.components.ToolCallCard
+import de.chennemann.opencode.mobile.streamingmarkdown.StreamingMarkdownText
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -303,8 +304,8 @@ private fun ConversationTurnItem(
 
         turn.systemTexts.forEach {
             SelectionContainer {
-                Text(
-                    it,
+                StreamingMarkdownText(
+                    content = it,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
