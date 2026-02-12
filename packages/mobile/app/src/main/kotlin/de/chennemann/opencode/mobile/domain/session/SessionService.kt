@@ -212,6 +212,7 @@ class SessionService(
                     sessionRecentOnly = false,
                     sessionLimit = InitialSessionLimit,
                 )
+                preloadFavoriteSessions(projects)
                 if (next == null) return@onSuccess
                 loadSessions(next)
                 loadCommands(next)
@@ -250,6 +251,10 @@ class SessionService(
             projects = mergeProjects(local.value.projects, next),
             favoriteProjects = next,
         )
+        val projects = local.value.projects
+        if (next.contains(value)) {
+            preloadFavoriteSessions(projects)
+        }
 
         scope.launch {
             runCatching {
@@ -670,6 +675,42 @@ class SessionService(
         }
     }
 
+    private fun preloadFavoriteSessions(projects: List<ProjectState>) {
+        val favorites = projects.filter { it.favorite }
+        if (favorites.isEmpty()) return
+        val scope = scope ?: return
+        scope.launch {
+            favorites.forEach { project ->
+                val directories = (listOf(project.worktree) + project.sandboxes)
+                    .map(::workspaceId)
+                    .distinct()
+                val latest = directories
+                    .flatMap { directory ->
+                        runCatching { proj.sessions(directory, 1) }
+                            .onFailure {
+                                log.warn(LogTag, "favorite preload failed worktree=$directory reason=${it.message}")
+                            }
+                            .getOrDefault(emptyList())
+                            .map {
+                                SessionState(
+                                    id = it.id,
+                                    title = it.title,
+                                    version = it.version,
+                                    directory = workspaceId(if (it.directory.isBlank()) directory else it.directory),
+                                    updatedAt = it.updatedAt,
+                                    archivedAt = it.archivedAt,
+                                )
+                            }
+                    }
+                    .filter { it.archivedAt == null }
+                    .maxWithOrNull(compareBy<SessionState>({ it.updatedAt ?: 0L }, { it.id }))
+                    ?: return@forEach
+                upsertActiveSession(latest, project.worktree)
+            }
+            local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
+        }
+    }
+
     private fun hydrateLast() {
         val recent = runCatching { cache.recentSession() }.getOrNull() ?: return
         val scope = scope ?: return
@@ -756,11 +797,12 @@ class SessionService(
     }
 
     private fun handleMessageUpdated(action: SessionEventAction.MessageUpdated, type: String) {
-        val key = keyForSession(action.sessionId)
+        var key = keyForSession(action.sessionId)
         if (key == null) {
             markSseDropped(type, "session not focused/active id=${action.sessionId}")
+            ensureSessionTracked(action.sessionId, action.directory)
             resolveSession(action.sessionId, action.directory)
-            return
+            key = keyForSession(action.sessionId) ?: return
         }
         val message = messageKey(key, action.messageId)
         if (action.role == "user") {
@@ -786,11 +828,12 @@ class SessionService(
     }
 
     private suspend fun handleMessageRemoved(action: SessionEventAction.MessageRemoved, type: String) {
-        val key = keyForSession(action.sessionId)
+        var key = keyForSession(action.sessionId)
         if (key == null) {
             markSseDropped(type, "session not focused/active id=${action.sessionId}")
+            ensureSessionTracked(action.sessionId, action.directory)
             resolveSession(action.sessionId, action.directory)
-            return
+            key = keyForSession(action.sessionId) ?: return
         }
         val server = key.substringBefore("::")
         withContext(Dispatchers.IO) {
@@ -815,11 +858,12 @@ class SessionService(
             markSseDropped(type, "missing part type")
             return
         }
-        val key = keyForSession(action.sessionId)
+        var key = keyForSession(action.sessionId)
         if (key == null) {
             markSseDropped(type, "session not focused/active id=${action.sessionId}")
+            ensureSessionTracked(action.sessionId, action.directory)
             resolveSession(action.sessionId, action.directory)
-            return
+            key = keyForSession(action.sessionId) ?: return
         }
         val message = messageKey(key, action.messageId)
         val updated = synchronized(mapLock) {
@@ -883,6 +927,7 @@ class SessionService(
 
     private fun handleSessionStatus(action: SessionEventAction.SessionStatus, type: String) {
         if (keyForSession(action.sessionId) == null) {
+            ensureSessionTracked(action.sessionId, action.directory)
             resolveSession(action.sessionId, action.directory)
         }
         markSseApplied(type, action.sessionId)
@@ -891,9 +936,32 @@ class SessionService(
 
     private fun handleSessionDiff(action: SessionEventAction.SessionDiff, type: String) {
         if (keyForSession(action.sessionId) == null) {
+            ensureSessionTracked(action.sessionId, action.directory)
             resolveSession(action.sessionId, action.directory)
         }
         markSseApplied(type, action.sessionId)
+    }
+
+    private fun ensureSessionTracked(sessionId: String, directory: String?) {
+        if (keyForSession(sessionId) != null) return
+        val worktree = if (!directory.isNullOrBlank() && directory != "global") {
+            workspaceId(directory)
+        } else {
+            null
+        }
+        if (worktree == null) return
+        val now = System.currentTimeMillis()
+        upsertActiveSession(
+            session = SessionState(
+                id = sessionId,
+                title = "Session ${sessionId.take(8)}",
+                version = "",
+                directory = worktree,
+                updatedAt = now,
+            ),
+            project = worktree,
+        )
+        local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
     }
 
     private fun scheduleSync(sessionId: String, burst: Boolean = false) {

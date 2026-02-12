@@ -197,9 +197,11 @@ class ConversationViewModel(
     private fun quickSwitches(projects: List<ProjectState>, sessions: List<SessionState>): List<QuickSwitchState> {
         val cutoff = System.currentTimeMillis() - QuickSwitchWindowMs
         return sessions
-            .filter { (it.updatedAt ?: 0L) >= cutoff }
             .groupBy { workspaceId(it.directory) }
             .mapNotNull { (directory, list) ->
+                val favorite = isFavoriteProject(projects, directory)
+                val fresh = list.any { (it.updatedAt ?: 0L) >= cutoff }
+                if (!favorite && !fresh) return@mapNotNull null
                 val session = list.maxWithOrNull(compareBy<SessionState>({ it.updatedAt ?: 0L }, { it.id }))
                     ?: return@mapNotNull null
                 val project = projectName(projects, directory)
@@ -211,6 +213,12 @@ class ConversationViewModel(
                 )
             }
             .sortedWith(compareByDescending<QuickSwitchState> { it.session.updatedAt ?: 0L }.thenByDescending { it.session.id })
+    }
+
+    private fun isFavoriteProject(projects: List<ProjectState>, directory: String): Boolean {
+        return projects.any {
+            it.favorite && (workspaceId(it.worktree) == directory || it.sandboxes.any { value -> workspaceId(value) == directory })
+        }
     }
 
     private fun projectName(projects: List<ProjectState>, directory: String): String {
