@@ -328,9 +328,11 @@ private fun ToolCallsSection(
     onToolLayout: (String, Int, Int) -> Unit,
 ) {
     var lifted by remember { mutableStateOf<String?>(null) }
+    var fallback by remember { mutableStateOf<ToolCallState?>(null) }
     val position = remember { mutableStateMapOf<String, ToolPosition>() }
     val collapsed = remember { mutableStateMapOf<String, Int>() }
-    val activeCall = if (active && !answerWriting) calls.lastOrNull() else null
+    val latest = calls.lastOrNull()
+    val activeCall = if (active && !answerWriting) latest ?: fallback else null
     val selected = lifted?.takeIf { id -> calls.any { it.id == id } }
     val card = remember {
         movableContentOf<ToolCallState, Boolean, () -> Unit> { call, expanded, onToggle ->
@@ -346,8 +348,21 @@ private fun ToolCallsSection(
             lifted = null
         }
     }
+    LaunchedEffect(active, answerWriting, latest) {
+        if (!active || answerWriting) {
+            fallback = null
+            return@LaunchedEffect
+        }
+        if (latest != null) {
+            fallback = latest
+        }
+    }
     val duration = rememberTurnDuration(startedAt, completedAt, active)
-    val count = calls.size
+    val count = if (calls.isEmpty() && activeCall != null) {
+        1
+    } else {
+        calls.size
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
