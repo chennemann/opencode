@@ -12,6 +12,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 
 @Composable
@@ -33,6 +34,10 @@ fun StreamingMarkdownText(
     strong: SpanStyle = SpanStyle(
         fontWeight = FontWeight.Bold,
     ),
+    link: SpanStyle = SpanStyle(
+        color = Color(0xFF1565C0),
+        textDecoration = TextDecoration.Underline,
+    ),
 ) {
     val model = remember(streaming) {
         StreamingMarkdownState(streaming = streaming)
@@ -40,12 +45,13 @@ fun StreamingMarkdownText(
     val runs = remember(content, model) {
         model.update(content)
     }
-    val text = remember(runs, inlineCode, emphasis, strong) {
+    val text = remember(runs, inlineCode, emphasis, strong, link) {
         toAnnotatedString(
             runs = runs,
             inlineCode = inlineCode,
             emphasis = emphasis,
             strong = strong,
+            link = link,
         )
     }
     BasicText(
@@ -69,8 +75,13 @@ fun toAnnotatedString(
     strong: SpanStyle = SpanStyle(
         fontWeight = FontWeight.Bold,
     ),
+    link: SpanStyle = SpanStyle(
+        color = Color(0xFF1565C0),
+        textDecoration = TextDecoration.Underline,
+    ),
 ): AnnotatedString = buildAnnotatedString {
-    decorate(runs).forEach { run ->
+    linkify(decorate(runs)).forEach { run ->
+        val start = length
         if (run.kind == MarkdownKind.TEXT) {
             append(run.value)
             return@forEach
@@ -93,7 +104,22 @@ fun toAnnotatedString(
             pop()
             return@forEach
         }
-        pushStyle(inlineCode)
+        if (run.kind == MarkdownKind.LINK) {
+            pushStyle(link)
+            append(run.value)
+            pop()
+            val href = run.href
+            if (href != null) {
+                addStringAnnotation(
+                    tag = "URL",
+                    annotation = href,
+                    start = start,
+                    end = length,
+                )
+            }
+            return@forEach
+        }
+        pushStyle(link)
         append(run.value)
         pop()
     }
@@ -154,18 +180,70 @@ private fun append(
     runs: MutableList<MarkdownRun>,
     kind: MarkdownKind,
     value: String,
+    href: String? = null,
 ) {
     if (value.isEmpty()) return
     val run = runs.lastOrNull()
     if (run == null) {
-        runs += MarkdownRun(kind, value)
+        runs += MarkdownRun(kind, value, href)
         return
     }
-    if (run.kind != kind) {
-        runs += MarkdownRun(kind, value)
+    if (run.kind != kind || run.href != href) {
+        runs += MarkdownRun(kind, value, href)
         return
     }
     runs[runs.lastIndex] = run.copy(value = run.value + value)
+}
+
+private fun linkify(runs: List<MarkdownRun>): List<MarkdownRun> {
+    val out = mutableListOf<MarkdownRun>()
+    runs.forEach { run ->
+        if (run.kind != MarkdownKind.TEXT) {
+            append(out, run.kind, run.value, run.href)
+            return@forEach
+        }
+        val plain = StringBuilder()
+        var index = 0
+        fun flush() {
+            if (plain.isEmpty()) return
+            append(out, MarkdownKind.TEXT, plain.toString())
+            plain.clear()
+        }
+        while (index < run.value.length) {
+            if (run.value[index] == '[') {
+                val close = run.value.indexOf(']', index + 1)
+                val open = if (close == -1) -1 else close + 1
+                val start = if (open >= run.value.length || run.value[open] != '(') -1 else open + 1
+                val end = if (start == -1) -1 else run.value.indexOf(')', start)
+                if (close != -1 && start != -1 && end != -1) {
+                    val label = run.value.substring(index + 1, close)
+                    val href = run.value.substring(start, end)
+                    if (label.isNotEmpty() && href.startsWith("http")) {
+                        flush()
+                        append(out, MarkdownKind.LINK, label, href)
+                        index = end + 1
+                        continue
+                    }
+                }
+            }
+            val http = run.value.startsWith("http://", index) || run.value.startsWith("https://", index)
+            if (http) {
+                var end = index
+                while (end < run.value.length && !run.value[end].isWhitespace()) {
+                    end += 1
+                }
+                val href = run.value.substring(index, end)
+                flush()
+                append(out, MarkdownKind.LINK, href, href)
+                index = end
+                continue
+            }
+            plain.append(run.value[index])
+            index += 1
+        }
+        flush()
+    }
+    return out
 }
 
 class StreamingMarkdownState(private val streaming: Boolean) {
