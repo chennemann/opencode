@@ -3,7 +3,9 @@ package de.chennemann.opencode.mobile.ui.conversation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import de.chennemann.opencode.mobile.domain.session.CommandState
+import de.chennemann.opencode.mobile.domain.session.ProjectState
 import de.chennemann.opencode.mobile.domain.session.ServerState
+import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.domain.session.SessionService
 import de.chennemann.opencode.mobile.navigation.NavEvent
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +36,8 @@ class ConversationViewModel(
         val status: ServerState,
         val turns: List<ConversationTurnUiState>,
         val commands: List<CommandState>,
+        val projects: List<ProjectState>,
+        val activeSessions: List<SessionState>,
         val canLoadMoreMessages: Boolean,
         val loadingMoreMessages: Boolean,
     )
@@ -58,6 +62,8 @@ class ConversationViewModel(
                 status = it.status,
                 turns = splitActiveTools(mapper.map(it.focusedMessages)),
                 commands = mergeCommands(it.commands),
+                projects = it.projects,
+                activeSessions = it.activeSessions,
                 canLoadMoreMessages = it.canLoadMoreMessages,
                 loadingMoreMessages = it.loadingMoreMessages,
             )
@@ -75,6 +81,7 @@ class ConversationViewModel(
             draft = local.draft,
             slashSuggestions = slashSuggestions(local.draft, global.commands, local.commandOpen),
             commandOpen = local.commandOpen,
+            quickSwitches = quickSwitches(global.projects, global.activeSessions),
             stepOpen = local.stepOpen,
             callOpen = local.callOpen,
         )
@@ -92,6 +99,7 @@ class ConversationViewModel(
                 draft = "",
                 slashSuggestions = emptyList(),
                 commandOpen = false,
+                quickSwitches = emptyList(),
                 stepOpen = emptyMap(),
                 callOpen = emptyMap(),
             ),
@@ -144,6 +152,10 @@ class ConversationViewModel(
                 local.update { it.copy(commandOpen = false) }
             }
 
+            is ConversationEvent.QuickSwitchTapped -> {
+                service.focusSession(event.sessionId)
+            }
+
             is ConversationEvent.SendTapped -> {
                 val value = local.value.draft
                 service.send(value)
@@ -180,6 +192,58 @@ class ConversationViewModel(
     private fun mergeCommands(commands: List<CommandState>): List<CommandState> {
         return (BuiltinCommands + commands)
             .distinctBy { it.name.lowercase() }
+    }
+
+    private fun quickSwitches(projects: List<ProjectState>, sessions: List<SessionState>): List<QuickSwitchState> {
+        val cutoff = System.currentTimeMillis() - QuickSwitchWindowMs
+        return sessions
+            .filter { (it.updatedAt ?: 0L) >= cutoff }
+            .groupBy { workspaceId(it.directory) }
+            .mapNotNull { (directory, list) ->
+                val session = list.maxWithOrNull(compareBy<SessionState>({ it.updatedAt ?: 0L }, { it.id }))
+                    ?: return@mapNotNull null
+                val project = projectName(projects, directory)
+                QuickSwitchState(
+                    key = directory,
+                    label = projectInitial(project),
+                    project = project,
+                    session = session,
+                )
+            }
+            .sortedWith(compareByDescending<QuickSwitchState> { it.session.updatedAt ?: 0L }.thenByDescending { it.session.id })
+    }
+
+    private fun projectName(projects: List<ProjectState>, directory: String): String {
+        return projects
+            .firstOrNull {
+                workspaceId(it.worktree) == directory || it.sandboxes.any { value -> workspaceId(value) == directory }
+            }
+            ?.name
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: folderName(directory)
+    }
+
+    private fun projectInitial(name: String): String {
+        return folderName(name)
+            .firstOrNull { it.isLetterOrDigit() }
+            ?.uppercaseChar()
+            ?.toString()
+            ?: "?"
+    }
+
+    private fun folderName(path: String): String {
+        val value = path.trim().trimEnd('/', '\\')
+        if (value.isBlank()) return path
+        val index = maxOf(value.lastIndexOf('/'), value.lastIndexOf('\\'))
+        if (index < 0) return value
+        val name = value.substring(index + 1)
+        if (name.isBlank()) return value
+        return name
+    }
+
+    private fun workspaceId(path: String): String {
+        return path.trimEnd('/', '\\')
     }
 
     private fun splitActiveTools(turns: List<ConversationTurnUiState>): List<ConversationTurnUiState> {
@@ -233,6 +297,7 @@ class ConversationViewModel(
 }
 
 private val SlashRegex = Regex("^/(\\S*)$")
+private const val QuickSwitchWindowMs = 2 * 60 * 60 * 1000L
 private val BuiltinCommands = listOf(
     CommandState(
         name = "new",
