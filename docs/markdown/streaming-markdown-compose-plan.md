@@ -60,14 +60,14 @@
 - [x] Add adapter test: maps run boundaries to exact `AnnotatedString` span ranges.
 - [x] Add adapter test: assigns default and overridden inline-code styles correctly.
 - [x] Add composable test: renders stable output during rapid chunk updates.
-- [ ] Add integration test: conversation assistant path renders streamed markdown correctly.
+- [x] Add integration test: conversation assistant path renders streamed markdown correctly.
 
 ## 8) Validate runtime behavior
 
 - [ ] Add benchmark or timing test for incremental append path versus full reparse path.
-- [ ] Validate long message streams with many small chunks for latency and jank.
-- [ ] Validate multiline mixed plain/code streams for rendering correctness.
-- [ ] Validate memory remains bounded during prolonged streaming sessions.
+- [x] Validate long message streams with many small chunks for latency and jank.
+- [x] Validate multiline mixed plain/code streams for rendering correctness.
+- [x] Validate memory remains bounded during prolonged streaming sessions.
 
 ## 9) Run quality gates
 
