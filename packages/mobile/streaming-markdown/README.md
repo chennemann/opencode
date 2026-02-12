@@ -20,3 +20,10 @@ Compose-specific streaming markdown rendering module for mobile.
 - Parser output runs for plain text and inline code segments.
 - Compose adapter from runs to `AnnotatedString`.
 - `StreamingMarkdownText` for direct UI usage.
+
+## API stability rules (v1)
+
+- Keep `MarkdownRun` and `MarkdownKind` backward compatible.
+- Add new token kinds in an additive way only.
+- Keep parser lifecycle methods stable (`start`, `write`, `end`, `reset`).
+- Keep default inline-code behavior line-scoped until a versioned parser mode is introduced.

@@ -43,6 +43,7 @@ kotlin {
 
 dependencies {
     implementation(project(":api"))
+    implementation(project(":streaming-markdown"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)

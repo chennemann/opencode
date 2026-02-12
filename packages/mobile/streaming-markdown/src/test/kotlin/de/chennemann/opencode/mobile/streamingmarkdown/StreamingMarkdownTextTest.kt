@@ -1,0 +1,98 @@
+package de.chennemann.opencode.mobile.streamingmarkdown
+
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+class StreamingMarkdownTextTest {
+    @Test
+    fun maps_run_boundaries_to_span_ranges() {
+        val runs = listOf(
+            MarkdownRun(MarkdownKind.TEXT, "a "),
+            MarkdownRun(MarkdownKind.INLINE_CODE, "b"),
+            MarkdownRun(MarkdownKind.TEXT, " c"),
+        )
+
+        val text = toAnnotatedString(runs = runs)
+
+        assertEquals("a b c", text.text)
+        assertEquals(1, text.spanStyles.size)
+        assertEquals(2, text.spanStyles[0].start)
+        assertEquals(3, text.spanStyles[0].end)
+    }
+
+    @Test
+    fun applies_inline_code_style_overrides() {
+        val runs = listOf(
+            MarkdownRun(MarkdownKind.TEXT, "a "),
+            MarkdownRun(MarkdownKind.INLINE_CODE, "b"),
+        )
+        val style = SpanStyle(background = Color.Red)
+
+        val text = toAnnotatedString(runs = runs, inlineCode = style)
+
+        assertEquals(style.background, text.spanStyles.first().item.background)
+    }
+
+    @Test
+    fun keeps_stream_state_stable_for_rapid_chunk_updates() {
+        val state = StreamingMarkdownState(streaming = true)
+
+        val one = state.update("a `b")
+        val two = state.update("a `bc")
+        val three = state.update("a `bc` d")
+
+        assertEquals(
+            listOf(
+                MarkdownRun(MarkdownKind.TEXT, "a "),
+                MarkdownRun(MarkdownKind.INLINE_CODE, "b"),
+            ),
+            one,
+        )
+        assertEquals(
+            listOf(
+                MarkdownRun(MarkdownKind.TEXT, "a "),
+                MarkdownRun(MarkdownKind.INLINE_CODE, "bc"),
+            ),
+            two,
+        )
+        assertEquals(
+            listOf(
+                MarkdownRun(MarkdownKind.TEXT, "a "),
+                MarkdownRun(MarkdownKind.INLINE_CODE, "bc"),
+                MarkdownRun(MarkdownKind.TEXT, " d"),
+            ),
+            three,
+        )
+    }
+
+    @Test
+    fun reparses_when_input_is_not_append_only() {
+        val state = StreamingMarkdownState(streaming = true)
+
+        state.update("a `b` c")
+        val next = state.update("x `y` z")
+
+        assertEquals(
+            listOf(
+                MarkdownRun(MarkdownKind.TEXT, "x "),
+                MarkdownRun(MarkdownKind.INLINE_CODE, "y"),
+                MarkdownRun(MarkdownKind.TEXT, " z"),
+            ),
+            next,
+        )
+    }
+
+    @Test
+    fun supports_non_streaming_snapshot_mode() {
+        val state = StreamingMarkdownState(streaming = false)
+
+        val runs = state.update("x `y` z")
+
+        assertTrue(runs.any { it.kind == MarkdownKind.INLINE_CODE })
+        assertFalse(runs.isEmpty())
+    }
+}
