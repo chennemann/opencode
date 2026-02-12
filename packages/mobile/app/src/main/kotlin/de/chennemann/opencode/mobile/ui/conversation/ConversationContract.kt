@@ -36,6 +36,7 @@ data class QuickSwitchState(
     val label: String,
     val project: String,
     val session: SessionState,
+    val active: Boolean,
 )
 
 sealed interface ConversationEvent {
