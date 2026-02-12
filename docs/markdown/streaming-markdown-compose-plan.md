@@ -80,7 +80,7 @@
 
 - [x] Add escaped backtick handling.
 - [x] Add multi-backtick delimiter support.
-- [ ] Add emphasis and strong token streaming support.
+- [x] Add emphasis and strong token streaming support.
 - [ ] Add fenced code block streaming state support.
 - [ ] Add link and autolink token support.
 - [ ] Add internal-first module publication plan.
