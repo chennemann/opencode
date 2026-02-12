@@ -2,7 +2,11 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ktlint)
+    id("maven-publish")
 }
+
+group = findProperty("streamingMarkdownGroup") as String? ?: "de.chennemann.opencode.mobile"
+version = findProperty("streamingMarkdownVersion") as String? ?: "0.1.0-SNAPSHOT"
 
 android {
     namespace = "de.chennemann.opencode.mobile.streamingmarkdown"
@@ -19,6 +23,12 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
     }
 }
 
@@ -45,4 +55,21 @@ ktlint {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("release") {
+            groupId = project.group.toString()
+            artifactId = "streaming-markdown"
+            version = project.version.toString()
+            afterEvaluate {
+                from(components["release"])
+            }
+            pom {
+                name.set("Streaming Markdown")
+                description.set("Compose-specific streaming markdown rendering")
+            }
+        }
+    }
 }
