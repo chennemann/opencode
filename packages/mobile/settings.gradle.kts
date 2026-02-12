@@ -22,3 +22,4 @@ dependencyResolutionManagement {
 rootProject.name = "mobile"
 include(":app")
 include(":api")
+include(":streaming-markdown")
