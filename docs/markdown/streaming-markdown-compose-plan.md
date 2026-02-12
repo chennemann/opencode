@@ -71,9 +71,9 @@
 
 ## 9) Run quality gates
 
-- [ ] Run `./gradlew ktlintFormat` in `packages/mobile`.
-- [ ] Run `./gradlew ktlintCheck` in `packages/mobile`.
-- [ ] Run `./gradlew clean build` in `packages/mobile`.
+- [x] Run `./gradlew ktlintFormat` in `packages/mobile`.
+- [x] Run `./gradlew ktlintCheck` in `packages/mobile`.
+- [x] Run `./gradlew clean build` in `packages/mobile`.
 - [ ] Resolve failures and rerun gates until all pass.
 
 ## 10) Track post-v1 follow-ups
