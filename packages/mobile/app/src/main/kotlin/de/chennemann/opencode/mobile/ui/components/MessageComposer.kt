@@ -1,5 +1,6 @@
 package de.chennemann.opencode.mobile.ui.components
 
+import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -52,6 +54,7 @@ fun MessageComposer(
     onQuickSwitch: (String) -> Unit,
 ) {
     var commandOpen by remember { mutableStateOf(false) }
+    var dismissedAt by remember { mutableLongStateOf(0L) }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -85,7 +88,10 @@ fun MessageComposer(
                 if (draft.isEmpty()) {
                     DropdownMenu(
                         expanded = commandOpen && suggestions.isNotEmpty(),
-                        onDismissRequest = { commandOpen = false },
+                        onDismissRequest = {
+                            commandOpen = false
+                            dismissedAt = SystemClock.elapsedRealtime()
+                        },
                         properties = PopupProperties(focusable = false),
                         modifier = Modifier
                             .fillMaxWidth(0.95f)
@@ -126,7 +132,16 @@ fun MessageComposer(
                     ) {
                         FilledTonalIconButton(
                             onClick = {
-                                commandOpen = !commandOpen
+                                val now = SystemClock.elapsedRealtime()
+                                if (commandOpen) {
+                                    commandOpen = false
+                                    dismissedAt = now
+                                    return@FilledTonalIconButton
+                                }
+                                if (now - dismissedAt < CommandReopenDelayMs) {
+                                    return@FilledTonalIconButton
+                                }
+                                commandOpen = true
                             },
                             modifier = Modifier
                                 .focusProperties { canFocus = false },
@@ -212,3 +227,5 @@ fun MessageComposer(
         }
     }
 }
+
+private const val CommandReopenDelayMs = 500L
