@@ -17,10 +17,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import de.chennemann.opencode.mobile.domain.session.CommandState
 import de.chennemann.opencode.mobile.icons.Icons
 import de.chennemann.opencode.mobile.icons.Send
@@ -45,7 +47,9 @@ fun MessageComposer(
     ) {
         FilledTonalIconButton(
             onClick = onCommandToggle,
-            modifier = Modifier.align(Alignment.Bottom),
+            modifier = Modifier
+                .align(Alignment.Bottom)
+                .focusProperties { canFocus = false },
             colors = if (commandOpen) {
                 IconButtonDefaults.filledTonalIconButtonColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -65,8 +69,9 @@ fun MessageComposer(
                 label = { Text("Message") },
             )
             DropdownMenu(
-                expanded = suggestions.isNotEmpty(),
+                expanded = commandOpen && suggestions.isNotEmpty(),
                 onDismissRequest = onCommandDismiss,
+                properties = PopupProperties(focusable = false),
                 modifier = Modifier
                     .fillMaxWidth(0.95f)
                     .heightIn(max = 280.dp),
