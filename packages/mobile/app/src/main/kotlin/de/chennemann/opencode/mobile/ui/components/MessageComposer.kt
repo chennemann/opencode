@@ -4,10 +4,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.DropdownMenu
@@ -30,6 +34,7 @@ import androidx.compose.ui.window.PopupProperties
 import de.chennemann.opencode.mobile.domain.session.CommandState
 import de.chennemann.opencode.mobile.icons.Icons
 import de.chennemann.opencode.mobile.icons.Send
+import de.chennemann.opencode.mobile.ui.conversation.QuickSwitchState
 
 @Composable
 fun MessageComposer(
@@ -37,12 +42,14 @@ fun MessageComposer(
     connected: Boolean,
     suggestions: List<CommandState>,
     commandOpen: Boolean,
+    quickSwitches: List<QuickSwitchState>,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onReload: () -> Unit,
     onCommandSelect: (CommandState) -> Unit,
     onCommandToggle: () -> Unit,
     onCommandDismiss: () -> Unit,
+    onQuickSwitch: (String) -> Unit,
 ) {
     val slashInteraction = remember { MutableInteractionSource() }
     val slashPressed by slashInteraction.collectIsPressedAsState()
@@ -75,12 +82,27 @@ fun MessageComposer(
             Text("/")
         }
         Box(modifier = Modifier.weight(1f)) {
-            TextField(
-                value = draft,
-                onValueChange = onDraftChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Message") },
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextField(
+                    value = draft,
+                    onValueChange = onDraftChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Message") },
+                )
+                if (quickSwitches.isNotEmpty()) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(quickSwitches, key = { it.key }) { item ->
+                            FilledTonalIconButton(
+                                onClick = { onQuickSwitch(item.session.id) },
+                                shape = CircleShape,
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Text(item.label)
+                            }
+                        }
+                    }
+                }
+            }
             DropdownMenu(
                 expanded = commandOpen && suggestions.isNotEmpty(),
                 onDismissRequest = {
