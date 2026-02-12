@@ -46,7 +46,6 @@ class ConversationViewModel(
     private data class LocalState(
         val scroll: Long = 0,
         val draft: String = "",
-        val commandOpen: Boolean = false,
         val stepOpen: Map<String, Boolean> = emptyMap(),
         val callOpen: Map<String, Boolean> = emptyMap(),
     )
@@ -81,8 +80,7 @@ class ConversationViewModel(
             loadingMoreMessages = global.loadingMoreMessages,
             scroll = local.scroll,
             draft = local.draft,
-            slashSuggestions = slashSuggestions(local.draft, global.commands, local.commandOpen),
-            commandOpen = local.commandOpen,
+            slashSuggestions = slashSuggestions(local.draft, global.commands),
             quickSwitches = quickSwitches(global.projects, global.activeSessions, global.focusedSession),
             stepOpen = local.stepOpen,
             callOpen = local.callOpen,
@@ -100,7 +98,6 @@ class ConversationViewModel(
                 scroll = 0,
                 draft = "",
                 slashSuggestions = emptyList(),
-                commandOpen = false,
                 quickSwitches = emptyList(),
                 stepOpen = emptyMap(),
                 callOpen = emptyMap(),
@@ -135,23 +132,12 @@ class ConversationViewModel(
 
             is ConversationEvent.DraftChanged -> {
                 local.update {
-                    it.copy(
-                        draft = event.value,
-                        commandOpen = it.commandOpen && (event.value.isBlank() || event.value.startsWith("/")),
-                    )
+                    it.copy(draft = event.value)
                 }
             }
 
             is ConversationEvent.SlashCommandSelected -> {
-                local.update { it.copy(draft = "/${event.name} ", commandOpen = false) }
-            }
-
-            is ConversationEvent.CommandListToggled -> {
-                local.update { it.copy(commandOpen = !it.commandOpen) }
-            }
-
-            is ConversationEvent.CommandListDismissed -> {
-                local.update { it.copy(commandOpen = false) }
+                local.update { it.copy(draft = "/${event.name} ") }
             }
 
             is ConversationEvent.QuickSwitchTapped -> {
@@ -162,7 +148,7 @@ class ConversationViewModel(
                 val value = local.value.draft
                 service.send(value)
                 if (value.isNotBlank()) {
-                    local.update { it.copy(draft = "", scroll = it.scroll + 1, commandOpen = false) }
+                    local.update { it.copy(draft = "", scroll = it.scroll + 1) }
                 }
             }
 
@@ -179,11 +165,10 @@ class ConversationViewModel(
     private fun slashSuggestions(
         draft: String,
         commands: List<CommandState>,
-        open: Boolean,
     ): List<CommandState> {
-        val match = SlashRegex.matchEntire(draft)
-        if (match == null && !open) return emptyList()
-        val query = match?.groupValues?.get(1)?.trim()?.lowercase().orEmpty()
+        if (draft.isBlank()) return commands
+        val match = SlashRegex.matchEntire(draft) ?: return emptyList()
+        val query = match.groupValues.getOrNull(1)?.trim()?.lowercase().orEmpty()
         return commands
             .filter {
                 if (query.isBlank()) return@filter true
