@@ -3,6 +3,8 @@ package de.chennemann.opencode.mobile.streamingmarkdown
 enum class MarkdownKind {
     TEXT,
     INLINE_CODE,
+    EMPHASIS,
+    STRONG,
 }
 
 data class MarkdownRun(
