@@ -1,6 +1,8 @@
 package de.chennemann.opencode.mobile.streamingmarkdown
 
-import androidx.compose.foundation.text.BasicText
+import androidx.compose.material3.Text
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -19,52 +21,83 @@ import androidx.compose.ui.text.style.TextOverflow
 fun StreamingMarkdownText(
     content: String,
     modifier: Modifier = Modifier,
-    style: TextStyle = TextStyle.Default,
+    style: TextStyle = LocalTextStyle.current,
     color: Color = Color.Unspecified,
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip,
     streaming: Boolean = true,
-    inlineCode: SpanStyle = SpanStyle(
-        fontFamily = FontFamily.Monospace,
-        background = Color(0x1A7A7A7A),
-    ),
-    emphasis: SpanStyle = SpanStyle(
-        fontStyle = FontStyle.Italic,
-    ),
-    strong: SpanStyle = SpanStyle(
-        fontWeight = FontWeight.Bold,
-    ),
-    link: SpanStyle = SpanStyle(
-        color = Color(0xFF1565C0),
-        textDecoration = TextDecoration.Underline,
-    ),
-    blockCode: SpanStyle = SpanStyle(
-        fontFamily = FontFamily.Monospace,
-        background = Color(0x1A7A7A7A),
-    ),
+    inlineCode: SpanStyle = StreamingMarkdownTextDefaults.inlineCodeStyle(),
+    emphasis: SpanStyle = StreamingMarkdownTextDefaults.emphasisStyle(),
+    strong: SpanStyle = StreamingMarkdownTextDefaults.strongStyle(),
+    link: SpanStyle = StreamingMarkdownTextDefaults.linkStyle(),
+    blockCode: SpanStyle = StreamingMarkdownTextDefaults.blockCodeStyle(),
 ) {
+    val markdownInlineCode = StreamingMarkdownTextDefaults.inlineCodeStyle().merge(inlineCode)
+    val markdownEmphasis = StreamingMarkdownTextDefaults.emphasisStyle().merge(emphasis)
+    val markdownStrong = StreamingMarkdownTextDefaults.strongStyle().merge(strong)
+    val markdownLink = StreamingMarkdownTextDefaults.linkStyle().merge(link)
+    val markdownBlockCode = StreamingMarkdownTextDefaults.blockCodeStyle().merge(blockCode)
+
     val model = remember(streaming) {
         StreamingMarkdownState(streaming = streaming)
     }
     val runs = remember(content, model) {
         model.update(content)
     }
-    val text = remember(runs, inlineCode, emphasis, strong, link, blockCode) {
+    val text = remember(
+        runs,
+        markdownInlineCode,
+        markdownEmphasis,
+        markdownStrong,
+        markdownLink,
+        markdownBlockCode,
+    ) {
         toAnnotatedString(
             runs = runs,
-            inlineCode = inlineCode,
-            emphasis = emphasis,
-            strong = strong,
-            link = link,
-            blockCode = blockCode,
+            inlineCode = markdownInlineCode,
+            emphasis = markdownEmphasis,
+            strong = markdownStrong,
+            link = markdownLink,
+            blockCode = markdownBlockCode,
         )
     }
-    BasicText(
+    Text(
         text = text,
         modifier = modifier,
-        style = if (color == Color.Unspecified) style else style.copy(color = color),
+        style = style,
+        color = color,
         maxLines = maxLines,
         overflow = overflow,
+    )
+}
+
+object StreamingMarkdownTextDefaults {
+    @Composable
+    fun inlineCodeStyle() = SpanStyle(
+        fontFamily = FontFamily.Monospace,
+        background = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+    )
+
+    @Composable
+    fun emphasisStyle() = SpanStyle(
+        fontStyle = FontStyle.Italic,
+    )
+
+    @Composable
+    fun strongStyle() = SpanStyle(
+        fontWeight = FontWeight.Bold,
+    )
+
+    @Composable
+    fun linkStyle() = SpanStyle(
+        color = MaterialTheme.colorScheme.primary,
+        textDecoration = TextDecoration.Underline,
+    )
+
+    @Composable
+    fun blockCodeStyle() = SpanStyle(
+        fontFamily = FontFamily.Monospace,
+        background = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
     )
 }
 
