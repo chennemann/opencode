@@ -34,7 +34,7 @@ class SessionService(
     private val streamer: SessionStreamCoordinator,
     private val reconciler: ReconcileCoordinator,
     private val dispatchers: DispatcherProvider,
-) {
+) : SessionServiceApi {
     private data class LocalState(
         val projects: List<ProjectState> = emptyList(),
         val favoriteProjects: Set<String> = emptySet(),
@@ -115,7 +115,7 @@ class SessionService(
     private val cpuLane = dispatchers.default
     private val mutationLane = dispatchers.default.limitedParallelism(1)
 
-    val state: StateFlow<SessionUiState> = output.asStateFlow()
+    override val state: StateFlow<SessionUiState> = output.asStateFlow()
 
     private fun mutate(key: String? = null, block: suspend () -> Unit) {
         pipeline?.launch(key, block)
@@ -126,7 +126,7 @@ class SessionService(
         return pipeline.run(key, block)
     }
 
-    fun start(scope: CoroutineScope) {
+    override fun start(scope: CoroutineScope) {
         if (started) return
         started = true
         this.scope = scope
@@ -188,14 +188,14 @@ class SessionService(
         }
     }
 
-    fun updateUrl(value: String) {
+    override fun updateUrl(value: String) {
         mutate {
             manual = true
             input.value = value
         }
     }
 
-    fun useDiscovered() {
+    override fun useDiscovered() {
         mutate {
             val value = conn.found.value ?: return@mutate
             manual = true
@@ -203,7 +203,7 @@ class SessionService(
         }
     }
 
-    fun refresh() {
+    override fun refresh() {
         mutate {
             conn.setUrl(input.value)
             conn.refresh()
@@ -273,7 +273,7 @@ class SessionService(
         }
     }
 
-    fun selectProject(worktree: String) {
+    override fun selectProject(worktree: String) {
         mutate {
             val selected = workspaceId(worktree)
             local.value = local.value.copy(
@@ -288,7 +288,7 @@ class SessionService(
         }
     }
 
-    fun toggleProjectFavorite(worktree: String) {
+    override fun toggleProjectFavorite(worktree: String) {
         mutate {
             val value = workspaceId(worktree)
             if (value.isBlank()) return@mutate
@@ -326,7 +326,7 @@ class SessionService(
         }
     }
 
-    fun toggleSessionQuickPin(session: SessionState, systemPinned: Boolean) {
+    override fun toggleSessionQuickPin(session: SessionState, systemPinned: Boolean) {
         mutate {
             val id = session.id.trim()
             if (id.isBlank()) return@mutate
@@ -399,7 +399,7 @@ class SessionService(
         }
     }
 
-    suspend fun createSessionAndFocus(worktree: String): Boolean {
+    override suspend fun createSessionAndFocus(worktree: String): Boolean {
         return mutateAwait {
             createSessionAndFocusNow(worktree)
         }
@@ -426,13 +426,13 @@ class SessionService(
         return true
     }
 
-    fun openSession(session: SessionState) {
+    override fun openSession(session: SessionState) {
         mutate {
             focusSession(session, session.directory)
         }
     }
 
-    fun send(text: String) {
+    override fun send(text: String) {
         mutate {
             val value = text.trim()
             if (value.isBlank()) return@mutate
@@ -529,7 +529,7 @@ class SessionService(
         return match to args
     }
 
-    fun loadMoreMessages() {
+    override fun loadMoreMessages() {
         mutate {
             val focused = local.value.focusedSession ?: return@mutate
             val key = focusedKey ?: keyForSession(focused.id) ?: return@mutate
@@ -743,7 +743,7 @@ class SessionService(
         }
     }
 
-    suspend fun sessionsForProject(worktree: String, limit: Int? = null): List<SessionState> {
+    override suspend fun sessionsForProject(worktree: String, limit: Int?): List<SessionState> {
         return mutateAwait {
             sessionsForProjectNow(worktree, limit)
         }
