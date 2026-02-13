@@ -36,6 +36,8 @@ data class QuickSwitchState(
     val label: String,
     val project: String,
     val active: Boolean,
+    val processing: Boolean,
+    val unread: Int,
 )
 
 data class QuickSwitchMenuState(
