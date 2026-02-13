@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicLong
 
 class SessionService(
@@ -669,7 +670,10 @@ class SessionService(
         if (conn.status.value !is ConnectionState.Connected) return
         val scope = scope ?: return
         scope.launch(mutationLane) {
-            if (!beginSync(session.id)) return@launch
+            if (!beginSync(session.id)) {
+                log.debug(LogTag, "sync skip session=${session.id} reason=already_active")
+                return@launch
+            }
             try {
                 timedSuspend(LaneMutation, "sync.remote", "session=${session.id} more=$more") {
                     val started = System.currentTimeMillis()
@@ -679,13 +683,20 @@ class SessionService(
                     val key = keyForSession(session.id)
                     val limit = key?.let { messageLimit[it] } ?: MessageSyncLimit
                     val result = timedSuspend(LaneIo, "sync.fetch", "session=${session.id} limit=$limit") {
-                        withContext(ioLane) { runCatching { msg.messages(session.id, session.directory, limit) } }
+                        withContext(ioLane) {
+                            runCatching {
+                                withTimeout(SyncFetchTimeoutMs) {
+                                    msg.messages(session.id, session.directory, limit)
+                                }
+                            }
+                        }
                     }
                     if (more) {
                         local.value = local.value.copy(loadingMoreMessages = false)
                     }
                     result.onSuccess { list ->
-                        val key = keyForSession(session.id) ?: return@onSuccess
+                        val key = keyForSession(session.id)
+                            ?: upsertActiveSession(session, projectForDirectory(session.directory), persist = false)
                         val server = key.substringBefore("::")
                         val now = System.currentTimeMillis()
                         val next = list
@@ -1255,6 +1266,7 @@ class SessionService(
         val scope = scope ?: return
         sync.schedule(scope, sessionId, if (burst) SyncBurstDelayMs else SyncDelayMs) {
             val entry = active.values.find { value -> value.id == sessionId }
+                ?: local.value.focusedSession?.takeIf { it.id == sessionId }
             if (entry != null) {
                 syncRemote(entry)
             }
@@ -1778,6 +1790,7 @@ internal class MutationPipeline(
 private const val StreamRestartDelayMs = 3000L
 private const val SyncDelayMs = 300L
 private const val SyncBurstDelayMs = 1200L
+private const val SyncFetchTimeoutMs = 15000L
 private const val OverlayFlushDelayMs = 500L
 private const val MessageSyncLimit = 400
 private const val ReconcileIntervalMs = 10000L
