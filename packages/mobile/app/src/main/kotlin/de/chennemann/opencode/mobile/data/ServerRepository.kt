@@ -2,8 +2,10 @@ package de.chennemann.opencode.mobile.data
 
 import android.util.Log
 import de.chennemann.opencode.mobile.db.AppDatabase
+import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.session.CommandGateway
 import de.chennemann.opencode.mobile.domain.session.CommandState
+import de.chennemann.opencode.mobile.domain.session.ConnectivityGateway
 import de.chennemann.opencode.mobile.domain.session.ConnectionGateway
 import de.chennemann.opencode.mobile.domain.session.MessageGateway
 import de.chennemann.opencode.mobile.domain.session.ProjectGateway
@@ -20,12 +22,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class ServerRepository(
     private val db: AppDatabase,
-    private val mdns: MdnsService,
-    private val service: ServerService,
-    private val network: NetworkService,
+    private val mdns: MdnsGateway,
+    private val service: ServerGateway,
+    private val network: ConnectivityGateway,
+    private val dispatchers: DispatcherProvider,
 ) : ConnectionGateway, ProjectGateway, MessageGateway, StreamGateway, CommandGateway {
     private val state = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     private val url = MutableStateFlow(DefaultUrl)
@@ -55,124 +59,170 @@ class ServerRepository(
     override suspend fun setUrl(next: String) {
         val value = normalizeUrl(next) ?: return
         url.value = value
-        db.appDatabaseQueries.upsertSetting(UrlKey, value)
+        withContext(dispatchers.io) {
+            db.appDatabaseQueries.upsertSetting(UrlKey, value)
+        }
     }
 
     override suspend fun refresh(loading: Boolean) {
         val endpoint = url.value
         if (loading) state.value = ConnectionState.Loading
-        val result = runCatching { service.health(endpoint) }
+        val result = runCatching {
+            withContext(dispatchers.io) {
+                service.health(endpoint)
+            }
+        }
         result.exceptionOrNull()?.let {
             Log.e("ServerRepository", "health failed for $endpoint", it)
         }
-        state.value = result.fold(
-            onSuccess = {
-                if (it.healthy) ConnectionState.Connected(it.version)
-                else ConnectionState.Failed("Server is unhealthy")
-            },
-            onFailure = { ConnectionState.Failed(it.message ?: "Connection failed") },
-        )
+        state.value = withContext(dispatchers.default) {
+            result.fold(
+                onSuccess = {
+                    if (it.healthy) ConnectionState.Connected(it.version)
+                    else ConnectionState.Failed("Server is unhealthy")
+                },
+                onFailure = { ConnectionState.Failed(it.message ?: "Connection failed") },
+            )
+        }
     }
 
     override suspend fun projects(): List<SessionProject> {
-        return service.projects(url.value).map {
-            SessionProject(
-                id = it.id,
-                worktree = it.worktree,
-                name = it.name,
-                sandboxes = it.sandboxes,
-            )
+        val rows = withContext(dispatchers.io) {
+            service.projects(url.value)
+        }
+        return withContext(dispatchers.default) {
+            rows.map {
+                SessionProject(
+                    id = it.id,
+                    worktree = it.worktree,
+                    name = it.name,
+                    sandboxes = it.sandboxes,
+                )
+            }
         }
     }
 
     override suspend fun sessions(worktree: String, limit: Int?): List<SessionSummary> {
-        return service.sessions(url.value, worktree, limit).map {
-            SessionSummary(
-                id = it.id,
-                title = it.title,
-                version = it.version,
-                directory = it.directory,
-                updatedAt = it.updatedAt,
-                archivedAt = it.archivedAt,
-            )
+        val rows = withContext(dispatchers.io) {
+            service.sessions(url.value, worktree, limit)
+        }
+        return withContext(dispatchers.default) {
+            rows.map {
+                SessionSummary(
+                    id = it.id,
+                    title = it.title,
+                    version = it.version,
+                    directory = it.directory,
+                    updatedAt = it.updatedAt,
+                    archivedAt = it.archivedAt,
+                )
+            }
         }
     }
 
     override suspend fun createSession(worktree: String, title: String): SessionSummary {
-        val created = service.createSession(url.value, worktree, title)
-        return SessionSummary(
-            id = created.id,
-            title = created.title,
-            version = created.version,
-            directory = created.directory,
-        )
+        val row = withContext(dispatchers.io) {
+            service.createSession(url.value, worktree, title)
+        }
+        return withContext(dispatchers.default) {
+            SessionSummary(
+                id = row.id,
+                title = row.title,
+                version = row.version,
+                directory = row.directory,
+            )
+        }
     }
 
     override suspend fun commands(directory: String): List<CommandState> {
-        return service.commands(url.value, directory).map {
-            CommandState(
-                name = it.name,
-                description = it.description,
-                source = it.source,
-            )
+        val rows = withContext(dispatchers.io) {
+            service.commands(url.value, directory)
+        }
+        return withContext(dispatchers.default) {
+            rows.map {
+                CommandState(
+                    name = it.name,
+                    description = it.description,
+                    source = it.source,
+                )
+            }
         }
     }
 
     override suspend fun messages(sessionId: String, directory: String, limit: Int?): List<SessionMessage> {
-        return service.sessionMessages(url.value, sessionId, directory, limit).map {
-            SessionMessage(
-                id = it.id,
-                role = it.role,
-                text = it.text,
-                parts = it.parts,
-                createdAt = it.createdAt,
-                completedAt = it.completedAt,
-            )
+        val rows = withContext(dispatchers.io) {
+            service.sessionMessages(url.value, sessionId, directory, limit)
+        }
+        return withContext(dispatchers.default) {
+            rows.map {
+                SessionMessage(
+                    id = it.id,
+                    role = it.role,
+                    text = it.text,
+                    parts = it.parts,
+                    createdAt = it.createdAt,
+                    completedAt = it.completedAt,
+                )
+            }
         }
     }
 
     override suspend fun streamEvents(lastEventId: String?, onRawEvent: suspend (String) -> Unit, onEvent: suspend (SessionStreamEvent) -> Unit): String? {
-        return service.streamEvents(url.value, lastEventId, onRawEvent) {
-            onEvent(
-                SessionStreamEvent(
-                    directory = it.directory,
-                    type = it.type,
-                    properties = it.properties,
-                    id = it.id,
-                    retry = it.retry,
+        return withContext(dispatchers.io) {
+            service.streamEvents(url.value, lastEventId, onRawEvent) {
+                onEvent(
+                    SessionStreamEvent(
+                        directory = it.directory,
+                        type = it.type,
+                        properties = it.properties,
+                        id = it.id,
+                        retry = it.retry,
+                    )
                 )
-            )
+            }
         }
     }
 
     override suspend fun sendMessage(sessionId: String, directory: String, text: String) {
-        service.sendMessage(url.value, sessionId, directory, text)
+        withContext(dispatchers.io) {
+            service.sendMessage(url.value, sessionId, directory, text)
+        }
     }
 
     override suspend fun sendCommand(sessionId: String, directory: String, name: String, arguments: String) {
-        service.sendCommand(url.value, sessionId, directory, name, arguments)
+        withContext(dispatchers.io) {
+            service.sendCommand(url.value, sessionId, directory, name, arguments)
+        }
     }
 
     override suspend fun streamCursor(): String? {
-        return db.appDatabaseQueries.selectSetting(eventCursorKey(url.value)).executeAsOneOrNull()
+        return withContext(dispatchers.io) {
+            db.appDatabaseQueries.selectSetting(eventCursorKey(url.value)).executeAsOneOrNull()
+        }
     }
 
     override suspend fun setStreamCursor(value: String?) {
         val key = eventCursorKey(url.value)
-        if (value.isNullOrBlank()) {
-            db.appDatabaseQueries.deleteSetting(key)
-            return
+        withContext(dispatchers.io) {
+            if (value.isNullOrBlank()) {
+                db.appDatabaseQueries.deleteSetting(key)
+                return@withContext
+            }
+            db.appDatabaseQueries.upsertSetting(key, value)
         }
-        db.appDatabaseQueries.upsertSetting(key, value)
     }
 
     private suspend fun load() {
-        val value = db.appDatabaseQueries.selectSetting(UrlKey).executeAsOneOrNull()
+        val value = withContext(dispatchers.io) {
+            db.appDatabaseQueries.selectSetting(UrlKey).executeAsOneOrNull()
+        }
         if (value == null) return
         val normalized = normalizeUrl(value) ?: return
         url.value = normalized
         if (normalized == value) return
-        db.appDatabaseQueries.upsertSetting(UrlKey, normalized)
+        withContext(dispatchers.io) {
+            db.appDatabaseQueries.upsertSetting(UrlKey, normalized)
+        }
     }
 }
 

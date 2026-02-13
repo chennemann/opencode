@@ -3,29 +3,33 @@ package de.chennemann.opencode.mobile.data
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import de.chennemann.opencode.mobile.db.AppDatabase
+import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.session.MessageState
 import de.chennemann.opencode.mobile.domain.session.RecentSessionCache
 import de.chennemann.opencode.mobile.domain.session.SessionCacheGateway
 import de.chennemann.opencode.mobile.domain.session.SessionQuickPinCache
 import de.chennemann.opencode.mobile.domain.session.SessionState
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 
 class SessionCacheRepository(
     private val db: AppDatabase,
+    private val dispatchers: DispatcherProvider,
 ) : SessionCacheGateway {
     override suspend fun upsertSession(server: String, project: String?, session: SessionState) {
-        val now = System.currentTimeMillis()
-        db.appDatabaseQueries.upsertSessionCache(
-            server,
-            session.id,
-            project,
-            session.directory,
-            session.title,
-            session.version,
-            now,
-            now,
-        )
+        withContext(dispatchers.io) {
+            val now = System.currentTimeMillis()
+            db.appDatabaseQueries.upsertSessionCache(
+                server,
+                session.id,
+                project,
+                session.directory,
+                session.title,
+                session.version,
+                now,
+                now,
+            )
+        }
     }
 
     override fun recentSession(): RecentSessionCache? {
@@ -50,21 +54,23 @@ class SessionCacheRepository(
     }
 
     override suspend fun setProjectFavorite(server: String, worktree: String, favorite: Boolean) {
-        val key = projectFavoriteKey(server)
-        val next = projectFavorites(server)
-            .toMutableSet()
-            .also {
-                if (favorite) it.add(worktree) else it.remove(worktree)
+        withContext(dispatchers.io) {
+            val key = projectFavoriteKey(server)
+            val next = projectFavorites(server)
+                .toMutableSet()
+                .also {
+                    if (favorite) it.add(worktree) else it.remove(worktree)
+                }
+                .toList()
+                .sorted()
+
+            if (next.isEmpty()) {
+                db.appDatabaseQueries.deleteSetting(key)
+                return@withContext
             }
-            .toList()
-            .sorted()
 
-        if (next.isEmpty()) {
-            db.appDatabaseQueries.deleteSetting(key)
-            return
+            db.appDatabaseQueries.upsertSetting(key, next.joinToString(ProjectFavoriteSeparator))
         }
-
-        db.appDatabaseQueries.upsertSetting(key, next.joinToString(ProjectFavoriteSeparator))
     }
 
     override fun sessionQuickPins(server: String): SessionQuickPinCache {
@@ -75,23 +81,27 @@ class SessionCacheRepository(
     }
 
     override suspend fun setSessionQuickPins(server: String, include: Set<String>, exclude: Set<String>) {
-        setSettingSet(db, sessionQuickIncludeKey(server), include)
-        setSettingSet(db, sessionQuickExcludeKey(server), exclude)
+        withContext(dispatchers.io) {
+            setSettingSet(db, sessionQuickIncludeKey(server), include)
+            setSettingSet(db, sessionQuickExcludeKey(server), exclude)
+        }
     }
 
     override suspend fun listMessages(server: String, sessionId: String): List<MessageState> {
-        return db.appDatabaseQueries
-            .listMessageCache(server, sessionId) { _, _, messageId, role, text, sortKey, createdAt, completedAt, _ ->
-                MessageState(
-                    id = messageId,
-                    role = role,
-                    text = text,
-                    sort = sortKey,
-                    createdAt = createdAt,
-                    completedAt = completedAt,
-                )
-            }
-            .executeAsList()
+        return withContext(dispatchers.io) {
+            db.appDatabaseQueries
+                .listMessageCache(server, sessionId) { _, _, messageId, role, text, sortKey, createdAt, completedAt, _ ->
+                    MessageState(
+                        id = messageId,
+                        role = role,
+                        text = text,
+                        sort = sortKey,
+                        createdAt = createdAt,
+                        completedAt = completedAt,
+                    )
+                }
+                .executeAsList()
+        }
     }
 
     override fun observeMessages(server: String, sessionId: String): Flow<List<MessageState>> {
@@ -107,29 +117,35 @@ class SessionCacheRepository(
                 )
             }
             .asFlow()
-            .mapToList(Dispatchers.IO)
+            .mapToList(dispatchers.io)
     }
 
     override suspend fun upsertMessage(server: String, sessionId: String, message: MessageState, updatedAt: Long) {
-        db.appDatabaseQueries.upsertMessageCache(
-            server,
-            sessionId,
-            message.id,
-            message.role,
-            message.text,
-            message.sort,
-            message.createdAt,
-            message.completedAt,
-            updatedAt,
-        )
+        withContext(dispatchers.io) {
+            db.appDatabaseQueries.upsertMessageCache(
+                server,
+                sessionId,
+                message.id,
+                message.role,
+                message.text,
+                message.sort,
+                message.createdAt,
+                message.completedAt,
+                updatedAt,
+            )
+        }
     }
 
     override suspend fun deleteMessage(server: String, sessionId: String, messageId: String) {
-        db.appDatabaseQueries.deleteMessageCache(server, sessionId, messageId)
+        withContext(dispatchers.io) {
+            db.appDatabaseQueries.deleteMessageCache(server, sessionId, messageId)
+        }
     }
 
     override suspend fun deleteSessionMessages(server: String, sessionId: String) {
-        db.appDatabaseQueries.deleteMessageCacheSession(server, sessionId)
+        withContext(dispatchers.io) {
+            db.appDatabaseQueries.deleteMessageCacheSession(server, sessionId)
+        }
     }
 }
 
