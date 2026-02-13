@@ -18,15 +18,21 @@ interface SessionServiceApi {
 
     fun toggleProjectFavorite(worktree: String)
 
+    fun removeProject(worktree: String)
+
     fun toggleSessionQuickPin(session: SessionState, systemPinned: Boolean)
 
     suspend fun createSessionAndFocus(worktree: String): Boolean
 
     fun openSession(session: SessionState)
 
-    fun send(text: String)
+    fun send(text: String, agent: String)
 
     fun loadMoreMessages()
+
+    fun archiveSession(session: SessionState)
+
+    suspend fun cachedSessionsForProject(worktree: String, limit: Int? = null): List<SessionState>
 
     suspend fun sessionsForProject(worktree: String, limit: Int? = null): List<SessionState>
 }

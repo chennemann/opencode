@@ -93,6 +93,29 @@ class ManageViewModelTest {
         collect.cancel()
     }
 
+    @Test
+    fun removesSelectedProjectFromList() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ManageViewModel(service, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        service.state.value = state(
+            projects = listOf(
+                ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true),
+            ),
+            selectedProject = "/repo/main",
+        )
+        advanceUntilIdle()
+
+        viewModel.onEvent(ManageEvent.ProjectRemoved("/repo/main"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("/repo/main"), service.removeRequests)
+        collect.cancel()
+    }
+
     private fun state(
         projects: List<ProjectState> = emptyList(),
         selectedProject: String? = null,
@@ -158,6 +181,7 @@ private class StubSessionService : SessionServiceApi {
     )
     var startCalls = 0
     val createRequests = mutableListOf<String>()
+    val removeRequests = mutableListOf<String>()
 
     override fun start(scope: CoroutineScope) {
         startCalls += 1
@@ -173,6 +197,10 @@ private class StubSessionService : SessionServiceApi {
 
     override fun toggleProjectFavorite(worktree: String) = Unit
 
+    override fun removeProject(worktree: String) {
+        removeRequests += worktree
+    }
+
     override fun toggleSessionQuickPin(session: SessionState, systemPinned: Boolean) = Unit
 
     override suspend fun createSessionAndFocus(worktree: String): Boolean {
@@ -182,9 +210,15 @@ private class StubSessionService : SessionServiceApi {
 
     override fun openSession(session: SessionState) = Unit
 
-    override fun send(text: String) = Unit
+    override fun send(text: String, agent: String) = Unit
 
     override fun loadMoreMessages() = Unit
+
+    override fun archiveSession(session: SessionState) = Unit
+
+    override suspend fun cachedSessionsForProject(worktree: String, limit: Int?): List<SessionState> {
+        return emptyList()
+    }
 
     override suspend fun sessionsForProject(worktree: String, limit: Int?): List<SessionState> {
         return emptyList()

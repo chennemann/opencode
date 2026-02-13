@@ -55,6 +55,8 @@ sealed interface ManageEvent {
 
     data class ProjectFavoriteToggled(val worktree: String) : ManageEvent
 
+    data class ProjectRemoved(val worktree: String) : ManageEvent
+
     data class WorkspaceSelected(val directory: String) : ManageEvent
 
     data object CreateSessionTapped : ManageEvent

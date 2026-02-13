@@ -1,5 +1,8 @@
 package de.chennemann.opencode.mobile.ui.conversation
 
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandVertically
@@ -47,6 +50,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.ToolCallState
@@ -66,6 +70,7 @@ import kotlin.math.roundToInt
 
 @Composable
 fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) -> Unit) {
+    val context = LocalContext.current
     val list = rememberLazyListState()
     val dragging by list.interactionSource.collectIsDraggedAsState()
     val scope = rememberCoroutineScope()
@@ -142,6 +147,7 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
     ) {
         ConversationHeader(
             title = state.title,
+            onOpenWirelessDebug = { openWirelessDebugSettings(context) },
             onOpenManage = { onEvent(ConversationEvent.OpenManageTapped) },
         )
 
@@ -245,11 +251,13 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
 
             MessageComposer(
                 draft = state.draft,
+                mode = state.mode,
                 connected = state.status is ServerState.Connected,
                 suggestions = state.slashSuggestions,
                 quickSwitches = state.quickSwitches,
                 quickSwitchMenu = state.quickSwitchMenu,
                 onDraftChange = { onEvent(ConversationEvent.DraftChanged(it)) },
+                onModeChange = { onEvent(ConversationEvent.ModeChanged(it)) },
                 onSend = { onEvent(ConversationEvent.SendTapped) },
                 onReload = { onEvent(ConversationEvent.ReloadTapped) },
                 onCommandSelect = { onEvent(ConversationEvent.SlashCommandSelected(it.name)) },
@@ -260,10 +268,21 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                 onQuickSwitchPin = { session, system ->
                     onEvent(ConversationEvent.QuickSwitchMenuPinTapped(session, system))
                 },
+                onQuickSwitchArchive = { onEvent(ConversationEvent.QuickSwitchMenuArchiveTapped(it)) },
+                onQuickSwitchLoadMore = { onEvent(ConversationEvent.QuickSwitchMenuLoadMoreTapped) },
                 onQuickSwitchCreate = { onEvent(ConversationEvent.QuickSwitchMenuCreateTapped) },
             )
         }
     }
+}
+
+private fun openWirelessDebugSettings(context: Context) {
+    val wireless = Intent("com.android.settings.WIFI_ADB_SETTINGS")
+    val developer = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+    val fallback = Intent(Settings.ACTION_SETTINGS)
+    if (runCatching { context.startActivity(wireless); true }.getOrDefault(false)) return
+    if (runCatching { context.startActivity(developer); true }.getOrDefault(false)) return
+    runCatching { context.startActivity(fallback) }
 }
 
 @Composable

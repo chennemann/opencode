@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,12 +16,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
@@ -56,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -70,24 +69,37 @@ import de.chennemann.opencode.mobile.domain.session.CommandState
 import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.icons.Icons
 import de.chennemann.opencode.mobile.icons.Add
+import de.chennemann.opencode.mobile.icons.CircleSlash
 import de.chennemann.opencode.mobile.icons.Pin
 import de.chennemann.opencode.mobile.icons.PinOutline
 import de.chennemann.opencode.mobile.icons.Send
 import de.chennemann.opencode.mobile.ui.conversation.QuickSwitchMenuState
 import de.chennemann.opencode.mobile.ui.conversation.QuickSwitchState
+import de.chennemann.opencode.mobile.ui.conversation.ConversationMode
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 
+private val ModeSwipeThreshold = 28.dp
+
+private fun cycleMode(mode: ConversationMode): ConversationMode {
+    return when (mode) {
+        ConversationMode.PLAN -> ConversationMode.BUILD
+        ConversationMode.BUILD -> ConversationMode.PLAN
+    }
+}
+
 @Composable
 fun MessageComposer(
     draft: String,
+    mode: ConversationMode,
     connected: Boolean,
     suggestions: List<CommandState>,
     quickSwitches: List<QuickSwitchState>,
     quickSwitchMenu: QuickSwitchMenuState?,
     onDraftChange: (String) -> Unit,
+    onModeChange: (ConversationMode) -> Unit,
     onSend: () -> Unit,
     onReload: () -> Unit,
     onCommandSelect: (CommandState) -> Unit,
@@ -96,6 +108,8 @@ fun MessageComposer(
     onQuickSwitchDismiss: () -> Unit,
     onQuickSwitchSession: (SessionState) -> Unit,
     onQuickSwitchPin: (SessionState, Boolean) -> Unit,
+    onQuickSwitchArchive: (SessionState) -> Unit,
+    onQuickSwitchLoadMore: () -> Unit,
     onQuickSwitchCreate: () -> Unit,
 ) {
     var commandOpen by remember { mutableStateOf(false) }
@@ -114,8 +128,14 @@ fun MessageComposer(
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
+        Text(
+            text = if (mode == ConversationMode.PLAN) "Plan" else "Build",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(0.dp),
@@ -129,7 +149,26 @@ fun MessageComposer(
                         onDraftChange(it.text)
                         commandOpen = commandOpen && (it.text.isBlank() || it.text.startsWith("/"))
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .pointerInput(mode) {
+                            val threshold = ModeSwipeThreshold.toPx()
+                            var delta = 0f
+                            var changed = false
+                            detectHorizontalDragGestures(
+                                onDragStart = {
+                                    delta = 0f
+                                    changed = false
+                                },
+                                onHorizontalDrag = { _, dragAmount ->
+                                    if (changed) return@detectHorizontalDragGestures
+                                    delta += dragAmount
+                                    if (delta > -threshold && delta < threshold) return@detectHorizontalDragGestures
+                                    changed = true
+                                    onModeChange(cycleMode(mode))
+                                },
+                            )
+                        },
                     placeholder = { Text("Message") },
                     maxLines = 12,
                     colors = TextFieldDefaults.colors(
@@ -211,7 +250,10 @@ fun MessageComposer(
                                 IconButtonDefaults.filledTonalIconButtonColors()
                             },
                         ) {
-                            Text("/")
+                            Icon(
+                                imageVector = Icons.CircleSlash,
+                                contentDescription = "Toggle command suggestions",
+                            )
                         }
                     }
                 }
@@ -308,6 +350,8 @@ fun MessageComposer(
             onDismiss = onQuickSwitchDismiss,
             onQuickSwitchSession = onQuickSwitchSession,
             onQuickSwitchPin = onQuickSwitchPin,
+            onQuickSwitchArchive = onQuickSwitchArchive,
+            onQuickSwitchLoadMore = onQuickSwitchLoadMore,
             onQuickSwitchCreate = onQuickSwitchCreate,
         )
     }
@@ -320,15 +364,18 @@ private fun QuickSwitchPanel(
     onDismiss: () -> Unit,
     onQuickSwitchSession: (SessionState) -> Unit,
     onQuickSwitchPin: (SessionState, Boolean) -> Unit,
+    onQuickSwitchArchive: (SessionState) -> Unit,
+    onQuickSwitchLoadMore: () -> Unit,
     onQuickSwitchCreate: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = false)
-    val state = rememberLazyListState()
-    val rows = menu.sessions.asReversed()
-    val target = (if (menu.loading) 1 else 0) +
-        (if (menu.sessions.isEmpty() && !menu.loading) 1 else 0) +
-        rows.size
+    val rows = menu.sessions
+        .sortedWith(
+            compareByDescending<SessionState> { menu.pinned.contains(it.id) }
+                .thenByDescending { it.updatedAt ?: 0L }
+                .thenByDescending { it.id }
+        )
     val flingGuard = remember {
         object : NestedScrollConnection {
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
@@ -340,9 +387,6 @@ private fun QuickSwitchPanel(
                 return Velocity.Zero
             }
         }
-    }
-    LaunchedEffect(menu.key, rows.map { it.id }, menu.loading) {
-        state.scrollToItem(target)
     }
     LaunchedEffect(sheet.currentValue, sheet.targetValue) {
         if (sheet.currentValue == SheetValue.Expanded && sheet.targetValue == SheetValue.PartiallyExpanded) {
@@ -369,25 +413,32 @@ private fun QuickSwitchPanel(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = menu.project,
-                    style = MaterialTheme.typography.titleSmall,
+                    text = folderName(menu.project),
+                    style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                TextButton(onClick = onDismiss) {
-                    Text("Close")
+                IconButton(
+                    onClick = onQuickSwitchCreate,
+                    colors = IconButtonDefaults.iconButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ),
+                ) {
+                    Icon(
+                        imageVector = Icons.Add,
+                        contentDescription = "New session",
+                    )
                 }
             }
 
             LazyColumn(
-                state = state,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
                     .nestedScroll(flingGuard),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (menu.loading) {
+                if (menu.loading && rows.isEmpty()) {
                     item {
                         Text(
                             text = "Loading sessions...",
@@ -423,12 +474,15 @@ private fun QuickSwitchPanel(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                text = quickSwitchSessionSubtitle(session, menu.worktree),
+                                text = quickSwitchSessionSubtitle(session, folderName(menu.project), menu.worktree),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                        }
+                        TextButton(onClick = { onQuickSwitchArchive(session) }) {
+                            Text("Archive")
                         }
                         IconButton(onClick = { onQuickSwitchPin(session, systemPinned) }) {
                             Icon(
@@ -448,17 +502,15 @@ private fun QuickSwitchPanel(
                     }
                 }
 
-                item {
-                    Button(
-                        onClick = onQuickSwitchCreate,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Add,
-                            contentDescription = null,
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("New session")
+                if (menu.canLoadMore) {
+                    item {
+                        TextButton(
+                            onClick = onQuickSwitchLoadMore,
+                            enabled = !menu.loading,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(if (menu.loading) "Loading..." else "Load more")
+                        }
                     }
                 }
             }
@@ -514,13 +566,13 @@ private fun QuickSwitchButton(
     }
 }
 
-private fun quickSwitchSessionSubtitle(session: SessionState, worktree: String): String {
+private fun quickSwitchSessionSubtitle(session: SessionState, project: String, worktree: String): String {
     val updated = session.updatedAt?.let {
         val value = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
         "Updated ${QuickSwitchSessionFormatter.format(value)}"
     } ?: "Updated unknown"
     if (workspaceId(session.directory) == workspaceId(worktree)) return updated
-    return "$updated | Workspace ${folderName(session.directory)}"
+    return "$updated | $project"
 }
 
 private fun folderName(path: String): String {

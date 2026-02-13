@@ -111,6 +111,7 @@ class ConversationScreenStreamingMarkdownTest {
         loadingMoreMessages = false,
         scroll = 0,
         draft = "",
+        mode = ConversationMode.BUILD,
         slashSuggestions = emptyList(),
         quickSwitches = emptyList(),
         stepOpen = emptyMap(),
