@@ -52,7 +52,7 @@ class ConversationViewModel(
         val key: String,
         val worktree: String,
         val project: String,
-        val primary: SessionState,
+        val primary: SessionState?,
         val cycle: List<SessionState>,
     )
 
@@ -252,7 +252,20 @@ class ConversationViewModel(
         )
         val project = model.projects[key] ?: return
         if (model.focusedKey != key) {
-            service.openSession(project.primary)
+            val primary = project.primary
+            if (primary == null) {
+                viewModelScope.launch {
+                    service.createSessionAndFocus(project.worktree)
+                }
+                return
+            }
+            service.openSession(primary)
+            return
+        }
+        if (project.cycle.isEmpty()) {
+            viewModelScope.launch {
+                service.createSessionAndFocus(project.worktree)
+            }
             return
         }
         val current = value.focusedSession?.id
@@ -367,18 +380,41 @@ class ConversationViewModel(
                 )
             }
             .sortedWith(
-                compareByDescending<Pair<QuickSwitchState, QuickSwitchProject>> { it.second.primary.updatedAt ?: 0L }
-                    .thenByDescending { it.second.primary.id }
+                compareByDescending<Pair<QuickSwitchState, QuickSwitchProject>> { it.second.primary?.updatedAt ?: Long.MIN_VALUE }
+                    .thenByDescending { it.second.primary?.id.orEmpty() }
             )
-        val keys = rows.map { it.first.key }.toSet()
+        val existing = rows.map { it.first.key }.toSet()
+        val placeholders = projects
+            .filter { it.favorite }
+            .mapNotNull {
+                val key = workspaceId(it.worktree)
+                if (existing.contains(key)) return@mapNotNull null
+                val label = projectLabel(it, key)
+                val state = QuickSwitchState(
+                    key = key,
+                    worktree = it.worktree,
+                    label = projectInitial(label),
+                    project = label,
+                    active = focused == key,
+                )
+                state to QuickSwitchProject(
+                    key = key,
+                    worktree = it.worktree,
+                    project = label,
+                    primary = null,
+                    cycle = emptyList(),
+                )
+            }
+        val merged = rows + placeholders
+        val keys = merged.map { it.first.key }.toSet()
         quickOrder.keys
             .toList()
             .filterNot(keys::contains)
             .forEach(quickOrder::remove)
         return QuickSwitchModel(
             focusedKey = focused,
-            switches = rows.map { it.first },
-            projects = rows.associate { it.first.key to it.second },
+            switches = merged.map { it.first },
+            projects = merged.associate { it.first.key to it.second },
         )
     }
 
