@@ -57,6 +57,7 @@ import de.chennemann.opencode.mobile.icons.Icons
 import de.chennemann.opencode.mobile.ui.components.ConversationHeader
 import de.chennemann.opencode.mobile.ui.components.MessageComposer
 import de.chennemann.opencode.mobile.ui.components.ToolCallCard
+import de.chennemann.opencode.mobile.ui.components.TurnTimer
 import de.chennemann.opencode.mobile.streamingmarkdown.StreamingMarkdownText
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -368,7 +369,6 @@ private fun ToolCallsSection(
             fallback = latest
         }
     }
-    val duration = rememberTurnDuration(startedAt, completedAt, active)
     val count = if (calls.isEmpty() && activeCall != null) {
         1
     } else {
@@ -403,8 +403,11 @@ private fun ToolCallsSection(
                 )
                 Text("${if (open) "Hide steps" else "Show steps"} • $count")
             }
-            if (duration != null) {
-                Text(duration)
+            if (startedAt != null) {
+                TurnTimer(
+                    startedAt = startedAt,
+                    completedAt = completedAt,
+                )
             }
         }
         if (!open && activeCall != null) {
@@ -496,37 +499,6 @@ private fun ToolCallsSection(
             }
         }
     }
-}
-
-@Composable
-private fun rememberTurnDuration(startedAt: Long?, completedAt: Long?, active: Boolean): String? {
-    if (startedAt == null) return null
-    if (completedAt != null) {
-        return formatTurnDuration(startedAt, completedAt)
-    }
-    if (!active) return null
-    var now by remember(startedAt, completedAt, active) { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(startedAt, completedAt, active) {
-        while (active) {
-            delay(1000)
-            now = System.currentTimeMillis()
-        }
-    }
-    return formatTurnDuration(startedAt, now)
-}
-
-private fun formatTurnDuration(startedAt: Long, completedAt: Long): String {
-    val totalSeconds = ((completedAt - startedAt).coerceAtLeast(0L) / 1000L)
-    val hours = totalSeconds / 3600
-    val minutes = (totalSeconds % 3600) / 60
-    val seconds = totalSeconds % 60
-    if (hours > 0) {
-        return "${hours}h ${minutes.toString().padStart(2, '0')}m"
-    }
-    if (minutes > 0) {
-        return "${minutes}m ${seconds.toString().padStart(2, '0')}s"
-    }
-    return "${seconds}s"
 }
 
 private fun isAtEnd(list: androidx.compose.foundation.lazy.LazyListState, totalCount: Int): Boolean {
