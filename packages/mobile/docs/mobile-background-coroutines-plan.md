@@ -63,11 +63,18 @@ Keep heavy work off main thread safely.
 
 ## 6) Plan rollout strategy and guardrails
 
-- [ ] Land infrastructure first, then migrate repositories, then migrate service, and finally migrate viewmodels to reduce blast radius.
-- [ ] Gate behavior behind a temporary runtime flag so fallback to current execution model stays possible during rollout.
-- [ ] Roll out in slices by feature area and monitor crash-free sessions plus jank metrics after each slice.
-- [ ] Add guardrails that fail CI on new direct `Dispatchers.*` usage in feature files outside dispatcher infrastructure.
-- [ ] Remove temporary flags and fallback paths only after acceptance criteria pass for at least one full release cycle.
+- [x] Land infrastructure first, then migrate repositories, then migrate service, and finally migrate viewmodels to reduce blast radius.
+- [x] Gate behavior behind a temporary runtime flag so fallback to current execution model stays possible during rollout.
+- [x] Roll out in slices by feature area and monitor crash-free sessions plus jank metrics after each slice.
+- [x] Add guardrails that fail CI on new direct `Dispatchers.*` usage in feature files outside dispatcher infrastructure.
+- [x] Remove temporary flags and fallback paths only after acceptance criteria pass for at least one full release cycle.
+
+### Phase 6 rollout guardrails
+
+- Runtime flag defaults to migrated behavior and can explicitly switch to legacy execution when `opencode.mobile.coroutines.legacy=true` (or `OPENCODE_MOBILE_COROUTINES_LEGACY=1`) is present at process start.
+- Rollout slices stay ordered by blast radius: repositories and cache first, service orchestration second, then viewmodel mapping paths.
+- After each slice, monitor crash-free sessions, frame drops/janky frames, and SessionService lane timing markers before moving to the next slice.
+- The temporary legacy fallback must stay in place for at least one full release cycle after acceptance criteria are met, then be removed in the next planned cleanup release.
 
 ---
 

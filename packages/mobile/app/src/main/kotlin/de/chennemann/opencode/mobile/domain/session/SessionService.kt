@@ -3,6 +3,7 @@ package de.chennemann.opencode.mobile.domain.session
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePart
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
+import de.chennemann.opencode.mobile.di.CoroutineRolloutFlag
 import de.chennemann.opencode.mobile.di.DispatcherProvider
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -34,6 +35,7 @@ class SessionService(
     private val streamer: SessionStreamCoordinator,
     private val reconciler: ReconcileCoordinator,
     private val dispatchers: DispatcherProvider,
+    private val rollout: CoroutineRolloutFlag,
 ) : SessionServiceApi {
     private data class LocalState(
         val projects: List<ProjectState> = emptyList(),
@@ -107,7 +109,7 @@ class SessionService(
     private val mapLock = Any()
     private var focusedDb = emptyList<MessageState>()
     private var scope: CoroutineScope? = null
-    private var pipeline: MutationPipeline? = null
+    private var mutation: MutationExecutor? = null
     private var started = false
     private var focusedKey: String? = null
     private var publishToken = 0L
@@ -118,19 +120,24 @@ class SessionService(
     override val state: StateFlow<SessionUiState> = output.asStateFlow()
 
     private fun mutate(key: String? = null, block: suspend () -> Unit) {
-        pipeline?.launch(key, block)
+        mutation?.launch(key, block)
     }
 
     private suspend fun <T> mutateAwait(key: String? = null, block: suspend () -> T): T {
-        val pipeline = pipeline ?: return block()
-        return pipeline.run(key, block)
+        val mutation = mutation ?: return block()
+        return mutation.run(key, block)
     }
 
     override fun start(scope: CoroutineScope) {
         if (started) return
         started = true
         this.scope = scope
-        pipeline = MutationPipeline(scope, mutationLane)
+        mutation = if (rollout.useMigratedExecution) {
+            PipelineMutationExecutor(MutationPipeline(scope, mutationLane))
+        } else {
+            LegacyMutationExecutor(scope, mutationLane)
+        }
+        log.debug(LogTag, "mutation mode=${if (rollout.useMigratedExecution) "migrated" else "legacy"}")
         conn.start(scope)
         scope.launch {
             combine(input, conn.found, conn.status, local) { url, discovered, status, local ->
@@ -1527,8 +1534,8 @@ class SessionService(
     }
 
     fun stop() {
-        pipeline?.cancel()
-        pipeline = null
+        mutation?.cancel()
+        mutation = null
         stream?.cancel()
         stream = null
         reconcile?.cancel()
@@ -1540,6 +1547,61 @@ class SessionService(
         sync.cancelAll()
         flush.values.forEach { it.cancel() }
         flush.clear()
+    }
+}
+
+internal interface MutationExecutor {
+    fun launch(key: String? = null, block: suspend () -> Unit)
+
+    suspend fun <T> run(key: String? = null, block: suspend () -> T): T
+
+    fun cancel()
+}
+
+internal class PipelineMutationExecutor(
+    private val pipeline: MutationPipeline,
+) : MutationExecutor {
+    override fun launch(key: String?, block: suspend () -> Unit) {
+        pipeline.launch(key, block)
+    }
+
+    override suspend fun <T> run(key: String?, block: suspend () -> T): T {
+        return pipeline.run(key, block)
+    }
+
+    override fun cancel() {
+        pipeline.cancel()
+    }
+}
+
+internal class LegacyMutationExecutor(
+    private val scope: CoroutineScope,
+    private val dispatcher: CoroutineDispatcher,
+) : MutationExecutor {
+    private val jobs = linkedSetOf<Job>()
+
+    override fun launch(key: String?, block: suspend () -> Unit) {
+        val job = scope.launch(dispatcher) {
+            block()
+        }
+        synchronized(jobs) {
+            jobs.add(job)
+        }
+        job.invokeOnCompletion {
+            synchronized(jobs) {
+                jobs.remove(job)
+            }
+        }
+    }
+
+    override suspend fun <T> run(key: String?, block: suspend () -> T): T {
+        return withContext(dispatcher) { block() }
+    }
+
+    override fun cancel() {
+        synchronized(jobs) {
+            jobs.toList()
+        }.forEach { it.cancel() }
     }
 }
 
