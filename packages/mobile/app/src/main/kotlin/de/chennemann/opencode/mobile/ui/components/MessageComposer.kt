@@ -23,7 +23,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -226,29 +225,25 @@ fun MessageComposer(
                             .align(Alignment.BottomEnd)
                             .padding(bottom = 4.dp)
                     ) {
-                        FilledTonalIconButton(
+                        IconButton(
                             onClick = {
                                 val now = SystemClock.elapsedRealtime()
                                 if (commandOpen) {
                                     commandOpen = false
                                     dismissedAt = now
-                                    return@FilledTonalIconButton
+                                    return@IconButton
                                 }
                                 if (now - dismissedAt < CommandReopenDelayMs) {
-                                    return@FilledTonalIconButton
+                                    return@IconButton
                                 }
                                 commandOpen = true
                             },
                             modifier = Modifier
-                                .focusProperties { canFocus = false },
-                            colors = if (commandOpen) {
-                                IconButtonDefaults.filledTonalIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                            } else {
-                                IconButtonDefaults.filledTonalIconButtonColors()
-                            },
+                                .focusProperties { canFocus = false }
+                                .size(48.dp),
+                            colors = IconButtonDefaults.iconButtonColors(
+                                contentColor = MaterialTheme.colorScheme.primary,
+                            ),
                         ) {
                             Icon(
                                 imageVector = Icons.CircleSlash,
