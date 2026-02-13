@@ -600,116 +600,132 @@ class SessionService(
         scope.launch(mutationLane) {
             if (!beginSync(session.id)) return@launch
             try {
-            val started = System.currentTimeMillis()
-            if (more) {
-                local.value = local.value.copy(loadingMoreMessages = true, message = null)
-            }
-            val key = keyForSession(session.id)
-            val limit = key?.let { messageLimit[it] } ?: MessageSyncLimit
-            val result = withContext(ioLane) { runCatching { msg.messages(session.id, session.directory, limit) } }
-            if (more) {
-                local.value = local.value.copy(loadingMoreMessages = false)
-            }
-            result.onSuccess { list ->
-                val key = keyForSession(session.id) ?: return@onSuccess
-                val server = key.substringBefore("::")
-                val now = System.currentTimeMillis()
-                val next = list
-                val complete = next.size < (messageLimit[key] ?: MessageSyncLimit)
-                val cached = withContext(ioLane) { cache.listMessages(server, session.id) }
-                val sticky = stickySort[key]
-                val incoming = mutableListOf<IncomingMessage>()
+                timedSuspend(LaneMutation, "sync.remote", "session=${session.id} more=$more") {
+                    val started = System.currentTimeMillis()
+                    if (more) {
+                        local.value = local.value.copy(loadingMoreMessages = true, message = null)
+                    }
+                    val key = keyForSession(session.id)
+                    val limit = key?.let { messageLimit[it] } ?: MessageSyncLimit
+                    val result = timedSuspend(LaneIo, "sync.fetch", "session=${session.id} limit=$limit") {
+                        withContext(ioLane) { runCatching { msg.messages(session.id, session.directory, limit) } }
+                    }
+                    if (more) {
+                        local.value = local.value.copy(loadingMoreMessages = false)
+                    }
+                    result.onSuccess { list ->
+                        val key = keyForSession(session.id) ?: return@onSuccess
+                        val server = key.substringBefore("::")
+                        val now = System.currentTimeMillis()
+                        val next = list
+                        val complete = next.size < (messageLimit[key] ?: MessageSyncLimit)
+                        val cached = timedSuspend(LaneIo, "sync.cache_read", "session=${session.id}") {
+                            withContext(ioLane) { cache.listMessages(server, session.id) }
+                        }
+                        val sticky = stickySort[key]
+                        val incoming = mutableListOf<IncomingMessage>()
 
-                next.forEach {
-                    val id = requireNotNull(it.id)
-                    val message = messageKey(key, id)
-                    val messageRole = it.role
-                    val parsed = parser.parseParts(it.parts)
-                    synchronized(mapLock) {
-                        if (parsed.isEmpty()) {
-                            part.remove(message)
-                        } else {
-                            val map = linkedMapOf<String, MessagePart>()
-                            parsed.forEach { item ->
-                                map[item.id] = item
+                        next.forEach {
+                            val id = requireNotNull(it.id)
+                            val message = messageKey(key, id)
+                            val messageRole = it.role
+                            val parsed = parser.parseParts(it.parts)
+                            synchronized(mapLock) {
+                                if (parsed.isEmpty()) {
+                                    part.remove(message)
+                                } else {
+                                    val map = linkedMapOf<String, MessagePart>()
+                                    parsed.forEach { item ->
+                                        map[item.id] = item
+                                    }
+                                    part[message] = map
+                                }
                             }
-                            part[message] = map
+                            val messageText = if (messageRole == "assistant") {
+                                decorator.render(synchronized(mapLock) { part[message]?.values })
+                            } else {
+                                it.text
+                            }
+                            role[message] = messageRole
+                            incoming.add(
+                                IncomingMessage(
+                                    id = id,
+                                    role = messageRole,
+                                    text = messageText,
+                                    createdAt = it.createdAt,
+                                    completedAt = it.completedAt,
+                                ),
+                            )
                         }
-                    }
-                    val messageText = if (messageRole == "assistant") {
-                        decorator.render(synchronized(mapLock) { part[message]?.values })
-                    } else {
-                        it.text
-                    }
-                    role[message] = messageRole
-                    incoming.add(
-                        IncomingMessage(
-                            id = id,
-                            role = messageRole,
-                            text = messageText,
-                            createdAt = it.createdAt,
-                            completedAt = it.completedAt,
-                        ),
-                    )
-                }
 
-                val plan = planner.plan(
-                    incoming = incoming,
-                    cached = cached,
-                    sticky = sticky,
-                    remoteSort = ::remoteSort,
-                    knownSort = { order[messageKey(key, it)] },
-                    claimPendingSort = { claimPendingSort(key, it) },
-                    retainRemoved = { retainPass.consume(key, it) },
-                    complete = complete,
-                )
-
-                synchronized(mapLock) {
-                    plan.sorts.forEach { (id, sort) ->
-                        order[messageKey(key, id)] = sort
-                    }
-                }
-
-                withContext(ioLane) {
-                    plan.upserts.forEach {
-                        cache.upsertMessage(
-                            server,
-                            session.id,
-                            it,
-                            now,
-                        )
-                    }
-                }
-
-                if (complete) {
-                    synchronized(mapLock) {
-                        plan.removedIds.forEach { id ->
-                            role.remove(messageKey(key, id))
-                            part.remove(messageKey(key, id))
-                            order.remove(messageKey(key, id))
+                        val plan = timed(
+                            LaneMutation,
+                            "sync.plan",
+                            "session=${session.id} incoming=${incoming.size} cached=${cached.size}",
+                        ) {
+                            planner.plan(
+                                incoming = incoming,
+                                cached = cached,
+                                sticky = sticky,
+                                remoteSort = ::remoteSort,
+                                knownSort = { order[messageKey(key, it)] },
+                                claimPendingSort = { claimPendingSort(key, it) },
+                                retainRemoved = { retainPass.consume(key, it) },
+                                complete = complete,
+                            )
                         }
-                    }
-                    withContext(ioLane) {
-                        plan.removedIds.forEach {
-                            cache.deleteMessage(server, session.id, it)
-                        }
-                    }
-                }
 
-                clearOverlay(key)
-                trimPending(key)
-                if (focusedKey == key) {
-                    if (plan.claimed) {
-                        observeFocused()
+                        synchronized(mapLock) {
+                            plan.sorts.forEach { (id, sort) ->
+                                order[messageKey(key, id)] = sort
+                            }
+                        }
+
+                        timedSuspend(LaneIo, "sync.cache_upsert", "session=${session.id} count=${plan.upserts.size}") {
+                            withContext(ioLane) {
+                                plan.upserts.forEach {
+                                    cache.upsertMessage(
+                                        server,
+                                        session.id,
+                                        it,
+                                        now,
+                                    )
+                                }
+                            }
+                        }
+
+                        if (complete) {
+                            synchronized(mapLock) {
+                                plan.removedIds.forEach { id ->
+                                    role.remove(messageKey(key, id))
+                                    part.remove(messageKey(key, id))
+                                    order.remove(messageKey(key, id))
+                                }
+                            }
+                            timedSuspend(LaneIo, "sync.cache_delete", "session=${session.id} count=${plan.removedIds.size}") {
+                                withContext(ioLane) {
+                                    plan.removedIds.forEach {
+                                        cache.deleteMessage(server, session.id, it)
+                                    }
+                                }
+                            }
+                        }
+
+                        clearOverlay(key)
+                        trimPending(key)
+                        if (focusedKey == key) {
+                            if (plan.claimed) {
+                                observeFocused()
+                            }
+                            local.value = local.value.copy(canLoadMoreMessages = !complete)
+                        }
+                        log.debug(LogTag, "sync ok session=${session.id} messages=${next.size} dt=${System.currentTimeMillis() - started}ms")
                     }
-                    local.value = local.value.copy(canLoadMoreMessages = !complete)
+                    result.onFailure {
+                        log.warn(LogTag, "sync failed session=${session.id} reason=${it.message}")
+                        local.value = local.value.copy(message = it.message ?: "Failed to load messages")
+                    }
                 }
-                log.debug(LogTag, "sync ok session=${session.id} messages=${next.size} dt=${System.currentTimeMillis() - started}ms")
-            }
-            result.onFailure {
-                log.warn(LogTag, "sync failed session=${session.id} reason=${it.message}")
-                local.value = local.value.copy(message = it.message ?: "Failed to load messages")
-            }
             } finally {
                 endSync(session.id)
             }
@@ -897,7 +913,9 @@ class SessionService(
 
     private suspend fun onEvent(event: SessionStreamEvent) {
         mutate(event.id?.let { "sse:$it" }) {
-            onEventNow(event)
+            timedSuspend(LaneMutation, "sse.event", "type=${event.type}") {
+                onEventNow(event)
+            }
         }
     }
 
@@ -1248,11 +1266,13 @@ class SessionService(
         observe = (scope ?: return).launch(mutationLane) {
             cache.observeMessages(server, session)
                 .collect {
-                    it.forEach { message ->
-                        order[messageKey(key, message.id)] = message.sort
+                    timed(LaneMutation, "focused.observe", "session=$session size=${it.size}") {
+                        it.forEach { message ->
+                            order[messageKey(key, message.id)] = message.sort
+                        }
+                        focusedDb = it
+                        publishFocused(key)
                     }
-                    focusedDb = it
-                    publishFocused(key)
                 }
         }
     }
@@ -1275,7 +1295,9 @@ class SessionService(
         val token = ++publishToken
         publish?.cancel()
         publish = scope.launch(cpuLane) {
-            val next = projector.project(key, base, staged, queued, parts)
+            val next = timed(LaneCpu, "focused.project", "session=$key base=${base.size} staged=${staged.size}") {
+                projector.project(key, base, staged, queued, parts)
+            }
             withContext(mutationLane) {
                 if (focusedKey != key || token != publishToken) return@withContext
                 local.value = local.value.copy(focusedMessages = next)
@@ -1484,6 +1506,26 @@ class SessionService(
         log.warn(LogTag, "sse drop type=$type reason=$reason")
     }
 
+    private inline fun <T> timed(lane: String, path: String, details: String, block: () -> T): T {
+        val start = System.nanoTime()
+        return try {
+            block()
+        } finally {
+            val dt = (System.nanoTime() - start) / 1_000_000
+            log.debug(LogTag, "perf lane=$lane path=$path dt=${dt}ms thread=${Thread.currentThread().name} $details")
+        }
+    }
+
+    private suspend fun <T> timedSuspend(lane: String, path: String, details: String, block: suspend () -> T): T {
+        val start = System.nanoTime()
+        return try {
+            block()
+        } finally {
+            val dt = (System.nanoTime() - start) / 1_000_000
+            log.debug(LogTag, "perf lane=$lane path=$path dt=${dt}ms thread=${Thread.currentThread().name} $details")
+        }
+    }
+
     fun stop() {
         pipeline?.cancel()
         pipeline = null
@@ -1574,3 +1616,6 @@ private const val SessionLimitStep = 50
 private const val SessionFetchLimit = 50
 private const val FavoritePreloadLimit = 50
 private const val WorkspaceSessionDisplayLimit = 3
+private const val LaneMutation = "mutation"
+private const val LaneIo = "io"
+private const val LaneCpu = "cpu"

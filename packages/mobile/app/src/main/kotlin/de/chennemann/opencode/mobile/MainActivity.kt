@@ -1,8 +1,11 @@
 package de.chennemann.opencode.mobile
 
 import android.Manifest
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Looper
+import android.os.StrictMode
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,6 +24,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if ((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            check(Looper.getMainLooper().thread === Thread.currentThread()) {
+                "MainActivity.onCreate must run on main thread"
+            }
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder(StrictMode.getThreadPolicy())
+                    .detectCustomSlowCalls()
+                    .penaltyLog()
+                    .build(),
+            )
+        }
         if (checkSelfPermission(Manifest.permission.INTERNET) != PackageManager.PERMISSION_GRANTED) {
             requestInternet.launch(Manifest.permission.INTERNET)
         }

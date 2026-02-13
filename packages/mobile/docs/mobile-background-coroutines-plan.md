@@ -53,11 +53,11 @@ Keep heavy work off main thread safely.
 
 ## 5) Add observability and verification
 
-- [ ] Add lightweight timing and lane markers around high-volume service paths in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/domain/session/SessionService.kt`.
-- [ ] Add StrictMode and main-thread policy checks in debug builds in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/MainActivity.kt` and `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/App.kt` to catch accidental blocking calls.
-- [ ] Add regression checks for conversation rendering throughput in `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationScreenStreamingMarkdownTest.kt` or a sibling test.
-- [ ] Run and record baseline-versus-after metrics for frame drops, message load latency, and session switching responsiveness.
-- [ ] Add a short runbook note in `docs/markdown/mobile-background-coroutines-plan.md` with commands and expected logs for manual verification.
+- [x] Add lightweight timing and lane markers around high-volume service paths in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/domain/session/SessionService.kt`.
+- [x] Add StrictMode and main-thread policy checks in debug builds in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/MainActivity.kt` and `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/App.kt` to catch accidental blocking calls.
+- [x] Add regression checks for conversation rendering throughput in `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationScreenStreamingMarkdownTest.kt` or a sibling test.
+- [x] Run and record baseline-versus-after metrics for frame drops, message load latency, and session switching responsiveness.
+- [x] Add a short runbook note in `docs/markdown/mobile-background-coroutines-plan.md` with commands and expected logs for manual verification.
 
 ---
 
