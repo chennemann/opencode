@@ -322,6 +322,18 @@ private fun ConversationTurnItem(
                 )
             }
         }
+
+        turn.startedAt?.let {
+            androidx.compose.foundation.layout.Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TurnTimer(
+                    startedAt = it,
+                    completedAt = turn.completedAt,
+                )
+            }
+        }
     }
 }
 
