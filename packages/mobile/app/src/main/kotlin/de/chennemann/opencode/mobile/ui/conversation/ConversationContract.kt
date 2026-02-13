@@ -23,12 +23,18 @@ data class ConversationUiState(
     val loadingMoreMessages: Boolean,
     val scroll: Long,
     val draft: String,
+    val mode: ConversationMode,
     val slashSuggestions: List<CommandState>,
     val quickSwitches: List<QuickSwitchState>,
     val quickSwitchMenu: QuickSwitchMenuState? = null,
     val stepOpen: Map<String, Boolean>,
     val callOpen: Map<String, Boolean>,
 )
+
+enum class ConversationMode {
+    PLAN,
+    BUILD,
+}
 
 data class QuickSwitchState(
     val key: String,
@@ -46,6 +52,8 @@ data class QuickSwitchMenuState(
     val project: String,
     val sessions: List<SessionState>,
     val loading: Boolean,
+    val limit: Int = 11,
+    val canLoadMore: Boolean = false,
     val pinned: Set<String> = emptySet(),
     val systemPinned: Set<String> = emptySet(),
 )
@@ -59,6 +67,8 @@ sealed interface ConversationEvent {
 
     data class DraftChanged(val value: String) : ConversationEvent
 
+    data class ModeChanged(val value: ConversationMode) : ConversationEvent
+
     data class SlashCommandSelected(val name: String) : ConversationEvent
 
     data class QuickSwitchTapped(val key: String) : ConversationEvent
@@ -70,6 +80,10 @@ sealed interface ConversationEvent {
     data class QuickSwitchMenuSessionTapped(val session: SessionState) : ConversationEvent
 
     data class QuickSwitchMenuPinTapped(val session: SessionState, val systemPinned: Boolean) : ConversationEvent
+
+    data class QuickSwitchMenuArchiveTapped(val session: SessionState) : ConversationEvent
+
+    data object QuickSwitchMenuLoadMoreTapped : ConversationEvent
 
     data object QuickSwitchMenuCreateTapped : ConversationEvent
 

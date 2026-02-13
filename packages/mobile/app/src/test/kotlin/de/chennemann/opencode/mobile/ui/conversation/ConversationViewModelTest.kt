@@ -107,9 +107,129 @@ class ConversationViewModelTest {
 
         val menu = viewModel.state.value.quickSwitchMenu
         assertEquals(listOf("/repo/main"), service.sessionRequests)
+        assertEquals(listOf(11), service.sessionRequestLimits)
+        assertEquals(listOf(11), service.cachedRequestLimits)
         assertTrue(menu != null)
         assertFalse(menu!!.loading)
         assertEquals(listOf("s2", "s1"), menu.sessions.map { it.id })
+        collect.cancel()
+    }
+
+    @Test
+    fun quickSwitchMenuLoadsMoreSessionsInPages() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ConversationViewModel(service, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        val focused = SessionState(
+            id = "s12",
+            title = "Focused",
+            version = "1",
+            directory = "/repo/main",
+            updatedAt = 1_200,
+        )
+        service.projectSessions["/repo/main"] = (1..12)
+            .map {
+                SessionState(
+                    id = "s$it",
+                    title = "Session $it",
+                    version = "1",
+                    directory = "/repo/main",
+                    updatedAt = it * 100L,
+                )
+            }
+            .sortedByDescending { it.updatedAt }
+        service.state.value = state(
+            focusedSession = focused,
+            projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
+            activeSessions = listOf(focused),
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.QuickSwitchLongPressed("/repo/main"))
+        advanceUntilIdle()
+
+        val initial = viewModel.state.value.quickSwitchMenu
+        assertTrue(initial != null)
+        assertEquals(11, initial!!.sessions.size)
+        assertTrue(initial.canLoadMore)
+        assertEquals(listOf(11), service.sessionRequestLimits)
+        assertEquals(listOf(11), service.cachedRequestLimits)
+
+        viewModel.onEvent(ConversationEvent.QuickSwitchMenuLoadMoreTapped)
+        advanceUntilIdle()
+
+        val next = viewModel.state.value.quickSwitchMenu
+        assertTrue(next != null)
+        assertEquals(12, next!!.sessions.size)
+        assertFalse(next.canLoadMore)
+        assertEquals(listOf(11, 22), service.sessionRequestLimits)
+        collect.cancel()
+    }
+
+    @Test
+    fun quickSwitchArchiveRemovesSessionAndDelegates() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ConversationViewModel(service, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        val focused = SessionState(
+            id = "s2",
+            title = "Focused",
+            version = "1",
+            directory = "/repo/main",
+            updatedAt = 200,
+        )
+        service.projectSessions["/repo/main"] = listOf(
+            SessionState(id = "s1", title = "Old", version = "1", directory = "/repo/main", updatedAt = 100),
+            focused,
+        )
+        service.state.value = state(
+            focusedSession = focused,
+            projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
+            activeSessions = listOf(focused),
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.QuickSwitchLongPressed("/repo/main"))
+        advanceUntilIdle()
+
+        viewModel.onEvent(ConversationEvent.QuickSwitchMenuArchiveTapped(focused))
+        advanceUntilIdle()
+
+        val menu = viewModel.state.value.quickSwitchMenu
+        assertTrue(menu != null)
+        assertEquals(listOf("s1"), menu!!.sessions.map { it.id })
+        assertEquals(listOf("s2"), service.archiveRequests)
+        collect.cancel()
+    }
+
+    @Test
+    fun quickSwitchOrdersByProjectNameInitial() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ConversationViewModel(service, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        service.state.value = state(
+            projects = listOf(
+                ProjectState(id = "p1", worktree = "/repo/zeta", name = "Zeta", favorite = true),
+                ProjectState(id = "p2", worktree = "/repo/alpha", name = "Alpha", favorite = true),
+            ),
+            activeSessions = listOf(
+                SessionState(id = "s-z", title = "Z", version = "1", directory = "/repo/zeta", updatedAt = 400),
+                SessionState(id = "s-a", title = "A", version = "1", directory = "/repo/alpha", updatedAt = 100),
+            ),
+        )
+
+        advanceUntilIdle()
+
+        assertEquals(listOf("Alpha", "Zeta"), viewModel.state.value.quickSwitches.map { it.project })
         collect.cancel()
     }
 
@@ -181,6 +301,9 @@ private class StubSessionService : SessionServiceApi {
     )
     var startCalls = 0
     val sessionRequests = mutableListOf<String>()
+    val sessionRequestLimits = mutableListOf<Int>()
+    val cachedRequestLimits = mutableListOf<Int>()
+    val archiveRequests = mutableListOf<String>()
     val projectSessions = linkedMapOf<String, List<SessionState>>()
 
     override fun start(scope: CoroutineScope) {
@@ -197,6 +320,8 @@ private class StubSessionService : SessionServiceApi {
 
     override fun toggleProjectFavorite(worktree: String) = Unit
 
+    override fun removeProject(worktree: String) = Unit
+
     override fun toggleSessionQuickPin(session: SessionState, systemPinned: Boolean) = Unit
 
     override suspend fun createSessionAndFocus(worktree: String): Boolean {
@@ -205,12 +330,30 @@ private class StubSessionService : SessionServiceApi {
 
     override fun openSession(session: SessionState) = Unit
 
-    override fun send(text: String) = Unit
+    override fun send(text: String, agent: String) = Unit
 
     override fun loadMoreMessages() = Unit
 
+    override fun archiveSession(session: SessionState) {
+        archiveRequests += session.id
+    }
+
+    override suspend fun cachedSessionsForProject(worktree: String, limit: Int?): List<SessionState> {
+        if (limit != null) {
+            cachedRequestLimits += limit
+        }
+        return projectSessions[worktree].orEmpty().let {
+            if (limit == null) it else it.take(limit)
+        }
+    }
+
     override suspend fun sessionsForProject(worktree: String, limit: Int?): List<SessionState> {
         sessionRequests += worktree
-        return projectSessions[worktree].orEmpty()
+        if (limit != null) {
+            sessionRequestLimits += limit
+        }
+        return projectSessions[worktree].orEmpty().let {
+            if (limit == null) it else it.take(limit)
+        }
     }
 }

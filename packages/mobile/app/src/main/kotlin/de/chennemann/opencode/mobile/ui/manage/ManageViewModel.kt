@@ -142,6 +142,10 @@ class ManageViewModel(
                 service.toggleProjectFavorite(event.worktree)
             }
 
+            is ManageEvent.ProjectRemoved -> {
+                service.removeProject(event.worktree)
+            }
+
             is ManageEvent.WorkspaceSelected -> {
                 local.value = local.value.copy(selectedWorkspace = event.directory)
             }

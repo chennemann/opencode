@@ -32,6 +32,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import de.chennemann.opencode.mobile.domain.session.ProjectState
@@ -201,10 +203,28 @@ private fun ServerCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
 private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
     var filterOpen by remember { mutableStateOf(state.projectQuery.isNotBlank()) }
     var pathOpen by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf(TextFieldValue(state.projectQuery)) }
+    var path by remember { mutableStateOf(TextFieldValue(state.projectPath)) }
 
     LaunchedEffect(state.projectQuery) {
         if (state.projectQuery.isBlank()) return@LaunchedEffect
         filterOpen = true
+    }
+
+    LaunchedEffect(state.projectQuery) {
+        if (state.projectQuery == query.text) return@LaunchedEffect
+        query = TextFieldValue(
+            text = state.projectQuery,
+            selection = TextRange(state.projectQuery.length),
+        )
+    }
+
+    LaunchedEffect(state.projectPath) {
+        if (state.projectPath == path.text) return@LaunchedEffect
+        path = TextFieldValue(
+            text = state.projectPath,
+            selection = TextRange(state.projectPath.length),
+        )
     }
 
     Card {
@@ -249,8 +269,11 @@ private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit
 
             if (filterOpen) {
                 TextField(
-                    value = state.projectQuery,
-                    onValueChange = { onEvent(ManageEvent.ProjectQueryChanged(it)) },
+                    value = query,
+                    onValueChange = {
+                        query = it
+                        onEvent(ManageEvent.ProjectQueryChanged(it.text))
+                    },
                     label = { Text("Search projects") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -260,14 +283,22 @@ private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit
             if (pathOpen) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextField(
-                        value = state.projectPath,
-                        onValueChange = { onEvent(ManageEvent.ProjectPathChanged(it)) },
+                        value = path,
+                        onValueChange = {
+                            path = it
+                            onEvent(ManageEvent.ProjectPathChanged(it.text))
+                        },
                         label = { Text("Open project path") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Button(
-                        onClick = { onEvent(ManageEvent.OpenProjectTapped) },
+                        onClick = {
+                            if (state.projectPath != path.text) {
+                                onEvent(ManageEvent.ProjectPathChanged(path.text))
+                            }
+                            onEvent(ManageEvent.OpenProjectTapped)
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text("Open path")
@@ -306,7 +337,20 @@ private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit
                 }
             }
 
+            val removable = state.selectedProject?.takeIf { selected ->
+                (state.favoriteProjects + state.otherProjects)
+                    .any { workspaceId(it.worktree) == workspaceId(selected) }
+            }
+
             if (state.otherProjects.isEmpty()) {
+                if (removable != null) {
+                    OutlinedButton(
+                        onClick = { onEvent(ManageEvent.ProjectRemoved(removable)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Remove selected project")
+                    }
+                }
                 return@Column
             }
 
@@ -340,7 +384,17 @@ private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (!state.projectsExpanded) return@Column
+            if (!state.projectsExpanded) {
+                if (removable != null) {
+                    OutlinedButton(
+                        onClick = { onEvent(ManageEvent.ProjectRemoved(removable)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Remove selected project")
+                    }
+                }
+                return@Column
+            }
 
             state.otherProjects.forEach {
                 ProjectCard(
@@ -351,6 +405,14 @@ private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit
                     onFavoriteToggle = { onEvent(ManageEvent.ProjectFavoriteToggled(it.worktree)) },
                     onSelect = { onEvent(ManageEvent.ProjectSelected(it.worktree)) },
                 )
+            }
+            if (removable != null) {
+                OutlinedButton(
+                    onClick = { onEvent(ManageEvent.ProjectRemoved(removable)) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Remove selected project")
+                }
             }
         }
     }

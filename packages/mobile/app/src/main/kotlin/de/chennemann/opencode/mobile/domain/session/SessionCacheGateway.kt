@@ -16,11 +16,23 @@ data class SessionQuickPinCache(
 interface SessionCacheGateway {
     suspend fun upsertSession(server: String, project: String?, session: SessionState)
 
+    suspend fun upsertSessionSnapshot(server: String, project: String?, session: SessionState)
+
+    suspend fun syncProjectSessions(server: String, project: String, sessions: List<SessionState>)
+
+    suspend fun listProjectSessions(server: String, project: String, limit: Int? = null): List<SessionState>
+
+    suspend fun deleteSession(server: String, sessionId: String)
+
     fun recentSession(): RecentSessionCache?
 
     fun projectFavorites(server: String): Set<String>
 
     suspend fun setProjectFavorite(server: String, worktree: String, favorite: Boolean)
+
+    fun hiddenProjects(server: String): Set<String>
+
+    suspend fun setProjectHidden(server: String, worktree: String, hidden: Boolean)
 
     fun sessionQuickPins(server: String): SessionQuickPinCache
 
