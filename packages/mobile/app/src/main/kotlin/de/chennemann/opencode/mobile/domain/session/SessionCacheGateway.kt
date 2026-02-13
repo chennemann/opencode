@@ -8,6 +8,11 @@ data class RecentSessionCache(
     val session: SessionState,
 )
 
+data class SessionQuickPinCache(
+    val include: Set<String> = emptySet(),
+    val exclude: Set<String> = emptySet(),
+)
+
 interface SessionCacheGateway {
     suspend fun upsertSession(server: String, project: String?, session: SessionState)
 
@@ -16,6 +21,10 @@ interface SessionCacheGateway {
     fun projectFavorites(server: String): Set<String>
 
     suspend fun setProjectFavorite(server: String, worktree: String, favorite: Boolean)
+
+    fun sessionQuickPins(server: String): SessionQuickPinCache
+
+    suspend fun setSessionQuickPins(server: String, include: Set<String>, exclude: Set<String>)
 
     suspend fun listMessages(server: String, sessionId: String): List<MessageState>
 
