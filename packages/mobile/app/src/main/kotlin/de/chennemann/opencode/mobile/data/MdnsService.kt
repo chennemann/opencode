@@ -8,6 +8,10 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 
+interface MdnsGateway {
+    fun discover(): Flow<MdnsEntry>
+}
+
 data class MdnsEntry(
     val name: String,
     val host: String,
@@ -25,8 +29,8 @@ data class MdnsEntry(
 
 class MdnsService(
     private val context: Context,
-) {
-    fun discover(): Flow<MdnsEntry> = callbackFlow {
+) : MdnsGateway {
+    override fun discover(): Flow<MdnsEntry> = callbackFlow {
         val manager = context.getSystemService(Context.NSD_SERVICE) as NsdManager?
         if (manager == null) {
             close()

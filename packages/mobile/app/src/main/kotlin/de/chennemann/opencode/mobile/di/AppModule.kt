@@ -2,9 +2,11 @@ package de.chennemann.opencode.mobile.di
 
 import de.chennemann.opencode.mobile.data.AndroidLogGateway
 import de.chennemann.opencode.mobile.data.MdnsService
+import de.chennemann.opencode.mobile.data.MdnsGateway
 import de.chennemann.opencode.mobile.data.NetworkService
 import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
+import de.chennemann.opencode.mobile.data.ServerGateway
 import de.chennemann.opencode.mobile.data.SessionCacheRepository
 import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
@@ -59,7 +61,7 @@ val appModule = module {
             )
         )
     }
-    single { MdnsService(get()) }
+    single<MdnsGateway> { MdnsService(get()) }
     single { NetworkService(get()) }
     single<DispatcherProvider> { DefaultDispatcherProvider() }
     single<CoroutineScope>(named(AppScopeName)) {
@@ -67,9 +69,9 @@ val appModule = module {
     }
     single<ConnectivityGateway> { get<NetworkService>() }
     single<LogGateway> { AndroidLogGateway() }
-    single { ServerService(get(), get()) }
-    single { ServerRepository(get(), get(), get(), get()) }
-    single { SessionCacheRepository(get()) }
+    single<ServerGateway> { ServerService(get(), get()) }
+    single { ServerRepository(get(), get(), get(), get(), get()) }
+    single { SessionCacheRepository(get(), get()) }
     single<ConnectionGateway> { get<ServerRepository>() }
     single<ProjectGateway> { get<ServerRepository>() }
     single<CommandGateway> { get<ServerRepository>() }

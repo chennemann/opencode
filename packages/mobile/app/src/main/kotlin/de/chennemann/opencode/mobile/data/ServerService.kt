@@ -74,10 +74,35 @@ data class GlobalStreamEvent(
     val retry: Int?,
 )
 
+interface ServerGateway {
+    suspend fun health(baseUrl: String): Health
+
+    suspend fun projects(baseUrl: String): List<ProjectInfo>
+
+    suspend fun sessions(baseUrl: String, worktree: String, limit: Int?): List<SessionInfo>
+
+    suspend fun createSession(baseUrl: String, worktree: String, title: String): SessionInfo
+
+    suspend fun commands(baseUrl: String, directory: String): List<CommandInfo>
+
+    suspend fun sessionMessages(baseUrl: String, sessionId: String, directory: String, limit: Int?): List<SessionMessageInfo>
+
+    suspend fun streamEvents(
+        baseUrl: String,
+        lastEventId: String?,
+        onRawEvent: suspend (String) -> Unit,
+        onEvent: suspend (GlobalStreamEvent) -> Unit,
+    ): String?
+
+    suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String)
+
+    suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String)
+}
+
 class ServerService(
     private val json: Json,
     private val engine: HttpClientEngine,
-) {
+) : ServerGateway {
     private val http = HttpClient(engine) {
         install(SSE) {
             maxReconnectionAttempts = Int.MAX_VALUE
@@ -100,7 +125,7 @@ class ServerService(
         return created
     }
 
-    suspend fun health(baseUrl: String): Health {
+    override suspend fun health(baseUrl: String): Health {
         val res = client(baseUrl).globalHealth()
         if (!res.success) {
             throw IllegalStateException("Server returned ${res.status}")
@@ -115,7 +140,7 @@ class ServerService(
         )
     }
 
-    suspend fun projects(baseUrl: String): List<ProjectInfo> {
+    override suspend fun projects(baseUrl: String): List<ProjectInfo> {
         val res = client(baseUrl).projectList(null)
         if (!res.success) {
             throw IllegalStateException("Server returned ${res.status}")
@@ -138,7 +163,7 @@ class ServerService(
             }
     }
 
-    suspend fun sessions(baseUrl: String, worktree: String, limit: Int?): List<SessionInfo> {
+    override suspend fun sessions(baseUrl: String, worktree: String, limit: Int?): List<SessionInfo> {
         val res = client(baseUrl).sessionList(worktree, true, null, null, limit?.let(::BigDecimal))
         if (!res.success) {
             throw IllegalStateException("Server returned ${res.status}")
@@ -173,7 +198,7 @@ class ServerService(
             }
     }
 
-    suspend fun createSession(baseUrl: String, worktree: String, title: String): SessionInfo {
+    override suspend fun createSession(baseUrl: String, worktree: String, title: String): SessionInfo {
         val res = http.post("$baseUrl/session") {
             parameter("directory", worktree)
             contentType(ContentType.Application.Json)
@@ -199,7 +224,7 @@ class ServerService(
         )
     }
 
-    suspend fun commands(baseUrl: String, directory: String): List<CommandInfo> {
+    override suspend fun commands(baseUrl: String, directory: String): List<CommandInfo> {
         val res = client(baseUrl).commandList(directory)
         if (!res.success) {
             throw IllegalStateException("Server returned ${res.status}")
@@ -220,7 +245,7 @@ class ServerService(
             }
     }
 
-    suspend fun sessionMessages(baseUrl: String, sessionId: String, directory: String, limit: Int?): List<SessionMessageInfo> {
+    override suspend fun sessionMessages(baseUrl: String, sessionId: String, directory: String, limit: Int?): List<SessionMessageInfo> {
         val res = client(baseUrl).sessionMessages(sessionId, directory, limit?.let(::BigDecimal))
         if (!res.success) {
             throw IllegalStateException("Server returned ${res.status}")
@@ -267,7 +292,7 @@ class ServerService(
             }
     }
 
-    suspend fun streamEvents(
+    override suspend fun streamEvents(
         baseUrl: String,
         lastEventId: String?,
         onRawEvent: suspend (String) -> Unit,
@@ -309,7 +334,7 @@ class ServerService(
         return cursor
     }
 
-    suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String) {
+    override suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String) {
         val res = http.post("$baseUrl/session/$sessionId/prompt_async") {
             parameter("directory", directory)
             contentType(ContentType.Application.Json)
@@ -334,7 +359,7 @@ class ServerService(
         }
     }
 
-    suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String) {
+    override suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String) {
         val res = http.post("$baseUrl/session/$sessionId/command") {
             parameter("directory", directory)
             contentType(ContentType.Application.Json)
