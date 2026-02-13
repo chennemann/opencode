@@ -16,6 +16,8 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import kotlinx.coroutines.flow.collect
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -126,10 +128,7 @@ class ServerService(
                 val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
                 val worktree = obj["worktree"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
                 val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: worktree
-                val sandboxes = obj["sandboxes"]
-                    ?.jsonArray
-                    ?.mapNotNull { sandbox -> sandbox.jsonPrimitive.contentOrNull }
-                    ?: emptyList()
+                val sandboxes = projectDirectories(obj)
                 ProjectInfo(
                     id = id,
                     worktree = worktree,
@@ -350,4 +349,23 @@ class ServerService(
             throw IllegalStateException("Server returned ${res.status}")
         }
     }
+}
+
+private fun projectDirectories(obj: JsonObject): List<String> {
+    val sandboxes = parseDirectoryArray(obj["sandboxes"])
+    if (sandboxes.isNotEmpty()) return sandboxes
+    return parseDirectoryArray(obj["workspaces"])
+}
+
+private fun parseDirectoryArray(value: JsonElement?): List<String> {
+    val array = value as? JsonArray ?: return emptyList()
+    return array
+        .mapNotNull {
+            it.jsonPrimitive.contentOrNull
+                ?: (it as? JsonObject)?.get("worktree")?.jsonPrimitive?.contentOrNull
+                ?: (it as? JsonObject)?.get("directory")?.jsonPrimitive?.contentOrNull
+        }
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .distinct()
 }
