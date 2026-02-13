@@ -2,13 +2,13 @@ package de.chennemann.opencode.mobile.ui.conversation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.session.CommandState
 import de.chennemann.opencode.mobile.domain.session.ProjectState
 import de.chennemann.opencode.mobile.domain.session.ServerState
+import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.SessionState
-import de.chennemann.opencode.mobile.domain.session.SessionService
 import de.chennemann.opencode.mobile.navigation.NavEvent
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -22,9 +22,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class ConversationViewModel(
-    private val service: SessionService,
+    private val service: SessionServiceApi,
+    private val dispatchers: DispatcherProvider,
 ) : ViewModel() {
     private val mapper = ConversationRenderMapper()
+    private val lane = dispatchers.default.limitedParallelism(1)
 
     private data class GlobalRenderState(
         val title: String,
@@ -88,7 +90,7 @@ class ConversationViewModel(
                 loadingMoreMessages = it.loadingMoreMessages,
             )
         }
-        .flowOn(Dispatchers.Default)
+        .flowOn(lane)
 
     val state: StateFlow<ConversationUiState> = combine(global, local) { global, local ->
         val quick = quickSwitchModel(
@@ -120,6 +122,7 @@ class ConversationViewModel(
             callOpen = local.callOpen,
         )
     }
+        .flowOn(lane)
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -181,11 +184,15 @@ class ConversationViewModel(
             }
 
             is ConversationEvent.QuickSwitchTapped -> {
-                quickSwitchTap(event.key)
+                viewModelScope.launch(lane) {
+                    quickSwitchTap(event.key)
+                }
             }
 
             is ConversationEvent.QuickSwitchLongPressed -> {
-                quickSwitchLongPress(event.key)
+                viewModelScope.launch(lane) {
+                    quickSwitchLongPress(event.key)
+                }
             }
 
             is ConversationEvent.QuickSwitchMenuDismissed -> {
@@ -204,7 +211,7 @@ class ConversationViewModel(
             is ConversationEvent.QuickSwitchMenuCreateTapped -> {
                 val worktree = local.value.quickSwitchMenu?.worktree ?: return
                 local.update { it.copy(quickSwitchMenu = null) }
-                viewModelScope.launch {
+                viewModelScope.launch(lane) {
                     service.createSessionAndFocus(worktree)
                 }
             }
@@ -262,7 +269,7 @@ class ConversationViewModel(
         if (model.focusedKey != key) {
             val primary = project.primary
             if (primary == null) {
-                viewModelScope.launch {
+                viewModelScope.launch(lane) {
                     service.createSessionAndFocus(project.worktree)
                 }
                 return
@@ -271,7 +278,7 @@ class ConversationViewModel(
             return
         }
         if (project.cycle.isEmpty()) {
-            viewModelScope.launch {
+            viewModelScope.launch(lane) {
                 service.createSessionAndFocus(project.worktree)
             }
             return
@@ -309,7 +316,7 @@ class ConversationViewModel(
                 )
             )
         }
-        viewModelScope.launch {
+        viewModelScope.launch(lane) {
             val result = runCatching { service.sessionsForProject(project.worktree) }
             result.onSuccess { list ->
                 local.update {
