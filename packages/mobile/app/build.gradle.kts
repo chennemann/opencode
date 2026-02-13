@@ -66,6 +66,7 @@ dependencies {
     implementation(libs.sqldelight.android.driver)
     implementation(libs.sqldelight.coroutines.extensions)
     testImplementation(libs.junit.jupiter.api)
+    testImplementation(libs.kotlinx.coroutines.test)
     testRuntimeOnly(libs.junit.jupiter.engine)
     testRuntimeOnly(libs.junit.platform.launcher)
     androidTestImplementation(libs.androidx.junit)
