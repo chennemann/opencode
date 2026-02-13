@@ -1,5 +1,6 @@
 package de.chennemann.opencode.mobile.ui.conversation
 
+import android.util.Log
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -10,6 +11,7 @@ import androidx.compose.ui.test.longClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.ToolCallState
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -56,6 +58,45 @@ class ConversationScreenStreamingMarkdownTest {
 
         compose.onAllNodesWithText("line 2 code").assertCountEquals(1)
         compose.onAllNodesWithText("line 2 `code`").assertCountEquals(0)
+    }
+
+    @Test
+    fun tracks_render_throughput_for_streamed_markdown_updates() {
+        val state = mutableStateOf(ui(listOf("chunk-0 `code-0`")))
+
+        compose.setContent {
+            ConversationScreen(
+                state = state.value,
+                onEvent = {},
+            )
+        }
+
+        val samples = mutableListOf<Long>()
+        repeat(160) { index ->
+            val text = buildString {
+                append("chunk-$index `code-$index`\n")
+                append("paragraph-$index")
+            }
+            val dt = kotlin.system.measureNanoTime {
+                compose.runOnIdle {
+                    state.value = ui(listOf(text))
+                }
+                compose.waitForIdle()
+            }
+            samples += dt
+        }
+
+        val avgMs = samples.average() / 1_000_000.0
+        val sorted = samples.sorted()
+        val p95Ms = sorted[(sorted.size * 95) / 100] / 1_000_000.0
+        Log.i(
+            "ConversationPerf",
+            "phase5_render updates=${samples.size} avg_ms=$avgMs p95_ms=$p95Ms",
+        )
+
+        assertTrue("Expected avg render update under 200ms, got $avgMs", avgMs < 200.0)
+        assertTrue("Expected p95 render update under 400ms, got $p95Ms", p95Ms < 400.0)
+        compose.onAllNodesWithText("chunk-159 code-159").assertCountEquals(1)
     }
 
     private fun ui(texts: List<String>) = ConversationUiState(

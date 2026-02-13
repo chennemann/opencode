@@ -1,6 +1,9 @@
 package de.chennemann.opencode.mobile
 
 import android.app.Application
+import android.content.pm.ApplicationInfo
+import android.os.Looper
+import android.os.StrictMode
 import de.chennemann.opencode.mobile.di.AppScopeName
 import de.chennemann.opencode.mobile.di.appModule
 import kotlinx.coroutines.CoroutineScope
@@ -13,6 +16,23 @@ import org.koin.core.context.startKoin
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
+        if ((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            check(Looper.getMainLooper().thread === Thread.currentThread()) {
+                "App.onCreate must run on main thread"
+            }
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder()
+                    .detectAll()
+                    .penaltyLog()
+                    .build(),
+            )
+            StrictMode.setVmPolicy(
+                StrictMode.VmPolicy.Builder()
+                    .detectAll()
+                    .penaltyLog()
+                    .build(),
+            )
+        }
         startKoin {
             androidContext(this@App)
             modules(appModule)
