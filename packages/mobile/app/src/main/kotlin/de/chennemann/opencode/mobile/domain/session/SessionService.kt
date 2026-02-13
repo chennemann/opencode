@@ -188,7 +188,10 @@ class SessionService(
         scope.launch {
             local.value = local.value.copy(loadingProjects = true, message = null)
             val server = serverForCache()
-            val favorites = runCatching { cache.projectFavorites(server) }.getOrDefault(emptySet())
+            val favorites = runCatching { cache.projectFavorites(server) }
+                .getOrDefault(emptySet())
+                .map(::workspaceId)
+                .toSet()
             val pins = runCatching { cache.sessionQuickPins(server) }
                 .getOrDefault(SessionQuickPinCache())
             val result = runCatching { proj.projects() }
@@ -199,18 +202,18 @@ class SessionService(
             )
             result.onSuccess { list ->
                 val projects = mergeProjects(
-                    list.map {
+                    canonicalProjects(list.map {
                         ProjectState(
                             id = it.id,
-                            worktree = it.worktree,
-                            name = if (it.name.isBlank()) projectName(it.worktree) else it.name,
-                            sandboxes = it.sandboxes,
+                            worktree = workspaceId(it.worktree),
+                            name = if (it.name.isBlank()) projectName(it.worktree) else it.name.trim(),
+                            sandboxes = it.sandboxes.map(::workspaceId),
                         )
-                    },
+                    }),
                     favorites,
                 )
-                val current = local.value.selectedProject
-                val next = if (current != null && projects.any { it.worktree == current }) {
+                val current = local.value.selectedProject?.let(::workspaceId)
+                val next = if (current != null && projects.any { workspaceId(it.worktree) == current }) {
                     current
                 } else {
                     projects.firstOrNull()?.worktree
@@ -236,19 +239,20 @@ class SessionService(
     }
 
     fun selectProject(worktree: String) {
+        val selected = workspaceId(worktree)
         local.value = local.value.copy(
-            selectedProject = worktree,
+            selectedProject = selected,
             commands = emptyList(),
             sessions = emptyList(),
             sessionRecentOnly = false,
             sessionLimit = InitialSessionLimit,
         )
-        loadSessions(worktree)
-        loadCommands(worktree)
+        loadSessions(selected)
+        loadCommands(selected)
     }
 
     fun toggleProjectFavorite(worktree: String) {
-        val value = worktree.trim()
+        val value = workspaceId(worktree)
         if (value.isBlank()) return
         val scope = scope ?: return
         val server = serverForCache()
@@ -1276,10 +1280,11 @@ class SessionService(
     }
 
     private fun mergeProjects(projects: List<ProjectState>, favorites: Set<String>): List<ProjectState> {
-        val next = projects.map {
-            it.copy(favorite = favorites.contains(it.worktree))
-        }
-        val known = next.map { it.worktree }.toSet()
+        val next = canonicalProjects(projects)
+            .map {
+                it.copy(favorite = favorites.contains(workspaceId(it.worktree)))
+            }
+        val known = next.map { workspaceId(it.worktree) }.toSet()
         val missing = favorites
             .filterNot(known::contains)
             .map {
@@ -1292,6 +1297,33 @@ class SessionService(
             }
 
         return sortProjects(next + missing)
+    }
+
+    private fun canonicalProjects(projects: List<ProjectState>): List<ProjectState> {
+        return projects
+            .groupBy { workspaceId(it.worktree) }
+            .map { (worktree, value) ->
+                val sandboxes = value
+                    .flatMap { it.sandboxes }
+                    .map(::workspaceId)
+                    .filter { it.isNotBlank() && it != worktree }
+                    .distinct()
+                val fallback = projectName(worktree)
+                val name = value
+                    .map { it.name.trim() }
+                    .firstOrNull { it.isNotBlank() && it != fallback }
+                    ?: value
+                        .map { it.name.trim() }
+                        .firstOrNull { it.isNotBlank() }
+                    ?: fallback
+                ProjectState(
+                    id = value.firstOrNull { it.id.isNotBlank() }?.id ?: "project:$worktree",
+                    worktree = worktree,
+                    name = name,
+                    sandboxes = sandboxes,
+                    favorite = value.any { it.favorite },
+                )
+            }
     }
 
     private fun sortProjects(projects: List<ProjectState>): List<ProjectState> {
