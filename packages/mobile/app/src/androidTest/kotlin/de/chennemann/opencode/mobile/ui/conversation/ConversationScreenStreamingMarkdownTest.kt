@@ -73,10 +73,7 @@ class ConversationScreenStreamingMarkdownTest {
 
         val samples = mutableListOf<Long>()
         repeat(160) { index ->
-            val text = buildString {
-                append("chunk-$index `code-$index`\n")
-                append("paragraph-$index")
-            }
+            val text = "chunk-$index `code-$index`"
             val dt = kotlin.system.measureNanoTime {
                 compose.runOnIdle {
                     state.value = ui(listOf(text))

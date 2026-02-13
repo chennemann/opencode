@@ -25,11 +25,14 @@ adb shell am instrument -w de.chennemann.opencode.mobile.test/androidx.test.runn
 
 Fill this table from captured logs. If no baseline exists yet, keep `BASELINE_PLACEHOLDER` until first run.
 
-| Metric                               | Baseline             | After             | Source                                                               |
-| ------------------------------------ | -------------------- | ----------------- | -------------------------------------------------------------------- |
-| Frame drops (janky frames)           | BASELINE_PLACEHOLDER | AFTER_PLACEHOLDER | `adb shell dumpsys gfxinfo de.chennemann.opencode.mobile framestats` |
-| Message load latency (sync.fetch dt) | BASELINE_PLACEHOLDER | AFTER_PLACEHOLDER | `SessionService perf lane=io path=sync.fetch`                        |
-| Session switching responsiveness     | BASELINE_PLACEHOLDER | AFTER_PLACEHOLDER | `SessionService perf lane=mutation path=focused.observe`             |
+| Metric                                  | Baseline             | After                                 | Source                                                              |
+| --------------------------------------- | -------------------- | ------------------------------------- | ------------------------------------------------------------------- |
+| Frame drops (janky frames)              | BASELINE_PLACEHOLDER | 12 / 707 (1.70%)                      | `adb shell dumpsys gfxinfo de.chennemann.opencode.mobile`           |
+| Message load latency (sync.fetch dt)    | BASELINE_PLACEHOLDER | 2478ms latest (observed 1288-26684ms) | `SessionService perf lane=io path=sync.fetch`                       |
+| Session switching responsiveness        | BASELINE_PLACEHOLDER | 5ms typical (observed max 42ms)       | `SessionService perf lane=mutation path=focused.observe`            |
+| Streaming render throughput (ui update) | BASELINE_PLACEHOLDER | avg 78.6ms, p95 89.3ms                | `ConversationPerf: phase5_render updates=160 avg_ms=... p95_ms=...` |
+
+Captured on 2026-02-13 (Pixel 6, Android 16) after migrated-mode install.
 
 ## Phase 6 rollout guardrails
 
