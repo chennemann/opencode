@@ -120,6 +120,12 @@ class ServerRepository(
         }
     }
 
+    override suspend fun archiveSession(sessionId: String, directory: String) {
+        withContext(dispatchers.io) {
+            service.archiveSession(url.value, sessionId, directory)
+        }
+    }
+
     override suspend fun createSession(worktree: String, title: String): SessionSummary {
         val row = withContext(dispatchers.io) {
             service.createSession(url.value, worktree, title)
@@ -183,15 +189,15 @@ class ServerRepository(
         }
     }
 
-    override suspend fun sendMessage(sessionId: String, directory: String, text: String) {
+    override suspend fun sendMessage(sessionId: String, directory: String, text: String, agent: String) {
         withContext(dispatchers.io) {
-            service.sendMessage(url.value, sessionId, directory, text)
+            service.sendMessage(url.value, sessionId, directory, text, agent)
         }
     }
 
-    override suspend fun sendCommand(sessionId: String, directory: String, name: String, arguments: String) {
+    override suspend fun sendCommand(sessionId: String, directory: String, name: String, arguments: String, agent: String) {
         withContext(dispatchers.io) {
-            service.sendCommand(url.value, sessionId, directory, name, arguments)
+            service.sendCommand(url.value, sessionId, directory, name, arguments, agent)
         }
     }
 

@@ -32,6 +32,74 @@ class SessionCacheRepository(
         }
     }
 
+    override suspend fun upsertSessionSnapshot(server: String, project: String?, session: SessionState) {
+        withContext(dispatchers.io) {
+            db.appDatabaseQueries.upsertSessionCacheSnapshot(
+                server,
+                session.id,
+                project,
+                session.directory,
+                session.title,
+                session.version,
+                session.updatedAt ?: System.currentTimeMillis(),
+            )
+        }
+    }
+
+    override suspend fun syncProjectSessions(server: String, project: String, sessions: List<SessionState>) {
+        withContext(dispatchers.io) {
+            val next = sessions
+                .groupBy { it.id }
+                .mapNotNull {
+                    it.value.maxWithOrNull(
+                        compareBy<SessionState>({ value -> value.updatedAt ?: 0L }, { value -> value.id })
+                    )
+                }
+            val nextIds = next.map { it.id }.toSet()
+            val currentIds = db.appDatabaseQueries
+                .listProjectSessionCache(server, project, mapper = ::mapSessionCache)
+                .executeAsList()
+                .map { it.id }
+
+            currentIds
+                .filterNot(nextIds::contains)
+                .forEach {
+                    db.appDatabaseQueries.deleteSessionCache(server, it)
+                    db.appDatabaseQueries.deleteMessageCacheSession(server, it)
+                }
+
+            next.forEach {
+                db.appDatabaseQueries.upsertSessionCacheSnapshot(
+                    server,
+                    it.id,
+                    project,
+                    it.directory,
+                    it.title,
+                    it.version,
+                    it.updatedAt ?: System.currentTimeMillis(),
+                )
+            }
+        }
+    }
+
+    override suspend fun listProjectSessions(server: String, project: String, limit: Int?): List<SessionState> {
+        return withContext(dispatchers.io) {
+            if (limit == null) {
+                db.appDatabaseQueries.listProjectSessionCache(server, project, mapper = ::mapSessionCache)
+                    .executeAsList()
+            } else {
+                db.appDatabaseQueries.listProjectSessionCacheLimited(server, project, limit.toLong(), mapper = ::mapSessionCache)
+                    .executeAsList()
+            }
+        }
+    }
+
+    override suspend fun deleteSession(server: String, sessionId: String) {
+        withContext(dispatchers.io) {
+            db.appDatabaseQueries.deleteSessionCache(server, sessionId)
+        }
+    }
+
     override fun recentSession(): RecentSessionCache? {
         return db.appDatabaseQueries.selectRecentSessionCache(
             mapper = { serverUrl, sessionId, projectId, directory, title, version, _, _ ->
@@ -60,6 +128,30 @@ class SessionCacheRepository(
                 .toMutableSet()
                 .also {
                     if (favorite) it.add(worktree) else it.remove(worktree)
+                }
+                .toList()
+                .sorted()
+
+            if (next.isEmpty()) {
+                db.appDatabaseQueries.deleteSetting(key)
+                return@withContext
+            }
+
+            db.appDatabaseQueries.upsertSetting(key, next.joinToString(ProjectFavoriteSeparator))
+        }
+    }
+
+    override fun hiddenProjects(server: String): Set<String> {
+        return settingSet(db, projectHiddenKey(server))
+    }
+
+    override suspend fun setProjectHidden(server: String, worktree: String, hidden: Boolean) {
+        withContext(dispatchers.io) {
+            val key = projectHiddenKey(server)
+            val next = hiddenProjects(server)
+                .toMutableSet()
+                .also {
+                    if (hidden) it.add(worktree) else it.remove(worktree)
                 }
                 .toList()
                 .sorted()
@@ -149,6 +241,25 @@ class SessionCacheRepository(
     }
 }
 
+private fun mapSessionCache(
+    server: String,
+    sessionId: String,
+    projectId: String?,
+    directory: String,
+    title: String,
+    version: String,
+    lastOpenedAt: Long,
+    updatedAt: Long,
+): SessionState {
+    return SessionState(
+        id = sessionId,
+        title = title,
+        version = version,
+        directory = directory,
+        updatedAt = updatedAt,
+    )
+}
+
 private const val ProjectFavoriteSeparator = "\n"
 
 private fun settingSet(db: AppDatabase, key: String): Set<String> {
@@ -177,6 +288,10 @@ private fun setSettingSet(db: AppDatabase, key: String, value: Set<String>) {
 
 private fun projectFavoriteKey(server: String): String {
     return "project_favorite:$server"
+}
+
+private fun projectHiddenKey(server: String): String {
+    return "project_hidden:$server"
 }
 
 private fun sessionQuickIncludeKey(server: String): String {

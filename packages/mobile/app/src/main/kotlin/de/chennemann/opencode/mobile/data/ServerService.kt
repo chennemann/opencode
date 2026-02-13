@@ -1,6 +1,8 @@
 package de.chennemann.opencode.mobile.data
 
 import de.chennemann.opencode.mobile.api.apis.DefaultApi
+import de.chennemann.opencode.mobile.api.models.SessionUpdateRequest
+import de.chennemann.opencode.mobile.api.models.SessionUpdateRequestTime
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.plugins.sse.SSE
@@ -81,6 +83,8 @@ interface ServerGateway {
 
     suspend fun sessions(baseUrl: String, worktree: String, limit: Int?): List<SessionInfo>
 
+    suspend fun archiveSession(baseUrl: String, sessionId: String, directory: String)
+
     suspend fun createSession(baseUrl: String, worktree: String, title: String): SessionInfo
 
     suspend fun commands(baseUrl: String, directory: String): List<CommandInfo>
@@ -94,9 +98,9 @@ interface ServerGateway {
         onEvent: suspend (GlobalStreamEvent) -> Unit,
     ): String?
 
-    suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String)
+    suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String, agent: String)
 
-    suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String)
+    suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String, agent: String)
 }
 
 class ServerService(
@@ -196,6 +200,21 @@ class ServerService(
                     archivedAt = archivedAt,
                 )
             }
+    }
+
+    override suspend fun archiveSession(baseUrl: String, sessionId: String, directory: String) {
+        val res = client(baseUrl).sessionUpdate(
+            sessionId,
+            directory,
+            SessionUpdateRequest(
+                time = SessionUpdateRequestTime(
+                    archived = BigDecimal(System.currentTimeMillis()),
+                )
+            ),
+        )
+        if (!res.success) {
+            throw IllegalStateException("Server returned ${res.status}")
+        }
     }
 
     override suspend fun createSession(baseUrl: String, worktree: String, title: String): SessionInfo {
@@ -334,12 +353,13 @@ class ServerService(
         return cursor
     }
 
-    override suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String) {
+    override suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String, agent: String) {
         val res = http.post("$baseUrl/session/$sessionId/prompt_async") {
             parameter("directory", directory)
             contentType(ContentType.Application.Json)
             setBody(
                 buildJsonObject {
+                    put("agent", agent)
                     put(
                         "parts",
                         buildJsonArray {
@@ -359,7 +379,7 @@ class ServerService(
         }
     }
 
-    override suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String) {
+    override suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String, agent: String) {
         val res = http.post("$baseUrl/session/$sessionId/command") {
             parameter("directory", directory)
             contentType(ContentType.Application.Json)
@@ -367,6 +387,7 @@ class ServerService(
                 buildJsonObject {
                     put("command", name)
                     put("arguments", arguments)
+                    put("agent", agent)
                 }.toString()
             )
         }

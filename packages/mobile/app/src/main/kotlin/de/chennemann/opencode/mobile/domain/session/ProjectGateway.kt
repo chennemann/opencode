@@ -5,5 +5,7 @@ interface ProjectGateway {
 
     suspend fun sessions(worktree: String, limit: Int? = null): List<SessionSummary>
 
+    suspend fun archiveSession(sessionId: String, directory: String)
+
     suspend fun createSession(worktree: String, title: String): SessionSummary
 }

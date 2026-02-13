@@ -120,6 +120,8 @@ private class StubServer : ServerGateway {
         return emptyList()
     }
 
+    override suspend fun archiveSession(baseUrl: String, sessionId: String, directory: String) = Unit
+
     override suspend fun createSession(baseUrl: String, worktree: String, title: String): SessionInfo {
         return SessionInfo(id = "s1", title = title, version = "1", directory = worktree)
     }
@@ -150,7 +152,7 @@ private class StubServer : ServerGateway {
         return lastEventId
     }
 
-    override suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String) = Unit
+    override suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String, agent: String) = Unit
 
-    override suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String) = Unit
+    override suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String, agent: String) = Unit
 }

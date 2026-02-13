@@ -15,11 +15,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import de.chennemann.opencode.mobile.icons.Icons
+import de.chennemann.opencode.mobile.icons.Adb
 import de.chennemann.opencode.mobile.icons.Settings
 
 @Composable
 fun ConversationHeader(
     title: String,
+    onOpenWirelessDebug: () -> Unit,
     onOpenManage: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -34,6 +36,14 @@ fun ConversationHeader(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+        IconButton(
+            onClick = onOpenWirelessDebug,
+            colors = IconButtonDefaults.iconButtonColors(
+                contentColor = MaterialTheme.colorScheme.primary,
+            ),
+        ) {
+            Icon(Icons.Adb, "Open wireless debugging settings")
         }
         IconButton(
             onClick = onOpenManage,
