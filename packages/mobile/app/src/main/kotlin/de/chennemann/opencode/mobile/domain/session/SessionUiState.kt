@@ -57,5 +57,7 @@ data class SessionUiState(
     val loadingProjects: Boolean,
     val loadingSessions: Boolean,
     val sessionRecentOnly: Boolean,
+    val quickPinInclude: Set<String> = emptySet(),
+    val quickPinExclude: Set<String> = emptySet(),
     val message: String?,
 )

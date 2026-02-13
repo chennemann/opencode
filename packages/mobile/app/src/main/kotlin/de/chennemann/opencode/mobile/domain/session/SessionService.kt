@@ -33,6 +33,8 @@ class SessionService(
     private data class LocalState(
         val projects: List<ProjectState> = emptyList(),
         val favoriteProjects: Set<String> = emptySet(),
+        val quickPinInclude: Set<String> = emptySet(),
+        val quickPinExclude: Set<String> = emptySet(),
         val selectedProject: String? = null,
         val commands: List<CommandState> = emptyList(),
         val sessions: List<SessionState> = emptyList(),
@@ -67,6 +69,8 @@ class SessionService(
             loadingProjects = false,
             loadingSessions = false,
             sessionRecentOnly = false,
+            quickPinInclude = emptySet(),
+            quickPinExclude = emptySet(),
             message = null,
         )
     )
@@ -123,6 +127,8 @@ class SessionService(
                     loadingProjects = local.loadingProjects,
                     loadingSessions = local.loadingSessions,
                     sessionRecentOnly = local.sessionRecentOnly,
+                    quickPinInclude = local.quickPinInclude,
+                    quickPinExclude = local.quickPinExclude,
                     message = local.message,
                 )
             }.collect {
@@ -183,8 +189,14 @@ class SessionService(
             local.value = local.value.copy(loadingProjects = true, message = null)
             val server = serverForCache()
             val favorites = runCatching { cache.projectFavorites(server) }.getOrDefault(emptySet())
+            val pins = runCatching { cache.sessionQuickPins(server) }
+                .getOrDefault(SessionQuickPinCache())
             val result = runCatching { proj.projects() }
-            local.value = local.value.copy(loadingProjects = false)
+            local.value = local.value.copy(
+                loadingProjects = false,
+                quickPinInclude = pins.include,
+                quickPinExclude = pins.exclude,
+            )
             result.onSuccess { list ->
                 val projects = mergeProjects(
                     list.map {
@@ -264,6 +276,45 @@ class SessionService(
                     projects = mergeProjects(local.value.projects, current),
                     favoriteProjects = current,
                     message = it.message ?: "Failed to update project favorite",
+                )
+            }
+        }
+    }
+
+    fun toggleSessionQuickPin(session: SessionState, systemPinned: Boolean) {
+        val id = session.id.trim()
+        if (id.isBlank()) return
+        val current = local.value
+        val effective = (systemPinned && !current.quickPinExclude.contains(id)) || current.quickPinInclude.contains(id)
+        val target = !effective
+        val nextInclude = if (target && !systemPinned) {
+            current.quickPinInclude + id
+        } else {
+            current.quickPinInclude - id
+        }
+        val nextExclude = if (!target && systemPinned) {
+            current.quickPinExclude + id
+        } else {
+            current.quickPinExclude - id
+        }
+        local.value = local.value.copy(
+            quickPinInclude = nextInclude,
+            quickPinExclude = nextExclude,
+        )
+        if (target) {
+            upsertActiveSession(session, projectForDirectory(session.directory), persist = false)
+            local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
+        }
+        val scope = scope ?: return
+        val server = serverForCache()
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                cache.setSessionQuickPins(server, nextInclude, nextExclude)
+            }.onFailure {
+                local.value = local.value.copy(
+                    quickPinInclude = current.quickPinInclude,
+                    quickPinExclude = current.quickPinExclude,
+                    message = it.message ?: "Failed to update session pin",
                 )
             }
         }
@@ -426,14 +477,16 @@ class SessionService(
         observeFocused()
     }
 
-    private fun upsertActiveSession(session: SessionState, project: String?): String {
+    private fun upsertActiveSession(session: SessionState, project: String?, persist: Boolean = true): String {
         val server = if (manual) input.value else conn.endpoint.value
         val key = key(server, session.id)
         active[key] = session
         sessionProject[key] = project
         messageLimit[key] = messageLimit[key] ?: MessageSyncLimit
-        scope?.launch {
-            cache.upsertSession(server, sessionProject[key], session)
+        if (persist) {
+            scope?.launch {
+                cache.upsertSession(server, sessionProject[key], session)
+            }
         }
         return key
     }
@@ -590,27 +643,11 @@ class SessionService(
         scope.launch {
             local.value = local.value.copy(loadingSessions = true, message = null)
             var partialFailure = false
-            val directories = workspaceDirectoriesForProject(worktree)
             val result = runCatching {
-                directories
-                    .flatMap { directory ->
-                        runCatching { proj.sessions(directory, SessionFetchLimit) }
-                            .onFailure {
-                                partialFailure = true
-                                log.warn(LogTag, "sessions failed worktree=$directory reason=${it.message}")
-                            }
-                            .getOrDefault(emptyList())
-                            .map {
-                                SessionState(
-                                    id = it.id,
-                                    title = it.title,
-                                    version = it.version,
-                                    directory = workspaceId(if (it.directory.isBlank()) directory else it.directory),
-                                    updatedAt = it.updatedAt,
-                                    archivedAt = it.archivedAt,
-                                )
-                            }
-                    }
+                collectProjectSessions(worktree, SessionFetchLimit) { directory, error ->
+                    partialFailure = true
+                    log.warn(LogTag, "sessions failed worktree=$directory reason=${error.message}")
+                }
             }
             local.value = local.value.copy(loadingSessions = false)
             result.onSuccess { list ->
@@ -628,6 +665,34 @@ class SessionService(
         }
     }
 
+    suspend fun sessionsForProject(worktree: String, limit: Int? = null): List<SessionState> {
+        return collectProjectSessions(worktree, limit) { _, _ -> }
+            .groupBy { it.id }
+            .mapNotNull {
+                it.value.maxWithOrNull(compareBy<SessionState>({ value -> value.updatedAt ?: 0L }, { value -> value.id }))
+            }
+            .sortedWith(
+                compareByDescending<SessionState> { it.updatedAt ?: 0L }
+                    .thenByDescending { it.id }
+            )
+    }
+
+    private suspend fun collectProjectSessions(
+        worktree: String,
+        limit: Int?,
+        onFailure: (String, Throwable) -> Unit,
+    ): List<SessionState> {
+        val directories = workspaceDirectoriesForProject(worktree)
+        return directories
+            .flatMap { directory ->
+                runCatching { proj.sessions(directory, limit) }
+                    .onFailure { onFailure(directory, it) }
+                    .getOrDefault(emptyList())
+                    .map { mapSessionSummary(it, directory) }
+            }
+            .filter { it.archivedAt == null }
+    }
+
     private fun workspaceDirectoriesForProject(worktree: String): List<String> {
         val selected = workspaceId(worktree)
         val project = local.value.projects.firstOrNull { workspaceId(it.worktree) == selected }
@@ -637,6 +702,26 @@ class SessionService(
         return (listOf(project.worktree) + project.sandboxes)
             .map(::workspaceId)
             .distinct()
+    }
+
+    private fun projectForDirectory(directory: String): String? {
+        val value = workspaceId(directory)
+        return local.value.projects
+            .firstOrNull {
+                workspaceId(it.worktree) == value || it.sandboxes.any { item -> workspaceId(item) == value }
+            }
+            ?.worktree
+    }
+
+    private fun mapSessionSummary(value: SessionSummary, directory: String): SessionState {
+        return SessionState(
+            id = value.id,
+            title = value.title,
+            version = value.version,
+            directory = workspaceId(if (value.directory.isBlank()) directory else value.directory),
+            updatedAt = value.updatedAt,
+            archivedAt = value.archivedAt,
+        )
     }
 
     private fun limitSessionsPerWorkspace(sessions: List<SessionState>, limit: Int): List<SessionState> {
@@ -681,31 +766,15 @@ class SessionService(
         val scope = scope ?: return
         scope.launch {
             favorites.forEach { project ->
-                val directories = (listOf(project.worktree) + project.sandboxes)
-                    .map(::workspaceId)
-                    .distinct()
-                val latest = directories
-                    .flatMap { directory ->
-                        runCatching { proj.sessions(directory, 1) }
-                            .onFailure {
-                                log.warn(LogTag, "favorite preload failed worktree=$directory reason=${it.message}")
-                            }
-                            .getOrDefault(emptyList())
-                            .map {
-                                SessionState(
-                                    id = it.id,
-                                    title = it.title,
-                                    version = it.version,
-                                    directory = workspaceId(if (it.directory.isBlank()) directory else it.directory),
-                                    updatedAt = it.updatedAt,
-                                    archivedAt = it.archivedAt,
-                                )
-                            }
+                val result = runCatching { sessionsForProject(project.worktree, FavoritePreloadLimit) }
+                result.onFailure {
+                    log.warn(LogTag, "favorite preload failed worktree=${project.worktree} reason=${it.message}")
+                }
+                result
+                    .getOrDefault(emptyList())
+                    .forEach {
+                        upsertActiveSession(it, project.worktree, persist = false)
                     }
-                    .filter { it.archivedAt == null }
-                    .maxWithOrNull(compareBy<SessionState>({ it.updatedAt ?: 0L }, { it.id }))
-                    ?: return@forEach
-                upsertActiveSession(latest, project.worktree)
             }
             local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
         }
@@ -1147,6 +1216,7 @@ class SessionService(
     }
 
     private fun removeSession(sessionId: String) {
+        clearSessionQuickPin(sessionId)
         val entry = active.entries.find { it.value.id == sessionId } ?: return
         val key = entry.key
         val server = key.substringBefore("::")
@@ -1176,6 +1246,29 @@ class SessionService(
             return
         }
         local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
+    }
+
+    private fun clearSessionQuickPin(sessionId: String) {
+        val current = local.value
+        if (!current.quickPinInclude.contains(sessionId) && !current.quickPinExclude.contains(sessionId)) return
+        val include = current.quickPinInclude - sessionId
+        val exclude = current.quickPinExclude - sessionId
+        local.value = local.value.copy(
+            quickPinInclude = include,
+            quickPinExclude = exclude,
+        )
+        val scope = scope ?: return
+        val server = serverForCache()
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                cache.setSessionQuickPins(server, include, exclude)
+            }.onFailure {
+                local.value = local.value.copy(
+                    quickPinInclude = current.quickPinInclude,
+                    quickPinExclude = current.quickPinExclude,
+                )
+            }
+        }
     }
 
     private fun serverForCache(): String {
@@ -1268,4 +1361,5 @@ private const val SessionResolveCooldownMs = 5000L
 private const val InitialSessionLimit = 50
 private const val SessionLimitStep = 50
 private const val SessionFetchLimit = 50
+private const val FavoritePreloadLimit = 50
 private const val WorkspaceSessionDisplayLimit = 3

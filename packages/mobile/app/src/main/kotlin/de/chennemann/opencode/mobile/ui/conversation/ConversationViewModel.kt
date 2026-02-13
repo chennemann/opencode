@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 class ConversationViewModel(
     private val service: SessionService,
@@ -33,6 +34,8 @@ class ConversationViewModel(
         val commands: List<CommandState>,
         val projects: List<ProjectState>,
         val activeSessions: List<SessionState>,
+        val quickPinInclude: Set<String>,
+        val quickPinExclude: Set<String>,
         val canLoadMoreMessages: Boolean,
         val loadingMoreMessages: Boolean,
     )
@@ -42,10 +45,26 @@ class ConversationViewModel(
         val draft: String = "",
         val stepOpen: Map<String, Boolean> = emptyMap(),
         val callOpen: Map<String, Boolean> = emptyMap(),
+        val quickSwitchMenu: QuickSwitchMenuState? = null,
+    )
+
+    private data class QuickSwitchProject(
+        val key: String,
+        val worktree: String,
+        val project: String,
+        val primary: SessionState,
+        val cycle: List<SessionState>,
+    )
+
+    private data class QuickSwitchModel(
+        val focusedKey: String?,
+        val switches: List<QuickSwitchState>,
+        val projects: Map<String, QuickSwitchProject>,
     )
 
     private val local = MutableStateFlow(LocalState())
     private val navFlow = MutableSharedFlow<NavEvent>(extraBufferCapacity = 1)
+    private val quickOrder = linkedMapOf<String, List<String>>()
 
     val nav = navFlow.asSharedFlow()
 
@@ -59,6 +78,8 @@ class ConversationViewModel(
                 commands = mergeCommands(it.commands),
                 projects = it.projects,
                 activeSessions = it.activeSessions,
+                quickPinInclude = it.quickPinInclude,
+                quickPinExclude = it.quickPinExclude,
                 canLoadMoreMessages = it.canLoadMoreMessages,
                 loadingMoreMessages = it.loadingMoreMessages,
             )
@@ -66,6 +87,13 @@ class ConversationViewModel(
         .flowOn(Dispatchers.Default)
 
     val state: StateFlow<ConversationUiState> = combine(global, local) { global, local ->
+        val quick = quickSwitchModel(
+            global.projects,
+            global.activeSessions,
+            global.focusedSession,
+            global.quickPinInclude,
+            global.quickPinExclude,
+        )
         ConversationUiState(
             title = global.title,
             status = global.status,
@@ -75,7 +103,13 @@ class ConversationViewModel(
             scroll = local.scroll,
             draft = local.draft,
             slashSuggestions = slashSuggestions(local.draft, global.commands),
-            quickSwitches = quickSwitches(global.projects, global.activeSessions, global.focusedSession),
+            quickSwitches = quick.switches,
+            quickSwitchMenu = quickSwitchMenu(
+                local.quickSwitchMenu,
+                global.projects,
+                global.quickPinInclude,
+                global.quickPinExclude,
+            ),
             stepOpen = local.stepOpen,
             callOpen = local.callOpen,
         )
@@ -93,6 +127,7 @@ class ConversationViewModel(
                 draft = "",
                 slashSuggestions = emptyList(),
                 quickSwitches = emptyList(),
+                quickSwitchMenu = null,
                 stepOpen = emptyMap(),
                 callOpen = emptyMap(),
             ),
@@ -140,7 +175,32 @@ class ConversationViewModel(
             }
 
             is ConversationEvent.QuickSwitchTapped -> {
-                service.focusSession(event.sessionId)
+                quickSwitchTap(event.key)
+            }
+
+            is ConversationEvent.QuickSwitchLongPressed -> {
+                quickSwitchLongPress(event.key)
+            }
+
+            is ConversationEvent.QuickSwitchMenuDismissed -> {
+                local.update { it.copy(quickSwitchMenu = null) }
+            }
+
+            is ConversationEvent.QuickSwitchMenuSessionTapped -> {
+                local.update { it.copy(quickSwitchMenu = null) }
+                service.openSession(event.session)
+            }
+
+            is ConversationEvent.QuickSwitchMenuPinTapped -> {
+                service.toggleSessionQuickPin(event.session, event.systemPinned)
+            }
+
+            is ConversationEvent.QuickSwitchMenuCreateTapped -> {
+                val worktree = local.value.quickSwitchMenu?.worktree ?: return
+                local.update { it.copy(quickSwitchMenu = null) }
+                viewModelScope.launch {
+                    service.createSessionAndFocus(worktree)
+                }
             }
 
             is ConversationEvent.SendTapped -> {
@@ -180,49 +240,242 @@ class ConversationViewModel(
             .distinctBy { it.name.lowercase() }
     }
 
-    private fun quickSwitches(
-        projects: List<ProjectState>,
-        sessions: List<SessionState>,
-        focusedSession: SessionState?,
-    ): List<QuickSwitchState> {
-        val cutoff = System.currentTimeMillis() - QuickSwitchWindowMs
-        val focused = focusedSession?.let { workspaceId(it.directory) }
-        return sessions
-            .groupBy { workspaceId(it.directory) }
-            .mapNotNull { (directory, list) ->
-                val favorite = isFavoriteProject(projects, directory)
-                val fresh = list.any { (it.updatedAt ?: 0L) >= cutoff }
-                if (!favorite && !fresh) return@mapNotNull null
-                val session = list.maxWithOrNull(compareBy<SessionState>({ it.updatedAt ?: 0L }, { it.id }))
-                    ?: return@mapNotNull null
-                val project = projectName(projects, directory)
-                val active = focusedSession?.id == session.id || focused == directory
-                QuickSwitchState(
-                    key = directory,
-                    label = projectInitial(project),
-                    project = project,
-                    session = session,
-                    active = active,
-                )
-            }
-            .sortedWith(compareByDescending<QuickSwitchState> { it.session.updatedAt ?: 0L }.thenByDescending { it.session.id })
+    private fun quickSwitchTap(key: String) {
+        local.update { it.copy(quickSwitchMenu = null) }
+        val value = service.state.value
+        val model = quickSwitchModel(
+            value.projects,
+            value.activeSessions,
+            value.focusedSession,
+            value.quickPinInclude,
+            value.quickPinExclude,
+        )
+        val project = model.projects[key] ?: return
+        if (model.focusedKey != key) {
+            service.openSession(project.primary)
+            return
+        }
+        val current = value.focusedSession?.id
+        val index = project.cycle.indexOfFirst { it.id == current }
+        val next = if (index < 0 || index == project.cycle.lastIndex) {
+            project.cycle.firstOrNull()
+        } else {
+            project.cycle.getOrNull(index + 1)
+        } ?: return
+        service.openSession(next)
     }
 
-    private fun isFavoriteProject(projects: List<ProjectState>, directory: String): Boolean {
-        return projects.any {
-            it.favorite && (workspaceId(it.worktree) == directory || it.sandboxes.any { value -> workspaceId(value) == directory })
+    private fun quickSwitchLongPress(key: String) {
+        val value = service.state.value
+        val model = quickSwitchModel(
+            value.projects,
+            value.activeSessions,
+            value.focusedSession,
+            value.quickPinInclude,
+            value.quickPinExclude,
+        )
+        val project = model.projects[key] ?: return
+        local.update {
+            it.copy(
+                quickSwitchMenu = QuickSwitchMenuState(
+                    key = project.key,
+                    worktree = project.worktree,
+                    project = project.project,
+                    sessions = project.cycle,
+                    loading = true,
+                )
+            )
+        }
+        viewModelScope.launch {
+            val result = runCatching { service.sessionsForProject(project.worktree) }
+            result.onSuccess { list ->
+                local.update {
+                    val menu = it.quickSwitchMenu ?: return@update it
+                    if (menu.key != key) return@update it
+                    it.copy(
+                        quickSwitchMenu = menu.copy(
+                            sessions = list,
+                            loading = false,
+                        )
+                    )
+                }
+            }
+            result.onFailure {
+                local.update {
+                    val menu = it.quickSwitchMenu ?: return@update it
+                    if (menu.key != key) return@update it
+                    it.copy(
+                        quickSwitchMenu = menu.copy(loading = false),
+                    )
+                }
+            }
         }
     }
 
-    private fun projectName(projects: List<ProjectState>, directory: String): String {
-        return projects
-            .firstOrNull {
-                workspaceId(it.worktree) == directory || it.sandboxes.any { value -> workspaceId(value) == directory }
+    private fun quickSwitchModel(
+        projects: List<ProjectState>,
+        sessions: List<SessionState>,
+        focusedSession: SessionState?,
+        include: Set<String>,
+        exclude: Set<String>,
+    ): QuickSwitchModel {
+        val lookup = projectLookup(projects)
+        val byKey = projects.associateBy { workspaceId(it.worktree) }
+        val cutoff = System.currentTimeMillis() - QuickSwitchWindowMs
+        val focused = focusedSession?.let {
+            lookup[workspaceId(it.directory)] ?: workspaceId(it.directory)
+        }
+        val rows = sessions
+            .filter { it.archivedAt == null }
+            .groupBy {
+                val directory = workspaceId(it.directory)
+                lookup[directory] ?: directory
             }
-            ?.name
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
-            ?: folderName(directory)
+            .mapNotNull { (key, value) ->
+                val all = value
+                    .groupBy { it.id }
+                    .mapNotNull {
+                        it.value.maxWithOrNull(compareBy<SessionState>({ row -> row.updatedAt ?: 0L }, { row -> row.id }))
+                    }
+                    .sortedWith(
+                        compareByDescending<SessionState> { it.updatedAt ?: 0L }
+                            .thenByDescending { it.id }
+                    )
+                val project = byKey[key]
+                val system = systemCycle(all, project?.favorite == true, cutoff)
+                val eligible = effectiveCycle(all, system, include, exclude)
+                if (eligible.isEmpty()) return@mapNotNull null
+                val primary = eligible
+                    .maxWithOrNull(compareBy<SessionState>({ it.updatedAt ?: 0L }, { it.id }))
+                    ?: return@mapNotNull null
+                val cycle = stableCycle(key, eligible)
+                if (cycle.isEmpty()) return@mapNotNull null
+                val label = projectLabel(project, key)
+                val state = QuickSwitchState(
+                    key = key,
+                    worktree = project?.worktree ?: key,
+                    label = projectInitial(label),
+                    project = label,
+                    active = focused == key,
+                )
+                state to QuickSwitchProject(
+                    key = key,
+                    worktree = project?.worktree ?: key,
+                    project = label,
+                    primary = primary,
+                    cycle = cycle,
+                )
+            }
+            .sortedWith(
+                compareByDescending<Pair<QuickSwitchState, QuickSwitchProject>> { it.second.primary.updatedAt ?: 0L }
+                    .thenByDescending { it.second.primary.id }
+            )
+        val keys = rows.map { it.first.key }.toSet()
+        quickOrder.keys
+            .toList()
+            .filterNot(keys::contains)
+            .forEach(quickOrder::remove)
+        return QuickSwitchModel(
+            focusedKey = focused,
+            switches = rows.map { it.first },
+            projects = rows.associate { it.first.key to it.second },
+        )
+    }
+
+    private fun quickSwitchMenu(
+        menu: QuickSwitchMenuState?,
+        projects: List<ProjectState>,
+        include: Set<String>,
+        exclude: Set<String>,
+    ): QuickSwitchMenuState? {
+        if (menu == null) return null
+        val worktree = workspaceId(menu.worktree)
+        val favorite = projects.firstOrNull { workspaceId(it.worktree) == worktree }?.favorite == true
+        val sessions = menu.sessions
+            .filter { it.archivedAt == null }
+            .groupBy { it.id }
+            .mapNotNull {
+                it.value.maxWithOrNull(compareBy<SessionState>({ value -> value.updatedAt ?: 0L }, { value -> value.id }))
+            }
+            .sortedWith(
+                compareByDescending<SessionState> { it.updatedAt ?: 0L }
+                    .thenByDescending { it.id }
+            )
+        val cutoff = System.currentTimeMillis() - QuickSwitchWindowMs
+        val system = systemCycle(sessions, favorite, cutoff)
+        val pinned = effectiveCycle(sessions, system, include, exclude)
+            .map { it.id }
+            .toSet()
+        return menu.copy(
+            sessions = sessions,
+            pinned = pinned,
+            systemPinned = system.map { it.id }.toSet(),
+        )
+    }
+
+    private fun systemCycle(sessions: List<SessionState>, favorite: Boolean, cutoff: Long): List<SessionState> {
+        val recent = sessions.filter { (it.updatedAt ?: 0L) >= cutoff }
+        if (recent.isNotEmpty()) return recent
+        if (!favorite) return emptyList()
+        return favoriteFallback(sessions)
+    }
+
+    private fun effectiveCycle(
+        sessions: List<SessionState>,
+        system: List<SessionState>,
+        include: Set<String>,
+        exclude: Set<String>,
+    ): List<SessionState> {
+        val forced = sessions.filter { include.contains(it.id) }
+        val base = system.filterNot { exclude.contains(it.id) }
+        return (base + forced).distinctBy { it.id }
+    }
+
+    private fun stableCycle(key: String, sessions: List<SessionState>): List<SessionState> {
+        val sorted = sessions
+            .sortedWith(
+                compareByDescending<SessionState> { it.updatedAt ?: 0L }
+                    .thenByDescending { it.id }
+            )
+        val ids = sorted.map { it.id }.toSet()
+        val keep = quickOrder[key].orEmpty().filter(ids::contains)
+        val append = sorted
+            .map { it.id }
+            .filterNot(keep::contains)
+        val next = keep + append
+        quickOrder[key] = next
+        val map = sorted.associateBy { it.id }
+        return next.mapNotNull(map::get)
+    }
+
+    private fun favoriteFallback(sessions: List<SessionState>): List<SessionState> {
+        val latest = sessions
+            .maxWithOrNull(compareBy<SessionState>({ it.updatedAt ?: 0L }, { it.id }))
+            ?: return emptyList()
+        val updatedAt = latest.updatedAt ?: return listOf(latest)
+        val cutoff = updatedAt - QuickSwitchFavoriteWindowMs
+        val list = sessions.filter { (it.updatedAt ?: Long.MIN_VALUE) >= cutoff }
+        if (list.isEmpty()) return listOf(latest)
+        return list
+    }
+
+    private fun projectLookup(projects: List<ProjectState>): Map<String, String> {
+        return projects
+            .flatMap {
+                val key = workspaceId(it.worktree)
+                (listOf(it.worktree) + it.sandboxes)
+                    .map(::workspaceId)
+                    .distinct()
+                    .map { directory -> directory to key }
+            }
+            .toMap()
+    }
+
+    private fun projectLabel(project: ProjectState?, fallback: String): String {
+        if (project == null) return folderName(fallback)
+        val name = project.name.trim()
+        if (name.isNotBlank()) return name
+        return folderName(project.worktree)
     }
 
     private fun projectInitial(name: String): String {
@@ -250,6 +503,7 @@ class ConversationViewModel(
 
 private val SlashRegex = Regex("^/(\\S*)$")
 private const val QuickSwitchWindowMs = 2 * 60 * 60 * 1000L
+private const val QuickSwitchFavoriteWindowMs = 30 * 60 * 1000L
 private val BuiltinCommands = listOf(
     CommandState(
         name = "new",
