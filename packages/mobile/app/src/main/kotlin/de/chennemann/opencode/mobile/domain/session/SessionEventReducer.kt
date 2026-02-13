@@ -43,6 +43,7 @@ sealed interface SessionEventAction {
     data class SessionStatus(
         val sessionId: String,
         val directory: String,
+        val status: String,
     ) : SessionEventAction
 
     data class SessionDiff(
@@ -136,7 +137,18 @@ class SessionEventReducer {
         if (event.type == "session.status") {
             val sessionId = event.properties["sessionID"]?.jsonPrimitive?.contentOrNull
             if (sessionId.isNullOrBlank()) return SessionEventAction.Drop(event.type, "missing sessionID")
-            return SessionEventAction.SessionStatus(sessionId, event.directory)
+            val status = event.properties["status"]
+                ?.jsonObject
+                ?.get("type")
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?: "busy"
+            return SessionEventAction.SessionStatus(sessionId, event.directory, status)
+        }
+        if (event.type == "session.idle") {
+            val sessionId = event.properties["sessionID"]?.jsonPrimitive?.contentOrNull
+            if (sessionId.isNullOrBlank()) return SessionEventAction.Drop(event.type, "missing sessionID")
+            return SessionEventAction.SessionStatus(sessionId, event.directory, "idle")
         }
         if (event.type == "session.diff") {
             val sessionId = event.properties["sessionID"]?.jsonPrimitive?.contentOrNull
