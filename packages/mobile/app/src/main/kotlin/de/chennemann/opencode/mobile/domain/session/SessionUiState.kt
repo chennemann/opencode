@@ -59,5 +59,7 @@ data class SessionUiState(
     val sessionRecentOnly: Boolean,
     val quickPinInclude: Set<String> = emptySet(),
     val quickPinExclude: Set<String> = emptySet(),
+    val quickProcessing: Set<String> = emptySet(),
+    val quickUnread: Set<String> = emptySet(),
     val message: String?,
 )

@@ -35,6 +35,8 @@ class SessionService(
         val favoriteProjects: Set<String> = emptySet(),
         val quickPinInclude: Set<String> = emptySet(),
         val quickPinExclude: Set<String> = emptySet(),
+        val quickProcessing: Set<String> = emptySet(),
+        val quickUnread: Set<String> = emptySet(),
         val selectedProject: String? = null,
         val commands: List<CommandState> = emptyList(),
         val sessions: List<SessionState> = emptyList(),
@@ -71,6 +73,8 @@ class SessionService(
             sessionRecentOnly = false,
             quickPinInclude = emptySet(),
             quickPinExclude = emptySet(),
+            quickProcessing = emptySet(),
+            quickUnread = emptySet(),
             message = null,
         )
     )
@@ -129,6 +133,8 @@ class SessionService(
                     sessionRecentOnly = local.sessionRecentOnly,
                     quickPinInclude = local.quickPinInclude,
                     quickPinExclude = local.quickPinExclude,
+                    quickProcessing = local.quickProcessing,
+                    quickUnread = local.quickUnread,
                     message = local.message,
                 )
             }.collect {
@@ -474,6 +480,7 @@ class SessionService(
         focusedKey = entry.key
         local.value = local.value.copy(
             focusedSession = entry.value,
+            quickUnread = local.value.quickUnread - sessionId,
             focusedMessages = emptyList(),
             canLoadMoreMessages = false,
             loadingMoreMessages = false,
@@ -509,6 +516,7 @@ class SessionService(
         local.value = local.value.copy(
             focusedSession = session,
             activeSessions = active.values.sortedByDescending { it.id },
+            quickUnread = local.value.quickUnread - session.id,
             focusedMessages = emptyList(),
             canLoadMoreMessages = false,
             loadingMoreMessages = false,
@@ -630,6 +638,8 @@ class SessionService(
                     }
                     local.value = local.value.copy(canLoadMoreMessages = !complete)
                 }
+                val running = next.any { it.role == "assistant" && it.completedAt == null }
+                setProcessing(session.id, running)
                 log.debug(LogTag, "sync ok session=${session.id} messages=${next.size} dt=${System.currentTimeMillis() - started}ms")
             }
             result.onFailure {
@@ -896,6 +906,9 @@ class SessionService(
             action.createdAt,
             action.completedAt,
         )
+        if (action.role == "assistant") {
+            setProcessing(action.sessionId, action.completedAt == null)
+        }
         markSseApplied(type, action.sessionId)
         scheduleSync(action.sessionId, true)
     }
@@ -960,6 +973,7 @@ class SessionService(
             sort,
         )
         markSseApplied(type, action.sessionId)
+        setProcessing(action.sessionId, true)
         scheduleSync(action.sessionId, true)
     }
 
@@ -1004,6 +1018,7 @@ class SessionService(
             resolveSession(action.sessionId, action.directory)
         }
         markSseApplied(type, action.sessionId)
+        setProcessing(action.sessionId, true)
         scheduleSync(action.sessionId)
     }
 
@@ -1013,6 +1028,7 @@ class SessionService(
             resolveSession(action.sessionId, action.directory)
         }
         markSseApplied(type, action.sessionId)
+        setProcessing(action.sessionId, true)
     }
 
     private fun ensureSessionTracked(sessionId: String, directory: String?) {
@@ -1221,6 +1237,8 @@ class SessionService(
 
     private fun removeSession(sessionId: String) {
         clearSessionQuickPin(sessionId)
+        setProcessing(sessionId, false)
+        local.value = local.value.copy(quickUnread = local.value.quickUnread - sessionId)
         val entry = active.entries.find { it.value.id == sessionId } ?: return
         val key = entry.key
         val server = key.substringBefore("::")
@@ -1250,6 +1268,29 @@ class SessionService(
             return
         }
         local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
+    }
+
+    private fun setProcessing(sessionId: String, running: Boolean) {
+        val current = local.value
+        val processing = if (running) {
+            current.quickProcessing + sessionId
+        } else {
+            current.quickProcessing - sessionId
+        }
+        val finished = current.quickProcessing.contains(sessionId) && !running
+        val focused = current.focusedSession?.id == sessionId
+        val unread = if (running || focused) {
+            current.quickUnread - sessionId
+        } else if (finished) {
+            current.quickUnread + sessionId
+        } else {
+            current.quickUnread
+        }
+        if (processing == current.quickProcessing && unread == current.quickUnread) return
+        local.value = current.copy(
+            quickProcessing = processing,
+            quickUnread = unread,
+        )
     }
 
     private fun clearSessionQuickPin(sessionId: String) {

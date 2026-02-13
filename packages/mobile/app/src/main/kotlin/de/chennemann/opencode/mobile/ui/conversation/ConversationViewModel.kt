@@ -36,6 +36,8 @@ class ConversationViewModel(
         val activeSessions: List<SessionState>,
         val quickPinInclude: Set<String>,
         val quickPinExclude: Set<String>,
+        val quickProcessing: Set<String>,
+        val quickUnread: Set<String>,
         val canLoadMoreMessages: Boolean,
         val loadingMoreMessages: Boolean,
     )
@@ -80,6 +82,8 @@ class ConversationViewModel(
                 activeSessions = it.activeSessions,
                 quickPinInclude = it.quickPinInclude,
                 quickPinExclude = it.quickPinExclude,
+                quickProcessing = it.quickProcessing,
+                quickUnread = it.quickUnread,
                 canLoadMoreMessages = it.canLoadMoreMessages,
                 loadingMoreMessages = it.loadingMoreMessages,
             )
@@ -93,6 +97,8 @@ class ConversationViewModel(
             global.focusedSession,
             global.quickPinInclude,
             global.quickPinExclude,
+            global.quickProcessing,
+            global.quickUnread,
         )
         ConversationUiState(
             title = global.title,
@@ -249,6 +255,8 @@ class ConversationViewModel(
             value.focusedSession,
             value.quickPinInclude,
             value.quickPinExclude,
+            value.quickProcessing,
+            value.quickUnread,
         )
         val project = model.projects[key] ?: return
         if (model.focusedKey != key) {
@@ -286,6 +294,8 @@ class ConversationViewModel(
             value.focusedSession,
             value.quickPinInclude,
             value.quickPinExclude,
+            value.quickProcessing,
+            value.quickUnread,
         )
         val project = model.projects[key] ?: return
         local.update {
@@ -331,6 +341,8 @@ class ConversationViewModel(
         focusedSession: SessionState?,
         include: Set<String>,
         exclude: Set<String>,
+        processing: Set<String>,
+        unread: Set<String>,
     ): QuickSwitchModel {
         val lookup = projectLookup(projects)
         val byKey = projects.associateBy { workspaceId(it.worktree) }
@@ -364,12 +376,15 @@ class ConversationViewModel(
                 val cycle = stableCycle(key, eligible)
                 if (cycle.isEmpty()) return@mapNotNull null
                 val label = projectLabel(project, key)
+                val cycleIds = cycle.map { it.id }.toSet()
                 val state = QuickSwitchState(
                     key = key,
                     worktree = project?.worktree ?: key,
                     label = projectInitial(label),
                     project = label,
                     active = focused == key,
+                    processing = cycleIds.any(processing::contains),
+                    unread = cycle.count { unread.contains(it.id) && !processing.contains(it.id) },
                 )
                 state to QuickSwitchProject(
                     key = key,
@@ -396,6 +411,8 @@ class ConversationViewModel(
                     label = projectInitial(label),
                     project = label,
                     active = focused == key,
+                    processing = false,
+                    unread = 0,
                 )
                 state to QuickSwitchProject(
                     key = key,
