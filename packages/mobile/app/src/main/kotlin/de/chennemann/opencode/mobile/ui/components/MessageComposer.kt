@@ -4,8 +4,6 @@ import android.os.SystemClock
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,8 +16,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalIconButton
@@ -37,21 +37,28 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.SheetValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import de.chennemann.opencode.mobile.domain.session.CommandState
@@ -66,6 +73,7 @@ import de.chennemann.opencode.mobile.ui.conversation.QuickSwitchState
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.launch
 
 @Composable
 fun MessageComposer(
@@ -269,10 +277,34 @@ private fun QuickSwitchPanel(
     onQuickSwitchPin: (SessionState, Boolean) -> Unit,
     onQuickSwitchCreate: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = false)
-    val scroll = rememberScrollState()
-    LaunchedEffect(menu.key, menu.sessions.map { it.id }) {
-        scroll.scrollTo(scroll.maxValue)
+    val state = rememberLazyListState()
+    val rows = menu.sessions.asReversed()
+    val target = (if (menu.loading) 1 else 0) +
+        (if (menu.sessions.isEmpty() && !menu.loading) 1 else 0) +
+        rows.size
+    val flingGuard = remember {
+        object : NestedScrollConnection {
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.SideEffect && available.y < 0f) return available
+                return Offset.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                return Velocity.Zero
+            }
+        }
+    }
+    LaunchedEffect(menu.key, rows.map { it.id }, menu.loading) {
+        state.scrollToItem(target)
+    }
+    LaunchedEffect(sheet.currentValue, sheet.targetValue) {
+        if (sheet.currentValue == SheetValue.Expanded && sheet.targetValue == SheetValue.PartiallyExpanded) {
+            scope.launch {
+                sheet.hide()
+            }
+        }
     }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -302,28 +334,33 @@ private fun QuickSwitchPanel(
                 }
             }
 
-            Column(
+            LazyColumn(
+                state = state,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .verticalScroll(scroll),
+                    .nestedScroll(flingGuard),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (menu.loading) {
-                    Text(
-                        text = "Loading sessions...",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    item {
+                        Text(
+                            text = "Loading sessions...",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
 
                 if (menu.sessions.isEmpty() && !menu.loading) {
-                    Text(
-                        text = "No sessions found",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    item {
+                        Text(
+                            text = "No sessions found",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
 
-                menu.sessions.asReversed().forEach { session ->
+                items(rows, key = { it.id }) { session ->
                     val pinned = menu.pinned.contains(session.id)
                     val systemPinned = menu.systemPinned.contains(session.id)
                     Row(
@@ -366,16 +403,18 @@ private fun QuickSwitchPanel(
                     }
                 }
 
-                Button(
-                    onClick = onQuickSwitchCreate,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(
-                        imageVector = Icons.Add,
-                        contentDescription = null,
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("New session")
+                item {
+                    Button(
+                        onClick = onQuickSwitchCreate,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Add,
+                            contentDescription = null,
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("New session")
+                    }
                 }
             }
         }
