@@ -30,3 +30,10 @@ Fill this table from captured logs. If no baseline exists yet, keep `BASELINE_PL
 | Frame drops (janky frames)           | BASELINE_PLACEHOLDER | AFTER_PLACEHOLDER | `adb shell dumpsys gfxinfo de.chennemann.opencode.mobile framestats` |
 | Message load latency (sync.fetch dt) | BASELINE_PLACEHOLDER | AFTER_PLACEHOLDER | `SessionService perf lane=io path=sync.fetch`                        |
 | Session switching responsiveness     | BASELINE_PLACEHOLDER | AFTER_PLACEHOLDER | `SessionService perf lane=mutation path=focused.observe`             |
+
+## Phase 6 rollout guardrails
+
+- Default path is the migrated execution model.
+- Temporary fallback can be enabled at startup with `opencode.mobile.coroutines.legacy=true` or `OPENCODE_MOBILE_COROUTINES_LEGACY=1`.
+- Roll out in slices (repositories/cache -> service -> viewmodels) and only continue when crash-free sessions and jank metrics remain stable after each slice.
+- Keep the fallback flag and legacy path for one full release cycle after acceptance criteria are met, then remove both in the following cleanup release.

@@ -65,6 +65,7 @@ val appModule = module {
     single<MdnsGateway> { MdnsService(get()) }
     single { NetworkService(get()) }
     single<DispatcherProvider> { DefaultDispatcherProvider() }
+    single<CoroutineRolloutFlag> { DefaultCoroutineRolloutFlag() }
     single<CoroutineScope>(named(AppScopeName)) {
         CoroutineScope(SupervisorJob() + get<DispatcherProvider>().default)
     }
@@ -87,7 +88,7 @@ val appModule = module {
     single { SessionStreamCoordinator(get(), get(), get(), get()) }
     single { ReconcileCoordinator() }
     single(createdAtStart = true) {
-        SessionService(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+        SessionService(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
             .also { it.start(get(named(AppScopeName))) }
     }
     single<SessionServiceApi> { get<SessionService>() }
