@@ -134,4 +134,48 @@ class SessionEventReducerTest {
         assertEquals("s1", value.sessionId)
         assertEquals("repo", value.directory)
     }
+
+    @Test
+    fun parsesSessionStatusEvent() {
+        val event = SessionStreamEvent(
+            directory = "repo",
+            type = "session.status",
+            properties = buildJsonObject {
+                put("sessionID", "s1")
+                put("status", buildJsonObject {
+                    put("type", "busy")
+                })
+            },
+            id = null,
+            retry = null,
+        )
+
+        val action = reducer.reduce(event)
+
+        assertTrue(action is SessionEventAction.SessionStatus)
+        val value = action as SessionEventAction.SessionStatus
+        assertEquals("s1", value.sessionId)
+        assertEquals("repo", value.directory)
+        assertEquals("busy", value.status)
+    }
+
+    @Test
+    fun parsesSessionIdleEvent() {
+        val event = SessionStreamEvent(
+            directory = "repo",
+            type = "session.idle",
+            properties = buildJsonObject {
+                put("sessionID", "s1")
+            },
+            id = null,
+            retry = null,
+        )
+
+        val action = reducer.reduce(event)
+
+        assertTrue(action is SessionEventAction.SessionStatus)
+        val value = action as SessionEventAction.SessionStatus
+        assertEquals("s1", value.sessionId)
+        assertEquals("idle", value.status)
+    }
 }
