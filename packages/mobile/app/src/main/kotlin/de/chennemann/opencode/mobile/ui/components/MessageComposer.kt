@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -245,33 +246,38 @@ fun MessageComposer(
         ) {
             if (quickSwitches.isNotEmpty()) {
                 LazyRow(
-                    modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
+                    modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     items(quickSwitches, key = { it.key }) { item ->
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
                             QuickSwitchButton(
                                 item = item,
                                 onClick = { onQuickSwitch(item.key) },
                                 onLongPress = { onQuickSwitchLongPress(item.key) },
                             )
-                            if (item.unread > 0) {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    repeat(minOf(item.unread, 6)) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(5.dp)
-                                                .background(
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    shape = CircleShape,
-                                                )
-                                        )
+                            Box(
+                                modifier = Modifier.height(8.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (item.unread > 0) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        repeat(minOf(item.unread, 6)) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(5.dp)
+                                                    .background(
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        shape = CircleShape,
+                                                    )
+                                            )
+                                        }
                                     }
                                 }
                             }

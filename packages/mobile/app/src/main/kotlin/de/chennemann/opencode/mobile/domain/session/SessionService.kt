@@ -638,8 +638,6 @@ class SessionService(
                     }
                     local.value = local.value.copy(canLoadMoreMessages = !complete)
                 }
-                val running = next.any { it.role == "assistant" && it.completedAt == null }
-                setProcessing(session.id, running)
                 log.debug(LogTag, "sync ok session=${session.id} messages=${next.size} dt=${System.currentTimeMillis() - started}ms")
             }
             result.onFailure {
@@ -973,7 +971,6 @@ class SessionService(
             sort,
         )
         markSseApplied(type, action.sessionId)
-        setProcessing(action.sessionId, true)
         scheduleSync(action.sessionId, true)
     }
 
@@ -1018,7 +1015,7 @@ class SessionService(
             resolveSession(action.sessionId, action.directory)
         }
         markSseApplied(type, action.sessionId)
-        setProcessing(action.sessionId, true)
+        setProcessing(action.sessionId, action.status != "idle")
         scheduleSync(action.sessionId)
     }
 
@@ -1028,7 +1025,6 @@ class SessionService(
             resolveSession(action.sessionId, action.directory)
         }
         markSseApplied(type, action.sessionId)
-        setProcessing(action.sessionId, true)
     }
 
     private fun ensureSessionTracked(sessionId: String, directory: String?) {
