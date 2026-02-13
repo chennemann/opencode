@@ -86,7 +86,7 @@ val appModule = module {
     single { SessionStreamCoordinator(get(), get(), get(), get()) }
     single { ReconcileCoordinator() }
     single(createdAtStart = true) {
-        SessionService(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+        SessionService(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
             .also { it.start(get(named(AppScopeName))) }
     }
     viewModel { ConversationViewModel(get()) }

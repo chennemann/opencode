@@ -3,9 +3,13 @@ package de.chennemann.opencode.mobile.domain.session
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePart
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
+import de.chennemann.opencode.mobile.di.DispatcherProvider
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +33,7 @@ class SessionService(
     private val reducer: SessionEventReducer,
     private val streamer: SessionStreamCoordinator,
     private val reconciler: ReconcileCoordinator,
+    private val dispatchers: DispatcherProvider,
 ) {
     private data class LocalState(
         val projects: List<ProjectState> = emptyList(),
@@ -102,16 +107,30 @@ class SessionService(
     private val mapLock = Any()
     private var focusedDb = emptyList<MessageState>()
     private var scope: CoroutineScope? = null
+    private var pipeline: MutationPipeline? = null
     private var started = false
     private var focusedKey: String? = null
     private var publishToken = 0L
+    private val ioLane = dispatchers.io
+    private val cpuLane = dispatchers.default
+    private val mutationLane = dispatchers.default.limitedParallelism(1)
 
     val state: StateFlow<SessionUiState> = output.asStateFlow()
+
+    private fun mutate(key: String? = null, block: suspend () -> Unit) {
+        pipeline?.launch(key, block)
+    }
+
+    private suspend fun <T> mutateAwait(key: String? = null, block: suspend () -> T): T {
+        val pipeline = pipeline ?: return block()
+        return pipeline.run(key, block)
+    }
 
     fun start(scope: CoroutineScope) {
         if (started) return
         started = true
         this.scope = scope
+        pipeline = MutationPipeline(scope, mutationLane)
         conn.start(scope)
         scope.launch {
             combine(input, conn.found, conn.status, local) { url, discovered, status, local ->
@@ -141,20 +160,20 @@ class SessionService(
                 output.value = it
             }
         }
-        scope.launch {
+        scope.launch(mutationLane) {
             conn.endpoint.collect {
                 if (manual) return@collect
                 input.value = it
             }
         }
-        scope.launch {
+        scope.launch(mutationLane) {
             conn.status.collect {
                 if (it !is ConnectionState.Connected) return@collect
-                loadProjects()
+                loadProjectsNow()
             }
         }
-        scope.launch {
-            hydrateLast()
+        scope.launch(mutationLane) {
+            hydrateLastNow()
         }
         reconcile(scope)
         stream(scope)
@@ -170,195 +189,225 @@ class SessionService(
     }
 
     fun updateUrl(value: String) {
-        manual = true
-        input.value = value
+        mutate {
+            manual = true
+            input.value = value
+        }
     }
 
     fun useDiscovered() {
-        val value = conn.found.value ?: return
-        manual = true
-        input.value = value
+        mutate {
+            val value = conn.found.value ?: return@mutate
+            manual = true
+            input.value = value
+        }
     }
 
     fun refresh() {
-        val scope = scope ?: return
-        scope.launch {
+        mutate {
             conn.setUrl(input.value)
             conn.refresh()
         }
     }
 
     fun loadProjects() {
-        val scope = scope ?: return
+        mutate {
+            loadProjectsNow()
+        }
+    }
+
+    private suspend fun loadProjectsNow() {
         if (local.value.loadingProjects) return
-        scope.launch {
-            local.value = local.value.copy(loadingProjects = true, message = null)
-            val server = serverForCache()
-            val favorites = runCatching { cache.projectFavorites(server) }
+        local.value = local.value.copy(loadingProjects = true, message = null)
+        val server = serverForCache()
+        val favorites = withContext(ioLane) {
+            runCatching { cache.projectFavorites(server) }
                 .getOrDefault(emptySet())
                 .map(::workspaceId)
                 .toSet()
-            val pins = runCatching { cache.sessionQuickPins(server) }
+        }
+        val pins = withContext(ioLane) {
+            runCatching { cache.sessionQuickPins(server) }
                 .getOrDefault(SessionQuickPinCache())
-            val result = runCatching { proj.projects() }
-            local.value = local.value.copy(
-                loadingProjects = false,
-                quickPinInclude = pins.include,
-                quickPinExclude = pins.exclude,
+        }
+        val result = withContext(ioLane) { runCatching { proj.projects() } }
+        local.value = local.value.copy(
+            loadingProjects = false,
+            quickPinInclude = pins.include,
+            quickPinExclude = pins.exclude,
+        )
+        result.onSuccess { list ->
+            val projects = mergeProjects(
+                canonicalProjects(list.map {
+                    ProjectState(
+                        id = it.id,
+                        worktree = workspaceId(it.worktree),
+                        name = if (it.name.isBlank()) projectName(it.worktree) else it.name.trim(),
+                        sandboxes = it.sandboxes.map(::workspaceId),
+                    )
+                }),
+                favorites,
             )
-            result.onSuccess { list ->
-                val projects = mergeProjects(
-                    canonicalProjects(list.map {
-                        ProjectState(
-                            id = it.id,
-                            worktree = workspaceId(it.worktree),
-                            name = if (it.name.isBlank()) projectName(it.worktree) else it.name.trim(),
-                            sandboxes = it.sandboxes.map(::workspaceId),
-                        )
-                    }),
-                    favorites,
-                )
-                val current = local.value.selectedProject?.let(::workspaceId)
-                val next = if (current != null && projects.any { workspaceId(it.worktree) == current }) {
-                    current
-                } else {
-                    projects.firstOrNull()?.worktree
-                }
-                local.value = local.value.copy(
-                    projects = projects,
-                    favoriteProjects = favorites,
-                    selectedProject = next,
-                    commands = if (next == null) emptyList() else local.value.commands,
-                    sessions = if (next == null) emptyList() else local.value.sessions,
-                    sessionRecentOnly = false,
-                    sessionLimit = InitialSessionLimit,
-                )
-                preloadFavoriteSessions(projects)
-                if (next == null) return@onSuccess
-                loadSessions(next)
-                loadCommands(next)
+            val current = local.value.selectedProject?.let(::workspaceId)
+            val next = if (current != null && projects.any { workspaceId(it.worktree) == current }) {
+                current
+            } else {
+                projects.firstOrNull()?.worktree
             }
-            result.onFailure {
-                local.value = local.value.copy(message = it.message ?: "Failed to load projects")
-            }
+            local.value = local.value.copy(
+                projects = projects,
+                favoriteProjects = favorites,
+                selectedProject = next,
+                commands = if (next == null) emptyList() else local.value.commands,
+                sessions = if (next == null) emptyList() else local.value.sessions,
+                sessionRecentOnly = false,
+                sessionLimit = InitialSessionLimit,
+            )
+            preloadFavoriteSessions(projects)
+            if (next == null) return@onSuccess
+            loadSessions(next)
+            loadCommands(next)
+        }
+        result.onFailure {
+            local.value = local.value.copy(message = it.message ?: "Failed to load projects")
         }
     }
 
     fun selectProject(worktree: String) {
-        val selected = workspaceId(worktree)
-        local.value = local.value.copy(
-            selectedProject = selected,
-            commands = emptyList(),
-            sessions = emptyList(),
-            sessionRecentOnly = false,
-            sessionLimit = InitialSessionLimit,
-        )
-        loadSessions(selected)
-        loadCommands(selected)
+        mutate {
+            val selected = workspaceId(worktree)
+            local.value = local.value.copy(
+                selectedProject = selected,
+                commands = emptyList(),
+                sessions = emptyList(),
+                sessionRecentOnly = false,
+                sessionLimit = InitialSessionLimit,
+            )
+            loadSessions(selected)
+            loadCommands(selected)
+        }
     }
 
     fun toggleProjectFavorite(worktree: String) {
-        val value = workspaceId(worktree)
-        if (value.isBlank()) return
-        val scope = scope ?: return
-        val server = serverForCache()
-        val current = local.value.favoriteProjects
-        val next = if (current.contains(value)) {
-            current - value
-        } else {
-            current + value
-        }
+        mutate {
+            val value = workspaceId(worktree)
+            if (value.isBlank()) return@mutate
+            val scope = scope ?: return@mutate
+            val server = serverForCache()
+            val current = local.value.favoriteProjects
+            val next = if (current.contains(value)) {
+                current - value
+            } else {
+                current + value
+            }
 
-        local.value = local.value.copy(
-            projects = mergeProjects(local.value.projects, next),
-            favoriteProjects = next,
-        )
-        val projects = local.value.projects
-        if (next.contains(value)) {
-            preloadFavoriteSessions(projects)
-        }
+            local.value = local.value.copy(
+                projects = mergeProjects(local.value.projects, next),
+                favoriteProjects = next,
+            )
+            val projects = local.value.projects
+            if (next.contains(value)) {
+                preloadFavoriteSessions(projects)
+            }
 
-        scope.launch {
-            runCatching {
-                cache.setProjectFavorite(server, value, next.contains(value))
-            }.onFailure {
-                local.value = local.value.copy(
-                    projects = mergeProjects(local.value.projects, current),
-                    favoriteProjects = current,
-                    message = it.message ?: "Failed to update project favorite",
-                )
+            scope.launch(ioLane) {
+                runCatching {
+                    cache.setProjectFavorite(server, value, next.contains(value))
+                }.onFailure {
+                    mutate {
+                        local.value = local.value.copy(
+                            projects = mergeProjects(local.value.projects, current),
+                            favoriteProjects = current,
+                            message = it.message ?: "Failed to update project favorite",
+                        )
+                    }
+                }
             }
         }
     }
 
     fun toggleSessionQuickPin(session: SessionState, systemPinned: Boolean) {
-        val id = session.id.trim()
-        if (id.isBlank()) return
-        val current = local.value
-        val effective = (systemPinned && !current.quickPinExclude.contains(id)) || current.quickPinInclude.contains(id)
-        val target = !effective
-        val nextInclude = if (target && !systemPinned) {
-            current.quickPinInclude + id
-        } else {
-            current.quickPinInclude - id
-        }
-        val nextExclude = if (!target && systemPinned) {
-            current.quickPinExclude + id
-        } else {
-            current.quickPinExclude - id
-        }
-        local.value = local.value.copy(
-            quickPinInclude = nextInclude,
-            quickPinExclude = nextExclude,
-        )
-        if (target) {
-            upsertActiveSession(session, projectForDirectory(session.directory), persist = false)
-            local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
-        }
-        val scope = scope ?: return
-        val server = serverForCache()
-        scope.launch(Dispatchers.IO) {
-            runCatching {
-                cache.setSessionQuickPins(server, nextInclude, nextExclude)
-            }.onFailure {
-                local.value = local.value.copy(
-                    quickPinInclude = current.quickPinInclude,
-                    quickPinExclude = current.quickPinExclude,
-                    message = it.message ?: "Failed to update session pin",
-                )
+        mutate {
+            val id = session.id.trim()
+            if (id.isBlank()) return@mutate
+            val current = local.value
+            val effective = (systemPinned && !current.quickPinExclude.contains(id)) || current.quickPinInclude.contains(id)
+            val target = !effective
+            val nextInclude = if (target && !systemPinned) {
+                current.quickPinInclude + id
+            } else {
+                current.quickPinInclude - id
+            }
+            val nextExclude = if (!target && systemPinned) {
+                current.quickPinExclude + id
+            } else {
+                current.quickPinExclude - id
+            }
+            local.value = local.value.copy(
+                quickPinInclude = nextInclude,
+                quickPinExclude = nextExclude,
+            )
+            if (target) {
+                upsertActiveSession(session, projectForDirectory(session.directory), persist = false)
+                local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
+            }
+            val scope = scope ?: return@mutate
+            val server = serverForCache()
+            scope.launch(ioLane) {
+                runCatching {
+                    cache.setSessionQuickPins(server, nextInclude, nextExclude)
+                }.onFailure {
+                    mutate {
+                        local.value = local.value.copy(
+                            quickPinInclude = current.quickPinInclude,
+                            quickPinExclude = current.quickPinExclude,
+                            message = it.message ?: "Failed to update session pin",
+                        )
+                    }
+                }
             }
         }
     }
 
     fun loadMoreSessions() {
-        val worktree = local.value.selectedProject ?: return
-        val limit = if (local.value.sessionRecentOnly) {
-            InitialSessionLimit + SessionLimitStep
-        } else {
-            local.value.sessionLimit + SessionLimitStep
+        mutate {
+            val worktree = local.value.selectedProject ?: return@mutate
+            val limit = if (local.value.sessionRecentOnly) {
+                InitialSessionLimit + SessionLimitStep
+            } else {
+                local.value.sessionLimit + SessionLimitStep
+            }
+            local.value = local.value.copy(
+                sessionRecentOnly = false,
+                sessionLimit = limit,
+            )
+            loadSessions(worktree)
         }
-        local.value = local.value.copy(
-            sessionRecentOnly = false,
-            sessionLimit = limit,
-        )
-        loadSessions(worktree)
     }
 
     fun createSession() {
-        val scope = scope ?: return
-        scope.launch {
-            createSessionAndFocus()
+        mutate {
+            val worktree = local.value.focusedSession?.directory ?: local.value.selectedProject ?: return@mutate
+            createSessionAndFocusNow(worktree)
         }
     }
 
     suspend fun createSessionAndFocus(): Boolean {
-        val worktree = local.value.focusedSession?.directory ?: local.value.selectedProject ?: return false
-        return createSessionAndFocus(worktree)
+        return mutateAwait {
+            val worktree = local.value.focusedSession?.directory ?: local.value.selectedProject ?: return@mutateAwait false
+            createSessionAndFocusNow(worktree)
+        }
     }
 
     suspend fun createSessionAndFocus(worktree: String): Boolean {
+        return mutateAwait {
+            createSessionAndFocusNow(worktree)
+        }
+    }
+
+    private suspend fun createSessionAndFocusNow(worktree: String): Boolean {
         local.value = local.value.copy(loadingSessions = true, message = null)
-        val result = runCatching { proj.createSession(worktree, "Mobile session") }
+        val result = withContext(ioLane) { runCatching { proj.createSession(worktree, "Mobile session") } }
         local.value = local.value.copy(loadingSessions = false)
         result.onFailure {
             local.value = local.value.copy(message = it.message ?: "Failed to create session")
@@ -378,73 +427,86 @@ class SessionService(
     }
 
     fun openSession(session: SessionState) {
-        focusSession(session, session.directory)
+        mutate {
+            focusSession(session, session.directory)
+        }
     }
 
     fun send(text: String) {
-        val value = text.trim()
-        if (value.isBlank()) return
-        val builtin = resolveBuiltin(value)
-        if (builtin == "new") {
-            createSession()
-            return
-        }
-        val scope = scope ?: return
-        val focused = local.value.focusedSession ?: return
-        val command = resolveCommand(value)
-        if (command != null) {
-            scope.launch {
+        mutate {
+            val value = text.trim()
+            if (value.isBlank()) return@mutate
+            val builtin = resolveBuiltin(value)
+            if (builtin == "new") {
+                val worktree = local.value.focusedSession?.directory ?: local.value.selectedProject ?: return@mutate
+                createSessionAndFocusNow(worktree)
+                return@mutate
+            }
+            val scope = scope ?: return@mutate
+            val focused = local.value.focusedSession ?: return@mutate
+            val command = resolveCommand(value)
+            if (command != null) {
+                scope.launch(ioLane) {
+                    val result = runCatching {
+                        msg.sendCommand(focused.id, focused.directory, command.first.name, command.second)
+                    }
+                    result.onSuccess {
+                        mutate {
+                            scheduleSync(focused.id)
+                        }
+                    }
+                    result.onFailure {
+                        mutate {
+                            local.value = local.value.copy(message = it.message ?: "Failed to run command")
+                        }
+                    }
+                }
+                return@mutate
+            }
+            val key = focusedKey ?: keyForSession(focused.id) ?: key(conn.endpoint.value, focused.id)
+            if (active[key] == null) {
+                active[key] = focused
+                focusedKey = key
+            }
+            val now = System.currentTimeMillis()
+            val id = "local-$now"
+            val sort = sequence()
+            pending.add(
+                key,
+                MessageState(
+                    id = id,
+                    role = "user",
+                    text = value,
+                    sort = sort,
+                    createdAt = now,
+                ),
+                OptimisticKeepPasses,
+            )
+            local.value = local.value.copy(
+                focusedMessages = local.value.focusedMessages + MessageState(
+                    id = id,
+                    role = "user",
+                    text = value,
+                    sort = sort,
+                    createdAt = now,
+                )
+            )
+            scope.launch(ioLane) {
                 val result = runCatching {
-                    msg.sendCommand(focused.id, focused.directory, command.first.name, command.second)
+                    msg.sendMessage(focused.id, focused.directory, value)
                 }
                 result.onSuccess {
-                    scheduleSync(focused.id)
+                    mutate {
+                        scheduleSync(focused.id)
+                    }
                 }
                 result.onFailure {
-                    local.value = local.value.copy(message = it.message ?: "Failed to run command")
+                    mutate {
+                        pending.remove(key, id)
+                        if (focusedKey == key) observeFocused()
+                        local.value = local.value.copy(message = it.message ?: "Failed to send message")
+                    }
                 }
-            }
-            return
-        }
-        val key = focusedKey ?: keyForSession(focused.id) ?: key(conn.endpoint.value, focused.id)
-        if (active[key] == null) {
-            active[key] = focused
-            focusedKey = key
-        }
-        val now = System.currentTimeMillis()
-        val id = "local-$now"
-        val sort = sequence()
-        pending.add(
-            key,
-            MessageState(
-                id = id,
-                role = "user",
-                text = value,
-                sort = sort,
-                createdAt = now,
-            ),
-            OptimisticKeepPasses,
-        )
-        local.value = local.value.copy(
-            focusedMessages = local.value.focusedMessages + MessageState(
-                id = id,
-                role = "user",
-                text = value,
-                sort = sort,
-                createdAt = now,
-            )
-        )
-        scope.launch {
-            val result = runCatching {
-                msg.sendMessage(focused.id, focused.directory, value)
-            }
-            result.onSuccess {
-                scheduleSync(focused.id)
-            }
-            result.onFailure {
-                pending.remove(key, id)
-                if (focusedKey == key) observeFocused()
-                local.value = local.value.copy(message = it.message ?: "Failed to send message")
             }
         }
     }
@@ -468,24 +530,28 @@ class SessionService(
     }
 
     fun loadMoreMessages() {
-        val focused = local.value.focusedSession ?: return
-        val key = focusedKey ?: keyForSession(focused.id) ?: return
-        val limit = messageLimit[key] ?: MessageSyncLimit
-        messageLimit[key] = limit + MessageSyncLimit
-        syncRemote(focused, more = true)
+        mutate {
+            val focused = local.value.focusedSession ?: return@mutate
+            val key = focusedKey ?: keyForSession(focused.id) ?: return@mutate
+            val limit = messageLimit[key] ?: MessageSyncLimit
+            messageLimit[key] = limit + MessageSyncLimit
+            syncRemote(focused, more = true)
+        }
     }
 
     fun focusSession(sessionId: String) {
-        val entry = active.entries.find { it.value.id == sessionId } ?: return
-        focusedKey = entry.key
-        local.value = local.value.copy(
-            focusedSession = entry.value,
-            quickUnread = local.value.quickUnread - sessionId,
-            focusedMessages = emptyList(),
-            canLoadMoreMessages = false,
-            loadingMoreMessages = false,
-        )
-        observeFocused()
+        mutate {
+            val entry = active.entries.find { it.value.id == sessionId } ?: return@mutate
+            focusedKey = entry.key
+            local.value = local.value.copy(
+                focusedSession = entry.value,
+                quickUnread = local.value.quickUnread - sessionId,
+                focusedMessages = emptyList(),
+                canLoadMoreMessages = false,
+                loadingMoreMessages = false,
+            )
+            observeFocused()
+        }
     }
 
     private fun upsertActiveSession(session: SessionState, project: String?, persist: Boolean = true): String {
@@ -495,7 +561,7 @@ class SessionService(
         sessionProject[key] = project
         messageLimit[key] = messageLimit[key] ?: MessageSyncLimit
         if (persist) {
-            scope?.launch {
+            scope?.launch(ioLane) {
                 cache.upsertSession(server, sessionProject[key], session)
             }
         }
@@ -508,7 +574,7 @@ class SessionService(
         if (previous != null && previous != key) {
             flush.remove(previous)?.cancel()
             val sessionId = previous.substringAfter("::")
-            scope?.launch {
+            scope?.launch(ioLane) {
                 flushStaged(previous, sessionId)
             }
         }
@@ -531,7 +597,7 @@ class SessionService(
     private fun syncRemote(session: SessionState, more: Boolean = false) {
         if (conn.status.value !is ConnectionState.Connected) return
         val scope = scope ?: return
-        scope.launch(Dispatchers.Default) {
+        scope.launch(mutationLane) {
             if (!beginSync(session.id)) return@launch
             try {
             val started = System.currentTimeMillis()
@@ -540,7 +606,7 @@ class SessionService(
             }
             val key = keyForSession(session.id)
             val limit = key?.let { messageLimit[it] } ?: MessageSyncLimit
-            val result = runCatching { msg.messages(session.id, session.directory, limit) }
+            val result = withContext(ioLane) { runCatching { msg.messages(session.id, session.directory, limit) } }
             if (more) {
                 local.value = local.value.copy(loadingMoreMessages = false)
             }
@@ -550,7 +616,7 @@ class SessionService(
                 val now = System.currentTimeMillis()
                 val next = list
                 val complete = next.size < (messageLimit[key] ?: MessageSyncLimit)
-                val cached = withContext(Dispatchers.IO) { cache.listMessages(server, session.id) }
+                val cached = withContext(ioLane) { cache.listMessages(server, session.id) }
                 val sticky = stickySort[key]
                 val incoming = mutableListOf<IncomingMessage>()
 
@@ -604,7 +670,7 @@ class SessionService(
                     }
                 }
 
-                withContext(Dispatchers.IO) {
+                withContext(ioLane) {
                     plan.upserts.forEach {
                         cache.upsertMessage(
                             server,
@@ -623,7 +689,7 @@ class SessionService(
                             order.remove(messageKey(key, id))
                         }
                     }
-                    withContext(Dispatchers.IO) {
+                    withContext(ioLane) {
                         plan.removedIds.forEach {
                             cache.deleteMessage(server, session.id, it)
                         }
@@ -652,7 +718,7 @@ class SessionService(
 
     private fun loadSessions(worktree: String) {
         val scope = scope ?: return
-        scope.launch {
+        scope.launch(mutationLane) {
             local.value = local.value.copy(loadingSessions = true, message = null)
             var partialFailure = false
             val result = runCatching {
@@ -678,6 +744,12 @@ class SessionService(
     }
 
     suspend fun sessionsForProject(worktree: String, limit: Int? = null): List<SessionState> {
+        return mutateAwait {
+            sessionsForProjectNow(worktree, limit)
+        }
+    }
+
+    private suspend fun sessionsForProjectNow(worktree: String, limit: Int? = null): List<SessionState> {
         return collectProjectSessions(worktree, limit) { _, _ -> }
             .groupBy { it.id }
             .mapNotNull {
@@ -697,7 +769,7 @@ class SessionService(
         val directories = workspaceDirectoriesForProject(worktree)
         return directories
             .flatMap { directory ->
-                runCatching { proj.sessions(directory, limit) }
+                runCatching { withContext(ioLane) { proj.sessions(directory, limit) } }
                     .onFailure { onFailure(directory, it) }
                     .getOrDefault(emptyList())
                     .map { mapSessionSummary(it, directory) }
@@ -761,8 +833,8 @@ class SessionService(
 
     private fun loadCommands(worktree: String) {
         val scope = scope ?: return
-        scope.launch {
-            val result = runCatching { cmd.commands(worktree) }
+        scope.launch(mutationLane) {
+            val result = runCatching { withContext(ioLane) { cmd.commands(worktree) } }
             result.onSuccess { list ->
                 local.value = local.value.copy(commands = list)
             }
@@ -776,9 +848,9 @@ class SessionService(
         val favorites = projects.filter { it.favorite }
         if (favorites.isEmpty()) return
         val scope = scope ?: return
-        scope.launch {
+        scope.launch(mutationLane) {
             favorites.forEach { project ->
-                val result = runCatching { sessionsForProject(project.worktree, FavoritePreloadLimit) }
+                val result = runCatching { sessionsForProjectNow(project.worktree, FavoritePreloadLimit) }
                 result.onFailure {
                     log.warn(LogTag, "favorite preload failed worktree=${project.worktree} reason=${it.message}")
                 }
@@ -792,10 +864,10 @@ class SessionService(
         }
     }
 
-    private fun hydrateLast() {
-        val recent = runCatching { cache.recentSession() }.getOrNull() ?: return
+    private suspend fun hydrateLastNow() {
+        val recent = withContext(ioLane) { runCatching { cache.recentSession() }.getOrNull() } ?: return
         val scope = scope ?: return
-        scope.launch {
+        scope.launch(mutationLane) {
             manual = true
             input.value = recent.server
             conn.setUrl(recent.server)
@@ -813,15 +885,23 @@ class SessionService(
     private fun reconcile(scope: CoroutineScope) {
         reconcile?.cancel()
         reconcile = reconciler.start(scope) {
-            if (conn.status.value !is ConnectionState.Connected) {
-                conn.refresh(false)
+            mutate {
+                if (conn.status.value !is ConnectionState.Connected) {
+                    conn.refresh(false)
+                }
+                val focused = local.value.focusedSession ?: return@mutate
+                syncRemote(focused)
             }
-            val focused = local.value.focusedSession ?: return@start
-            syncRemote(focused)
         }
     }
 
     private suspend fun onEvent(event: SessionStreamEvent) {
+        mutate(event.id?.let { "sse:$it" }) {
+            onEventNow(event)
+        }
+    }
+
+    private suspend fun onEventNow(event: SessionStreamEvent) {
         when (val action = reducer.reduce(event)) {
             is SessionEventAction.Ignore -> {
                 log.debug(LogTag, "ignore type=${action.type}")
@@ -830,7 +910,7 @@ class SessionService(
 
             is SessionEventAction.ReloadProjects -> {
                 markSseApplied(event.type, null)
-                loadProjects()
+                loadProjectsNow()
                 local.value.focusedSession?.let { syncRemote(it) }
             }
 
@@ -920,7 +1000,7 @@ class SessionService(
             key = keyForSession(action.sessionId) ?: return
         }
         val server = key.substringBefore("::")
-        withContext(Dispatchers.IO) {
+        withContext(ioLane) {
             cache.deleteMessage(server, action.sessionId, action.messageId)
         }
         role.remove(messageKey(key, action.messageId))
@@ -1062,14 +1142,14 @@ class SessionService(
     private fun resolveSession(sessionId: String, directory: String?) {
         val scope = scope ?: return
         if (!resolver.allow(sessionId)) return
-        scope.launch {
+        scope.launch(mutationLane) {
             val worktree = if (!directory.isNullOrBlank() && directory != "global") {
                 directory
             } else {
                 local.value.selectedProject
             }
             if (worktree.isNullOrBlank()) return@launch
-            val result = runCatching { proj.sessions(worktree) }
+            val result = runCatching { withContext(ioLane) { proj.sessions(worktree) } }
             result.onFailure {
                 log.warn(LogTag, "resolve session failed id=$sessionId reason=${it.message}")
             }
@@ -1124,7 +1204,7 @@ class SessionService(
     private fun queueFlush(key: String, sessionId: String) {
         val scope = scope ?: return
         flush[key]?.cancel()
-        flush[key] = scope.launch {
+        flush[key] = scope.launch(mutationLane) {
             delay(OverlayFlushDelayMs)
             flushStaged(key, sessionId)
         }
@@ -1134,7 +1214,7 @@ class SessionService(
         val staged = synchronized(mapLock) { overlayDirty.remove(key)?.toList() } ?: return
         val server = key.substringBefore("::")
         val now = System.currentTimeMillis()
-        withContext(Dispatchers.IO) {
+        withContext(ioLane) {
             staged.forEach {
                 val message = synchronized(mapLock) { overlay[it] } ?: return@forEach
                 cache.upsertMessage(
@@ -1165,7 +1245,7 @@ class SessionService(
         focusedDb = emptyList()
         val server = key.substringBefore("::")
         val session = key.substringAfter("::")
-        observe = (scope ?: return).launch {
+        observe = (scope ?: return).launch(mutationLane) {
             cache.observeMessages(server, session)
                 .collect {
                     it.forEach { message ->
@@ -1194,9 +1274,9 @@ class SessionService(
         val parts = snapshot.third
         val token = ++publishToken
         publish?.cancel()
-        publish = scope.launch(Dispatchers.Default) {
+        publish = scope.launch(cpuLane) {
             val next = projector.project(key, base, staged, queued, parts)
-            withContext(Dispatchers.Main.immediate) {
+            withContext(mutationLane) {
                 if (focusedKey != key || token != publishToken) return@withContext
                 local.value = local.value.copy(focusedMessages = next)
             }
@@ -1249,7 +1329,7 @@ class SessionService(
         clearOverlay(key)
         flush.remove(key)?.cancel()
         messageLimit.remove(key)
-        scope?.launch(Dispatchers.IO) {
+        scope?.launch(ioLane) {
             cache.deleteSessionMessages(server, sessionId)
         }
         if (focusedKey == key) {
@@ -1300,14 +1380,16 @@ class SessionService(
         )
         val scope = scope ?: return
         val server = serverForCache()
-        scope.launch(Dispatchers.IO) {
+        scope.launch(ioLane) {
             runCatching {
                 cache.setSessionQuickPins(server, include, exclude)
             }.onFailure {
-                local.value = local.value.copy(
-                    quickPinInclude = current.quickPinInclude,
-                    quickPinExclude = current.quickPinExclude,
-                )
+                mutate {
+                    local.value = local.value.copy(
+                        quickPinInclude = current.quickPinInclude,
+                        quickPinExclude = current.quickPinExclude,
+                    )
+                }
             }
         }
     }
@@ -1403,6 +1485,8 @@ class SessionService(
     }
 
     fun stop() {
+        pipeline?.cancel()
+        pipeline = null
         stream?.cancel()
         stream = null
         reconcile?.cancel()
@@ -1414,6 +1498,64 @@ class SessionService(
         sync.cancelAll()
         flush.values.forEach { it.cancel() }
         flush.clear()
+    }
+}
+
+internal class MutationPipeline(
+    scope: CoroutineScope,
+    dispatcher: CoroutineDispatcher,
+) {
+    private data class Entry(
+        val key: String?,
+        val block: suspend () -> Unit,
+    )
+
+    private val queue = Channel<Entry>(Channel.UNLIMITED)
+    private val pending = linkedSetOf<String>()
+    private val worker = scope.launch(dispatcher) {
+        for (entry in queue) {
+            runCatching { entry.block() }
+            entry.key?.let { key ->
+                synchronized(pending) {
+                    pending.remove(key)
+                }
+            }
+        }
+    }
+
+    fun launch(key: String? = null, block: suspend () -> Unit): Boolean {
+        if (key != null) {
+            val accepted = synchronized(pending) {
+                if (pending.contains(key)) return@synchronized false
+                pending.add(key)
+                true
+            }
+            if (!accepted) return false
+        }
+        val sent = queue.trySend(Entry(key, block)).isSuccess
+        if (!sent && key != null) {
+            synchronized(pending) {
+                pending.remove(key)
+            }
+        }
+        return sent
+    }
+
+    suspend fun <T> run(key: String? = null, block: suspend () -> T): T {
+        val done = CompletableDeferred<T>()
+        if (!launch(key) {
+            runCatching { block() }
+                .onSuccess(done::complete)
+                .onFailure(done::completeExceptionally)
+        }) {
+            throw CancellationException("mutation pipeline is closed")
+        }
+        return done.await()
+    }
+
+    fun cancel() {
+        queue.close()
+        worker.cancel()
     }
 }
 
