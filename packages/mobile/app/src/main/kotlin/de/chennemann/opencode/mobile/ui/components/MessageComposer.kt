@@ -59,6 +59,8 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
@@ -98,8 +100,17 @@ fun MessageComposer(
 ) {
     var commandOpen by remember { mutableStateOf(false) }
     var dismissedAt by remember { mutableLongStateOf(0L) }
+    var field by remember { mutableStateOf(TextFieldValue(draft)) }
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(draft) {
+        if (draft == field.text) return@LaunchedEffect
+        field = TextFieldValue(
+            text = draft,
+            selection = TextRange(draft.length),
+        )
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -112,10 +123,11 @@ fun MessageComposer(
         ) {
             Box(modifier = Modifier.weight(1f)) {
                 TextField(
-                    value = draft,
+                    value = field,
                     onValueChange = {
-                        onDraftChange(it)
-                        commandOpen = commandOpen && (it.isBlank() || it.startsWith("/"))
+                        field = it
+                        onDraftChange(it.text)
+                        commandOpen = commandOpen && (it.text.isBlank() || it.text.startsWith("/"))
                     },
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("Message") },
@@ -213,8 +225,11 @@ fun MessageComposer(
                 ) {
                     IconButton(
                         onClick = {
+                            if (draft != field.text) {
+                                onDraftChange(field.text)
+                            }
                             onSend()
-                            if (draft.isNotBlank()) {
+                            if (field.text.isNotBlank()) {
                                 commandOpen = false
                                 focus.clearFocus()
                                 keyboard?.hide()
