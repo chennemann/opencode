@@ -2,6 +2,7 @@ package de.chennemann.opencode.mobile.ui.components
 
 import android.os.SystemClock
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -247,11 +249,33 @@ fun MessageComposer(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     items(quickSwitches, key = { it.key }) { item ->
-                        QuickSwitchButton(
-                            item = item,
-                            onClick = { onQuickSwitch(item.key) },
-                            onLongPress = { onQuickSwitchLongPress(item.key) },
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            QuickSwitchButton(
+                                item = item,
+                                onClick = { onQuickSwitch(item.key) },
+                                onLongPress = { onQuickSwitchLongPress(item.key) },
+                            )
+                            if (item.unread > 0) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    repeat(minOf(item.unread, 6)) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(5.dp)
+                                                .background(
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    shape = CircleShape,
+                                                )
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -438,22 +462,33 @@ private fun QuickSwitchButton(
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
-    Surface(
-        shape = CircleShape,
-        color = container,
-        contentColor = content,
-        modifier = Modifier
-            .size(36.dp)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongPress,
-            ),
+    Box(
+        modifier = Modifier.size(44.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
+        if (item.processing) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(44.dp),
+                strokeWidth = 2.dp,
+            )
+        }
+        Surface(
+            shape = CircleShape,
+            color = container,
+            contentColor = content,
+            modifier = Modifier
+                .size(36.dp)
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = onLongPress,
+                ),
         ) {
-            Text(item.label)
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(item.label)
+            }
         }
     }
 }
