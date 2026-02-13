@@ -247,11 +247,19 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                 connected = state.status is ServerState.Connected,
                 suggestions = state.slashSuggestions,
                 quickSwitches = state.quickSwitches,
+                quickSwitchMenu = state.quickSwitchMenu,
                 onDraftChange = { onEvent(ConversationEvent.DraftChanged(it)) },
                 onSend = { onEvent(ConversationEvent.SendTapped) },
                 onReload = { onEvent(ConversationEvent.ReloadTapped) },
                 onCommandSelect = { onEvent(ConversationEvent.SlashCommandSelected(it.name)) },
                 onQuickSwitch = { onEvent(ConversationEvent.QuickSwitchTapped(it)) },
+                onQuickSwitchLongPress = { onEvent(ConversationEvent.QuickSwitchLongPressed(it)) },
+                onQuickSwitchDismiss = { onEvent(ConversationEvent.QuickSwitchMenuDismissed) },
+                onQuickSwitchSession = { onEvent(ConversationEvent.QuickSwitchMenuSessionTapped(it)) },
+                onQuickSwitchPin = { session, system ->
+                    onEvent(ConversationEvent.QuickSwitchMenuPinTapped(session, system))
+                },
+                onQuickSwitchCreate = { onEvent(ConversationEvent.QuickSwitchMenuCreateTapped) },
             )
         }
     }

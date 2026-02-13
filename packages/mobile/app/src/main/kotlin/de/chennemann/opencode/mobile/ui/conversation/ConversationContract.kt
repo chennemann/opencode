@@ -25,16 +25,27 @@ data class ConversationUiState(
     val draft: String,
     val slashSuggestions: List<CommandState>,
     val quickSwitches: List<QuickSwitchState>,
+    val quickSwitchMenu: QuickSwitchMenuState? = null,
     val stepOpen: Map<String, Boolean>,
     val callOpen: Map<String, Boolean>,
 )
 
 data class QuickSwitchState(
     val key: String,
+    val worktree: String,
     val label: String,
     val project: String,
-    val session: SessionState,
     val active: Boolean,
+)
+
+data class QuickSwitchMenuState(
+    val key: String,
+    val worktree: String,
+    val project: String,
+    val sessions: List<SessionState>,
+    val loading: Boolean,
+    val pinned: Set<String> = emptySet(),
+    val systemPinned: Set<String> = emptySet(),
 )
 
 sealed interface ConversationEvent {
@@ -48,7 +59,17 @@ sealed interface ConversationEvent {
 
     data class SlashCommandSelected(val name: String) : ConversationEvent
 
-    data class QuickSwitchTapped(val sessionId: String) : ConversationEvent
+    data class QuickSwitchTapped(val key: String) : ConversationEvent
+
+    data class QuickSwitchLongPressed(val key: String) : ConversationEvent
+
+    data object QuickSwitchMenuDismissed : ConversationEvent
+
+    data class QuickSwitchMenuSessionTapped(val session: SessionState) : ConversationEvent
+
+    data class QuickSwitchMenuPinTapped(val session: SessionState, val systemPinned: Boolean) : ConversationEvent
+
+    data object QuickSwitchMenuCreateTapped : ConversationEvent
 
     data object SendTapped : ConversationEvent
 
