@@ -1,10 +1,15 @@
 package de.chennemann.opencode.mobile.domain.session
 
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.runBlocking
-import org.junit.jupiter.api.Assertions.assertTrue
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonObject
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 class SessionStreamCoordinatorTest {
@@ -15,11 +20,11 @@ class SessionStreamCoordinatorTest {
     }
 
     private class StubConn : ConnectionGateway {
-        override val status: StateFlow<ConnectionState> = MutableStateFlow(ConnectionState.Connected("1"))
-        override val endpoint: StateFlow<String> = MutableStateFlow("http://localhost")
-        override val found: StateFlow<String?> = MutableStateFlow(null)
+        override val status: StateFlow<ConnectionState> = MutableStateFlow(ConnectionState.Connected("1")).asStateFlow()
+        override val endpoint: StateFlow<String> = MutableStateFlow("http://localhost").asStateFlow()
+        override val found: StateFlow<String?> = MutableStateFlow(null).asStateFlow()
 
-        override fun start(scope: kotlinx.coroutines.CoroutineScope) {}
+        override fun start(scope: CoroutineScope) {}
 
         override suspend fun setUrl(next: String) {}
 
@@ -27,61 +32,157 @@ class SessionStreamCoordinatorTest {
     }
 
     private class StubNet : ConnectivityGateway {
-        override val online: StateFlow<Boolean> = MutableStateFlow(true)
-        override val changed: StateFlow<Long> = MutableStateFlow(0)
-    }
+        private val onlineState = MutableStateFlow(true)
+        private val changedState = MutableStateFlow(0L)
 
-    private class StubFeed : StreamGateway {
-        var emitted = false
+        override val online: StateFlow<Boolean> = onlineState.asStateFlow()
+        override val changed: StateFlow<Long> = changedState.asStateFlow()
 
-        override suspend fun streamEvents(
-            lastEventId: String?,
-            onRawEvent: suspend (String) -> Unit,
-            onEvent: suspend (SessionStreamEvent) -> Unit,
-        ): String? {
-            if (!emitted) {
-                emitted = true
-                onRawEvent("raw")
-                onEvent(
-                    SessionStreamEvent(
-                        directory = "repo",
-                        type = "server.heartbeat",
-                        properties = kotlinx.serialization.json.JsonObject(emptyMap()),
-                        id = "e1",
-                        retry = null,
-                    ),
-                )
-            }
-            delay(20)
-            return null
+        fun markChanged() {
+            changedState.value += 1
         }
-
-        override suspend fun streamCursor(): String? {
-            return null
-        }
-
-        override suspend fun setStreamCursor(value: String?) {}
     }
 
     @Test
-    fun emitsEventsThroughCallback() = runBlocking {
-        val feed = StubFeed()
+    fun retriesOnlyAfterNetworkChangeAndDelay() = runTest {
+        val net = StubNet()
+        val feed = object : StreamGateway {
+            var calls = 0
+
+            override suspend fun streamEvents(
+                lastEventId: String?,
+                onRawEvent: suspend (String) -> Unit,
+                onEvent: suspend (SessionStreamEvent) -> Unit,
+            ): String? {
+                calls += 1
+                if (calls == 1) throw IllegalStateException("first failure")
+                awaitCancellation()
+            }
+
+            override suspend fun streamCursor(): String? = null
+
+            override suspend fun setStreamCursor(value: String?) {}
+        }
+        val coordinator = SessionStreamCoordinator(
+            conn = StubConn(),
+            feed = feed,
+            net = net,
+            log = StubLog(),
+        )
+        val job = coordinator.start(backgroundScope) {}
+
+        runCurrent()
+        assertEquals(1, feed.calls)
+
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertEquals(1, feed.calls)
+
+        net.markChanged()
+        runCurrent()
+        assertEquals(1, feed.calls)
+
+        advanceTimeBy(3000)
+        runCurrent()
+        assertEquals(2, feed.calls)
+
+        job.cancel()
+    }
+
+    @Test
+    fun passesInitialCursorAndPersistsUpdatedCursorForRetry() = runTest {
+        val net = StubNet()
+        val cursors = mutableListOf<String?>()
+        val stored = mutableListOf<String?>()
+        val feed = object : StreamGateway {
+            var calls = 0
+
+            override suspend fun streamEvents(
+                lastEventId: String?,
+                onRawEvent: suspend (String) -> Unit,
+                onEvent: suspend (SessionStreamEvent) -> Unit,
+            ): String? {
+                calls += 1
+                cursors += lastEventId
+                if (calls == 1) {
+                    onEvent(event("e1"))
+                    throw IllegalStateException("stream failed")
+                }
+                awaitCancellation()
+            }
+
+            override suspend fun streamCursor(): String? = "seed"
+
+            override suspend fun setStreamCursor(value: String?) {
+                stored += value
+            }
+        }
+        val coordinator = SessionStreamCoordinator(
+            conn = StubConn(),
+            feed = feed,
+            net = net,
+            log = StubLog(),
+        )
+        val job = coordinator.start(backgroundScope) {}
+
+        runCurrent()
+        assertEquals(listOf("seed"), cursors)
+        assertEquals(listOf("e1"), stored)
+
+        net.markChanged()
+        runCurrent()
+        advanceTimeBy(3000)
+        runCurrent()
+
+        assertEquals(listOf("seed", "e1"), cursors)
+
+        job.cancel()
+    }
+
+    @Test
+    fun persistsCursorBeforeEventCallbackAndPreservesOrder() = runTest {
+        val order = mutableListOf<String>()
+        val feed = object : StreamGateway {
+            override suspend fun streamEvents(
+                lastEventId: String?,
+                onRawEvent: suspend (String) -> Unit,
+                onEvent: suspend (SessionStreamEvent) -> Unit,
+            ): String? {
+                onRawEvent("raw")
+                onEvent(event("e1"))
+                onEvent(event(null))
+                awaitCancellation()
+            }
+
+            override suspend fun streamCursor(): String? = null
+
+            override suspend fun setStreamCursor(value: String?) {
+                order += "persist:$value"
+            }
+        }
         val coordinator = SessionStreamCoordinator(
             conn = StubConn(),
             feed = feed,
             net = StubNet(),
             log = StubLog(),
         )
-        var events = 0
-
-        val job = coordinator.start(this) {
-            events += 1
+        val job = coordinator.start(backgroundScope) { event ->
+            order += "callback:${event.id}"
         }
 
-        delay(60)
-        job.cancel()
+        runCurrent()
+        assertEquals(listOf("persist:e1", "callback:e1", "callback:null"), order)
 
-        assertTrue(feed.emitted)
-        assertTrue(events >= 1)
+        job.cancel()
+    }
+
+    private fun event(id: String?): SessionStreamEvent {
+        return SessionStreamEvent(
+            directory = "repo",
+            type = "server.heartbeat",
+            properties = JsonObject(emptyMap()),
+            id = id,
+            retry = null,
+        )
     }
 }
