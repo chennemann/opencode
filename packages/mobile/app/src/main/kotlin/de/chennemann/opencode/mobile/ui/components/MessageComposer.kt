@@ -57,9 +57,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
@@ -75,6 +77,7 @@ import de.chennemann.opencode.mobile.icons.Send
 import de.chennemann.opencode.mobile.ui.conversation.QuickSwitchMenuState
 import de.chennemann.opencode.mobile.ui.conversation.QuickSwitchState
 import de.chennemann.opencode.mobile.ui.conversation.ConversationMode
+import de.chennemann.opencode.mobile.ui.theme.MobileTheme
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -86,6 +89,13 @@ private fun cycleMode(mode: ConversationMode): ConversationMode {
     return when (mode) {
         ConversationMode.PLAN -> ConversationMode.BUILD
         ConversationMode.BUILD -> ConversationMode.PLAN
+    }
+}
+
+private fun modeLabel(mode: ConversationMode): String {
+    return when (mode) {
+        ConversationMode.PLAN -> "Plan"
+        ConversationMode.BUILD -> "Build"
     }
 }
 
@@ -129,167 +139,186 @@ fun MessageComposer(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        Text(
-            text = if (mode == ConversationMode.PLAN) "Plan" else "Build",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(0.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Box(modifier = Modifier.weight(1f)) {
-                TextField(
-                    value = field,
-                    onValueChange = {
-                        field = it
-                        onDraftChange(it.text)
-                        commandOpen = commandOpen && (it.text.isBlank() || it.text.startsWith("/"))
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .pointerInput(mode) {
-                            val threshold = ModeSwipeThreshold.toPx()
-                            var delta = 0f
-                            var changed = false
-                            detectHorizontalDragGestures(
-                                onDragStart = {
-                                    delta = 0f
-                                    changed = false
-                                },
-                                onHorizontalDrag = { _, dragAmount ->
-                                    if (changed) return@detectHorizontalDragGestures
-                                    delta += dragAmount
-                                    if (delta > -threshold && delta < threshold) return@detectHorizontalDragGestures
-                                    changed = true
-                                    onModeChange(cycleMode(mode))
-                                },
-                            )
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ConversationMode.entries.forEach {
+                    val selected = it == mode
+                    Text(
+                        text = modeLabel(it),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                        ),
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         },
-                    placeholder = { Text("Message") },
-                    maxLines = 12,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        disabledContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent,
-                    ),
-                )
-
-                if (draft.isEmpty()) {
-                    DropdownMenu(
-                        expanded = commandOpen && suggestions.isNotEmpty(),
-                        onDismissRequest = {
-                            commandOpen = false
-                            dismissedAt = SystemClock.elapsedRealtime()
-                        },
-                        properties = PopupProperties(focusable = false),
                         modifier = Modifier
-                            .fillMaxWidth(0.95f)
-                            .heightIn(max = 280.dp),
-                    ) {
-                        suggestions.forEach { command ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(
-                                            text = "/${command.name}",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        if (!command.description.isNullOrBlank()) {
-                                            Text(
-                                                text = command.description,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
-                                    }
-                                },
-                                onClick = {
-                                    onCommandSelect(command)
-                                    commandOpen = false
-                                },
-                            )
-                        }
-                    }
-
-                    Box(
-                        Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(bottom = 4.dp)
-                    ) {
-                        IconButton(
-                            onClick = {
-                                val now = SystemClock.elapsedRealtime()
-                                if (commandOpen) {
-                                    commandOpen = false
-                                    dismissedAt = now
-                                    return@IconButton
-                                }
-                                if (now - dismissedAt < CommandReopenDelayMs) {
-                                    return@IconButton
-                                }
-                                commandOpen = true
+                            .clickable {
+                                if (!selected) onModeChange(it)
                             },
-                            modifier = Modifier
-                                .focusProperties { canFocus = false }
-                                .size(48.dp),
-                            colors = IconButtonDefaults.iconButtonColors(
-                                contentColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        ) {
-                            Icon(
-                                imageVector = Icons.CircleSlash,
-                                contentDescription = "Toggle command suggestions",
-                            )
-                        }
-                    }
+                    )
                 }
             }
 
-            if (connected) {
-                Box(
-                    Modifier
-                        .align(Alignment.Bottom)
-                        .padding(bottom = 4.dp)
-                ) {
-                    IconButton(
-                        onClick = {
-                            if (draft != field.text) {
-                                onDraftChange(field.text)
-                            }
-                            onSend()
-                            if (field.text.isNotBlank()) {
-                                commandOpen = false
-                                focus.clearFocus()
-                                keyboard?.hide()
-                            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    TextField(
+                        value = field,
+                        onValueChange = {
+                            field = it
+                            onDraftChange(it.text)
+                            commandOpen = commandOpen && (it.text.isBlank() || it.text.startsWith("/"))
                         },
-                        colors = IconButtonDefaults.iconButtonColors(
-                            contentColor = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .fillMaxWidth().padding(end = 48.dp)
+                            .pointerInput(mode) {
+                                val threshold = ModeSwipeThreshold.toPx()
+                                var delta = 0f
+                                var changed = false
+                                detectHorizontalDragGestures(
+                                    onDragStart = {
+                                        delta = 0f
+                                        changed = false
+                                    },
+                                    onHorizontalDrag = { _, dragAmount ->
+                                        if (changed) return@detectHorizontalDragGestures
+                                        delta += dragAmount
+                                        if (delta > -threshold && delta < threshold) return@detectHorizontalDragGestures
+                                        changed = true
+                                        onModeChange(cycleMode(mode))
+                                    },
+                                )
+                            },
+                        placeholder = { Text("Message") },
+                        maxLines = 12,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
                         ),
-                        modifier = Modifier.size(48.dp),
-                    ) {
-                        Icon(Icons.Send, "")
+                    )
+
+                    if (draft.isEmpty()) {
+                        DropdownMenu(
+                            expanded = commandOpen && suggestions.isNotEmpty(),
+                            onDismissRequest = {
+                                commandOpen = false
+                                dismissedAt = SystemClock.elapsedRealtime()
+                            },
+                            properties = PopupProperties(focusable = false),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 280.dp),
+                        ) {
+                            suggestions.forEach { command ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(
+                                                text = "/${command.name}",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            if (!command.description.isNullOrBlank()) {
+                                                Text(
+                                                    text = command.description,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        onCommandSelect(command)
+                                        commandOpen = false
+                                    },
+                                )
+                            }
+                        }
+
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(bottom = 4.dp, end = 64.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    val now = SystemClock.elapsedRealtime()
+                                    if (commandOpen) {
+                                        commandOpen = false
+                                        dismissedAt = now
+                                        return@IconButton
+                                    }
+                                    if (now - dismissedAt < CommandReopenDelayMs) {
+                                        return@IconButton
+                                    }
+                                    commandOpen = true
+                                },
+                                modifier = Modifier
+                                    .focusProperties { canFocus = false }
+                                    .size(48.dp),
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.CircleSlash,
+                                    contentDescription = "Toggle command suggestions",
+                                )
+                            }
+                        }
                     }
-                }
-            } else {
-                Button(
-                    onClick = onReload,
-                    modifier = Modifier.align(Alignment.Bottom),
-                ) {
-                    Text("Reload")
+
+                    if (connected) {
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(bottom = 4.dp, end = 16.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    if (draft != field.text) {
+                                        onDraftChange(field.text)
+                                    }
+                                    onSend()
+                                    if (field.text.isNotBlank()) {
+                                        commandOpen = false
+                                        focus.clearFocus()
+                                        keyboard?.hide()
+                                    }
+                                },
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.primary,
+                                ),
+                                modifier = Modifier.size(48.dp),
+                            ) {
+                                Icon(Icons.Send, "")
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = onReload,
+                            modifier = Modifier,
+                        ) {
+                            Text("Reload")
+                        }
+                    }
                 }
             }
         }
-
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -298,7 +327,7 @@ fun MessageComposer(
         ) {
             if (quickSwitches.isNotEmpty()) {
                 LazyRow(
-                    modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+                    modifier = Modifier.padding(top = 0.dp, bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     items(quickSwitches, key = { it.key }) { item ->
@@ -582,6 +611,60 @@ private fun folderName(path: String): String {
 
 private fun workspaceId(path: String): String {
     return path.trimEnd('/', '\\')
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun MessageComposerPreview() {
+    var mode by remember { mutableStateOf(ConversationMode.BUILD) }
+    var draft by remember { mutableStateOf("") }
+    MobileTheme {
+        MessageComposer(
+            draft = draft,
+            mode = mode,
+            connected = true,
+            suggestions = listOf(
+                CommandState(
+                    name = "help",
+                    description = "Show all commands",
+                )
+            ),
+            quickSwitches = listOf(
+                QuickSwitchState(
+                    key = "/repo/main",
+                    worktree = "/repo/main",
+                    label = "M",
+                    project = "main",
+                    active = true,
+                    processing = false,
+                    unread = 0,
+                ),
+                QuickSwitchState(
+                    key = "/repo/docs",
+                    worktree = "/repo/docs",
+                    label = "D",
+                    project = "docs",
+                    active = false,
+                    processing = true,
+                    unread = 2,
+                ),
+            ),
+            quickSwitchMenu = null,
+            onDraftChange = { draft = it },
+            onModeChange = { mode = it },
+            onSend = {},
+            onReload = {},
+            onCommandSelect = {},
+            onQuickSwitch = {},
+            onQuickSwitchLongPress = {},
+            onQuickSwitchDismiss = {},
+            onQuickSwitchSession = {},
+            onQuickSwitchPin = { _, _ -> },
+            onQuickSwitchArchive = {},
+            onQuickSwitchLoadMore = {},
+            onQuickSwitchCreate = {},
+        )
+    }
 }
 
 private const val CommandReopenDelayMs = 500L
