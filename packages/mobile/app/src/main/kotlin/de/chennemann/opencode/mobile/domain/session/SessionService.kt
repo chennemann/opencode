@@ -160,7 +160,12 @@ class SessionService(
         } else {
             LegacyMutationExecutor(scope, mutationLane)
         }
-        log.debug(LogTag, "mutation mode=${if (rollout.useMigratedExecution) "migrated" else "legacy"}")
+        debug(
+            unit = LogUnit.system,
+            event = "mutation_mode",
+            message = "Mutation executor mode",
+            context = mapOf("mode" to if (rollout.useMigratedExecution) "migrated" else "legacy"),
+        )
         conn.start(scope)
         scope.launch {
             combine(input, conn.found, conn.status, local) { url, discovered, status, local ->
@@ -734,11 +739,21 @@ class SessionService(
                 syncGate(session, force)
             }
             if (!gate.fetch) {
-                log.debug(LogTag, "sync skip session=${session.id} reason=${gate.reason}")
+                debug(
+                    unit = LogUnit.sync,
+                    event = "sync_skip",
+                    message = "Skipping sync",
+                    context = mapOf("session" to session.id, "reason" to gate.reason),
+                )
                 return@launch
             }
             if (!beginSync(session.id)) {
-                log.debug(LogTag, "sync skip session=${session.id} reason=already_active")
+                debug(
+                    unit = LogUnit.sync,
+                    event = "sync_skip",
+                    message = "Skipping sync",
+                    context = mapOf("session" to session.id, "reason" to "already_active"),
+                )
                 return@launch
             }
             try {
@@ -872,10 +887,25 @@ class SessionService(
                             }
                             local.value = local.value.copy(canLoadMoreMessages = !complete)
                         }
-                        log.debug(LogTag, "sync ok session=${session.id} messages=${next.size} dt=${System.currentTimeMillis() - started}ms")
+                        debug(
+                            unit = LogUnit.sync,
+                            event = "sync_ok",
+                            message = "Sync finished",
+                            context = mapOf(
+                                "session" to session.id,
+                                "messages" to "${next.size}",
+                                "dt_ms" to "${System.currentTimeMillis() - started}",
+                            ),
+                        )
                     }
                     result.onFailure {
-                        log.warn(LogTag, "sync failed session=${session.id} reason=${it.message}")
+                        warn(
+                            unit = LogUnit.sync,
+                            event = "sync_failed",
+                            message = "Sync failed",
+                            context = mapOf("session" to session.id, "reason" to (it.message ?: "unknown")),
+                            error = it,
+                        )
                         local.value = local.value.copy(message = it.message ?: "Failed to load messages")
                     }
                 }
@@ -893,7 +923,13 @@ class SessionService(
             val result = runCatching {
                 collectProjectSessions(worktree, SessionFetchLimit) { directory, error ->
                     partialFailure = true
-                    log.warn(LogTag, "sessions failed worktree=$directory reason=${error.message}")
+                    warn(
+                        unit = LogUnit.workspace,
+                        event = "sessions_failed",
+                        message = "Workspace sessions failed",
+                        context = mapOf("worktree" to directory, "reason" to (error.message ?: "unknown")),
+                        error = error,
+                    )
                 }
             }
             local.value = local.value.copy(loadingSessions = false)
@@ -902,7 +938,13 @@ class SessionService(
                 runCatching {
                     persistProjectSessionCache(worktree, list)
                 }.onFailure {
-                    log.warn(LogTag, "session cache update failed worktree=$worktree reason=${it.message}")
+                    warn(
+                        unit = LogUnit.cache,
+                        event = "session_cache_update_failed",
+                        message = "Session cache update failed",
+                        context = mapOf("worktree" to worktree, "reason" to (it.message ?: "unknown")),
+                        error = it,
+                    )
                 }
                 local.value = local.value.copy(
                     sessions = limitSessionsPerWorkspace(list, WorkspaceSessionDisplayLimit),
@@ -950,7 +992,13 @@ class SessionService(
         runCatching {
             persistProjectSessionCache(worktree, sessions)
         }.onFailure {
-            log.warn(LogTag, "session cache update failed worktree=$worktree reason=${it.message}")
+            warn(
+                unit = LogUnit.cache,
+                event = "session_cache_update_failed",
+                message = "Session cache update failed",
+                context = mapOf("worktree" to worktree, "reason" to (it.message ?: "unknown")),
+                error = it,
+            )
         }
 
         return sessions
@@ -1041,7 +1089,13 @@ class SessionService(
                 local.value = local.value.copy(commands = list)
             }
             result.onFailure {
-                log.warn(LogTag, "commands failed worktree=$worktree reason=${it.message}")
+                warn(
+                    unit = LogUnit.workspace,
+                    event = "commands_failed",
+                    message = "Command list failed",
+                    context = mapOf("worktree" to worktree, "reason" to (it.message ?: "unknown")),
+                    error = it,
+                )
             }
         }
     }
@@ -1054,7 +1108,13 @@ class SessionService(
             favorites.forEach { project ->
                 val result = runCatching { sessionsForProjectNow(project.worktree, FavoritePreloadLimit) }
                 result.onFailure {
-                    log.warn(LogTag, "favorite preload failed worktree=${project.worktree} reason=${it.message}")
+                    warn(
+                        unit = LogUnit.workspace,
+                        event = "favorite_preload_failed",
+                        message = "Favorite preload failed",
+                        context = mapOf("worktree" to project.worktree, "reason" to (it.message ?: "unknown")),
+                        error = it,
+                    )
                 }
                 result
                     .getOrDefault(emptyList())
@@ -1210,7 +1270,12 @@ class SessionService(
     private suspend fun onEventNow(event: SessionStreamEvent) {
         when (val action = reducer.reduce(event)) {
             is SessionEventAction.Ignore -> {
-                log.debug(LogTag, "ignore type=${action.type}")
+                debug(
+                    unit = LogUnit.stream,
+                    event = "sse_ignore",
+                    message = "Ignored SSE action",
+                    context = mapOf("type" to action.type),
+                )
                 return
             }
 
@@ -1458,7 +1523,13 @@ class SessionService(
             if (worktree.isNullOrBlank()) return@launch
             val result = runCatching { withContext(ioLane) { proj.sessions(worktree) } }
             result.onFailure {
-                log.warn(LogTag, "resolve session failed id=$sessionId reason=${it.message}")
+                warn(
+                    unit = LogUnit.workspace,
+                    event = "resolve_session_failed",
+                    message = "Session resolve failed",
+                    context = mapOf("session" to sessionId, "reason" to (it.message ?: "unknown")),
+                    error = it,
+                )
             }
             val found = result.getOrNull()
                 ?.firstOrNull { it.id == sessionId }
@@ -1472,7 +1543,12 @@ class SessionService(
                 updatedAt = found.updatedAt,
                 archivedAt = found.archivedAt,
             )
-            log.debug(LogTag, "resolve session id=$sessionId track=${session.title}")
+            debug(
+                unit = LogUnit.workspace,
+                event = "resolve_session",
+                message = "Session resolved",
+                context = mapOf("session" to sessionId, "title" to session.title),
+            )
             upsertActiveSession(session, worktree)
             local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
             scheduleSync(sessionId)
@@ -1740,7 +1816,12 @@ class SessionService(
         if (!local.value.quickProcessing.contains(sessionId)) return
         val stillRunning = incoming.any { it.role == "assistant" && it.completedAt == null }
         if (stillRunning) return
-        log.debug(LogTag, "sync corrected stale processing session=$sessionId")
+        debug(
+            unit = LogUnit.sync,
+            event = "sync_processing_reset",
+            message = "Corrected stale processing state",
+            context = mapOf("session" to sessionId),
+        )
         setProcessing(sessionId, false)
     }
 
@@ -2075,11 +2156,21 @@ class SessionService(
                 lastCheckAt = 0L,
             )
         }
-        log.debug(LogTag, "sse apply type=$type session=$sessionId")
+        debug(
+            unit = LogUnit.stream,
+            event = "sse_apply",
+            message = "Applied SSE event",
+            context = mapOf("type" to type, "session" to (sessionId ?: "")),
+        )
     }
 
     private fun markSseDropped(type: String, reason: String) {
-        log.warn(LogTag, "sse drop type=$type reason=$reason")
+        warn(
+            unit = LogUnit.stream,
+            event = "sse_drop",
+            message = "Dropped SSE event",
+            context = mapOf("type" to type, "reason" to reason),
+        )
     }
 
     private inline fun <T> timed(lane: String, path: String, details: String, block: () -> T): T {
@@ -2088,7 +2179,18 @@ class SessionService(
             block()
         } finally {
             val dt = (System.nanoTime() - start) / 1_000_000
-            log.debug(LogTag, "perf lane=$lane path=$path dt=${dt}ms thread=${Thread.currentThread().name} $details")
+            debug(
+                unit = LogUnit.sync,
+                event = "perf",
+                message = "Timing marker",
+                context = mapOf(
+                    "lane" to lane,
+                    "path" to path,
+                    "dt_ms" to "$dt",
+                    "thread" to Thread.currentThread().name,
+                    "details" to details,
+                ),
+            )
         }
     }
 
@@ -2098,8 +2200,33 @@ class SessionService(
             block()
         } finally {
             val dt = (System.nanoTime() - start) / 1_000_000
-            log.debug(LogTag, "perf lane=$lane path=$path dt=${dt}ms thread=${Thread.currentThread().name} $details")
+            debug(
+                unit = LogUnit.sync,
+                event = "perf",
+                message = "Timing marker",
+                context = mapOf(
+                    "lane" to lane,
+                    "path" to path,
+                    "dt_ms" to "$dt",
+                    "thread" to Thread.currentThread().name,
+                    "details" to details,
+                ),
+            )
         }
+    }
+
+    private fun debug(unit: LogUnit, event: String, message: String, context: Map<String, String> = emptyMap()) {
+        log.debug(unit, LogTag, event, message, context)
+    }
+
+    private fun warn(
+        unit: LogUnit,
+        event: String,
+        message: String,
+        context: Map<String, String> = emptyMap(),
+        error: Throwable? = null,
+    ) {
+        log.warn(unit, LogTag, event, message, context, error)
     }
 
     fun stop() {

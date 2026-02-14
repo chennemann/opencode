@@ -5,6 +5,9 @@ import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.session.ConnectionState
 import de.chennemann.opencode.mobile.domain.session.ConnectivityGateway
+import de.chennemann.opencode.mobile.domain.session.LogGateway
+import de.chennemann.opencode.mobile.domain.session.LogLevel
+import de.chennemann.opencode.mobile.domain.session.LogUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -49,6 +52,7 @@ class ServerRepositoryTest {
             service = StubServer(),
             network = StubNetwork(),
             dispatchers = lanes(main, worker),
+            log = StubLog(),
         )
 
         val load = async { repo.projects() }
@@ -69,6 +73,7 @@ class ServerRepositoryTest {
             service = StubServer(),
             network = StubNetwork(),
             dispatchers = lanes(main, worker),
+            log = StubLog(),
         )
 
         val write = async { repo.setStreamCursor("cursor-1") }
@@ -98,6 +103,7 @@ class ServerRepositoryTest {
             service = service,
             network = StubNetwork(),
             dispatchers = lanes(main, worker),
+            log = StubLog(),
         )
         val states = mutableListOf<ConnectionState>()
         val collect = launch { repo.status.collect { states += it } }
@@ -142,6 +148,7 @@ class ServerRepositoryTest {
             service = StubServer(),
             network = StubNetwork(),
             dispatchers = lanes(main, worker),
+            log = StubLog(),
         )
 
         val set = async { repo.setUrl("  EXAMPLE.local:8080///  ") }
@@ -172,6 +179,7 @@ class ServerRepositoryTest {
             service = StubServer(),
             network = StubNetwork(),
             dispatchers = lanes(main, worker),
+            log = StubLog(),
         )
 
         repo.setUrl("a.local:4096")
@@ -200,6 +208,7 @@ class ServerRepositoryTest {
             service = service,
             network = network,
             dispatchers = lanes(main, worker),
+            log = StubLog(),
         )
 
         val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + Job())
@@ -249,6 +258,19 @@ private class StubNetwork : ConnectivityGateway {
 
     fun markChanged() {
         changedState.value += 1
+    }
+}
+
+private class StubLog : LogGateway {
+    override fun log(
+        level: LogLevel,
+        unit: LogUnit,
+        tag: String,
+        event: String,
+        message: String,
+        context: Map<String, String>,
+        error: Throwable?,
+    ) {
     }
 }
 

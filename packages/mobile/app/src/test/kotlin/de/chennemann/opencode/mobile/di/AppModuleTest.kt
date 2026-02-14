@@ -24,6 +24,7 @@ import de.chennemann.opencode.mobile.domain.session.SessionService
 import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
 import de.chennemann.opencode.mobile.ui.conversation.ConversationViewModel
+import de.chennemann.opencode.mobile.ui.logs.LogsViewModel
 import de.chennemann.opencode.mobile.ui.manage.ManageViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,8 +58,10 @@ class AppModuleTest {
 
         val conversation = koin.get<ConversationViewModel>()
         val manage = koin.get<ManageViewModel>()
+        val logs = koin.get<LogsViewModel>()
         assertNotNull(conversation)
         assertNotNull(manage)
+        assertNotNull(logs)
         assertSame(api, viewModelService(conversation))
         assertSame(api, viewModelService(manage))
     }
@@ -128,9 +131,16 @@ private class FakeConnectivityGateway : ConnectivityGateway {
 }
 
 private class FakeLogGateway : LogGateway {
-    override fun debug(tag: String, message: String) = Unit
-
-    override fun warn(tag: String, message: String) = Unit
+    override fun log(
+        level: de.chennemann.opencode.mobile.domain.session.LogLevel,
+        unit: de.chennemann.opencode.mobile.domain.session.LogUnit,
+        tag: String,
+        event: String,
+        message: String,
+        context: Map<String, String>,
+        error: Throwable?,
+    ) {
+    }
 }
 
 private class FakeServerGateway : ServerGateway {

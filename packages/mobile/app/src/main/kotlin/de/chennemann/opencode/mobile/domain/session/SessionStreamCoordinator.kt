@@ -19,15 +19,41 @@ class SessionStreamCoordinator(
             var cursor = runCatching { feed.streamCursor() }.getOrNull()
             while (isActive) {
                 val endpoint = conn.endpoint.value
-                log.debug(SessionLogTag, "sse connect attempt=${attempt + 1} endpoint=$endpoint cursor=$cursor")
+                log.debug(
+                    unit = LogUnit.stream,
+                    tag = SessionLogTag,
+                    event = "sse_connect",
+                    message = "Connecting to stream",
+                    context = mapOf(
+                        "attempt" to "${attempt + 1}",
+                        "endpoint" to endpoint,
+                        "cursor" to cursor.orEmpty(),
+                    ),
+                )
                 val result = runCatching {
                     feed.streamEvents(cursor, { chunk ->
                         log.debug(
-                            SessionLogTag,
-                            "sse raw len=${chunk.length} head=${chunk.take(140).replace("\n", "\\n")}",
+                            unit = LogUnit.stream,
+                            tag = SessionLogTag,
+                            event = "sse_raw",
+                            message = "Stream chunk",
+                            context = mapOf(
+                                "length" to "${chunk.length}",
+                                "head" to chunk.take(140).replace("\n", "\\n"),
+                            ),
                         )
                     }) { event ->
-                        log.debug(SessionLogTag, "sse event type=${event.type} dir=${event.directory} id=${event.id}")
+                        log.debug(
+                            unit = LogUnit.stream,
+                            tag = SessionLogTag,
+                            event = "sse_event",
+                            message = "Stream event",
+                            context = mapOf(
+                                "type" to event.type,
+                                "directory" to event.directory,
+                                "id" to event.id.orEmpty(),
+                            ),
+                        )
                         if (!event.id.isNullOrBlank()) {
                             cursor = event.id
                             runCatching { feed.setStreamCursor(cursor) }
@@ -36,18 +62,43 @@ class SessionStreamCoordinator(
                     }
                 }
                 if (result.isSuccess) {
-                    log.debug(SessionLogTag, "sse stream ended normally reconnecting")
+                    log.debug(
+                        unit = LogUnit.stream,
+                        tag = SessionLogTag,
+                        event = "sse_end",
+                        message = "Stream ended normally, reconnecting",
+                    )
                     attempt = 0
                     continue
                 }
                 val reason = result.exceptionOrNull()?.message ?: "unknown stream error"
-                log.warn(SessionLogTag, "sse stream error attempt=${attempt + 1} reason=$reason")
+                log.warn(
+                    unit = LogUnit.stream,
+                    tag = SessionLogTag,
+                    event = "sse_error",
+                    message = "Stream failed",
+                    context = mapOf(
+                        "attempt" to "${attempt + 1}",
+                        "reason" to reason,
+                    ),
+                    error = result.exceptionOrNull(),
+                )
                 attempt += 1
                 val seen = net.changed.value
                 val mode = if (!net.online.value) "offline; waiting for network change" else "waiting for network change before reconnect"
-                log.debug(SessionLogTag, mode)
+                log.debug(
+                    unit = LogUnit.stream,
+                    tag = SessionLogTag,
+                    event = "sse_wait",
+                    message = mode,
+                )
                 net.changed.first { it > seen }
-                log.debug(SessionLogTag, "network changed; retrying stream")
+                log.debug(
+                    unit = LogUnit.stream,
+                    tag = SessionLogTag,
+                    event = "sse_retry",
+                    message = "Network changed, retrying stream",
+                )
                 delay(StreamRestartDelay)
             }
         }

@@ -110,11 +110,21 @@ fun ManageScreen(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
             }
         }
         item("back") {
-            OutlinedButton(
-                onClick = { onEvent(ManageEvent.BackTapped) },
-                modifier = Modifier.fillMaxWidth(),
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("Back")
+                OutlinedButton(
+                    onClick = { onEvent(ManageEvent.OpenLogsTapped) },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Logs")
+                }
+                OutlinedButton(
+                    onClick = { onEvent(ManageEvent.BackTapped) },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Back")
+                }
             }
         }
     }

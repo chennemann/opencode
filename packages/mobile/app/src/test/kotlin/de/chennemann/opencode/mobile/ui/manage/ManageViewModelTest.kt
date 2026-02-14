@@ -228,6 +228,22 @@ class ManageViewModelTest {
         assertTrue(nav.await() is NavEvent.ToConversation)
     }
 
+    @Test
+    fun opensLogsAndNavigatesToLogsScreen() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ManageViewModel(service, lanes(main, worker))
+
+        val nav = async { viewModel.nav.first() }
+        advanceUntilIdle()
+        viewModel.onEvent(ManageEvent.OpenLogsTapped)
+        advanceUntilIdle()
+
+        assertTrue(nav.await() is NavEvent.ToLogs)
+    }
+
     private fun state(
         projects: List<ProjectState> = emptyList(),
         selectedProject: String? = null,
