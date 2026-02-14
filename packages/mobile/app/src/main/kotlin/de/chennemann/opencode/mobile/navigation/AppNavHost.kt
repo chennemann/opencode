@@ -9,6 +9,8 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import de.chennemann.opencode.mobile.ui.conversation.ConversationScreen
 import de.chennemann.opencode.mobile.ui.conversation.ConversationViewModel
+import de.chennemann.opencode.mobile.ui.logs.LogsScreen
+import de.chennemann.opencode.mobile.ui.logs.LogsViewModel
 import de.chennemann.opencode.mobile.ui.manage.ManageScreen
 import de.chennemann.opencode.mobile.ui.manage.ManageViewModel
 import org.koin.androidx.compose.koinViewModel
@@ -51,9 +53,28 @@ fun AppNavHost() {
                                 }
                                 if (stack.isEmpty()) stack.add(ConversationRoute)
                             }
+                            if (it is NavEvent.ToLogs) {
+                                stack.add(LogsRoute)
+                            }
                         }
                     }
                     ManageScreen(
+                        state = state,
+                        onEvent = model::onEvent,
+                    )
+                }
+
+                is LogsRoute -> NavEntry(key) {
+                    val model: LogsViewModel = koinViewModel()
+                    val state by model.state.collectAsStateWithLifecycle()
+                    LaunchedEffect(model) {
+                        model.nav.collect {
+                            if (it is NavEvent.Back) {
+                                stack.removeLastOrNull()
+                            }
+                        }
+                    }
+                    LogsScreen(
                         state = state,
                         onEvent = model::onEvent,
                     )

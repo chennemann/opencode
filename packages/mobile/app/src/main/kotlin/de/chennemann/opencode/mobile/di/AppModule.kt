@@ -1,6 +1,7 @@
 package de.chennemann.opencode.mobile.di
 
 import de.chennemann.opencode.mobile.data.AndroidLogGateway
+import de.chennemann.opencode.mobile.data.LocalLogRepository
 import de.chennemann.opencode.mobile.data.MdnsService
 import de.chennemann.opencode.mobile.data.MdnsGateway
 import de.chennemann.opencode.mobile.data.NetworkService
@@ -16,6 +17,8 @@ import de.chennemann.opencode.mobile.domain.session.ConnectivityGateway
 import de.chennemann.opencode.mobile.domain.session.ConnectionGateway
 import de.chennemann.opencode.mobile.domain.session.FocusedMessageProjector
 import de.chennemann.opencode.mobile.domain.session.LogGateway
+import de.chennemann.opencode.mobile.domain.session.LogRedactor
+import de.chennemann.opencode.mobile.domain.session.LogStoreGateway
 import de.chennemann.opencode.mobile.domain.session.MessageGateway
 import de.chennemann.opencode.mobile.domain.session.ProjectGateway
 import de.chennemann.opencode.mobile.domain.session.ReconcileCoordinator
@@ -28,6 +31,7 @@ import de.chennemann.opencode.mobile.domain.session.SessionStreamCoordinator
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
 import de.chennemann.opencode.mobile.ui.conversation.ConversationViewModel
 import de.chennemann.opencode.mobile.ui.manage.ManageViewModel
+import de.chennemann.opencode.mobile.ui.logs.LogsViewModel
 import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -70,9 +74,11 @@ val appModule = module {
         CoroutineScope(SupervisorJob() + get<DispatcherProvider>().default)
     }
     single<ConnectivityGateway> { get<NetworkService>() }
-    single<LogGateway> { AndroidLogGateway() }
+    single { LogRedactor() }
+    single<LogStoreGateway> { LocalLogRepository(get(), get(), get()) }
+    single<LogGateway> { AndroidLogGateway(get(), get(named(AppScopeName)), get()) }
     single<ServerGateway> { ServerService(get(), get()) }
-    single { ServerRepository(get(), get(), get(), get(), get()) }
+    single { ServerRepository(get(), get(), get(), get(), get(), get()) }
     single { SessionCacheRepository(get(), get()) }
     single<ConnectionGateway> { get<ServerRepository>() }
     single<ProjectGateway> { get<ServerRepository>() }
@@ -94,4 +100,5 @@ val appModule = module {
     single<SessionServiceApi> { get<SessionService>() }
     viewModel { ConversationViewModel(get(), get()) }
     viewModel { ManageViewModel(get(), get()) }
+    viewModel { LogsViewModel(get(), get()) }
 }

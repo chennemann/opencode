@@ -5,5 +5,7 @@ sealed interface NavEvent {
 
     data object ToConversation : NavEvent
 
+    data object ToLogs : NavEvent
+
     data object Back : NavEvent
 }

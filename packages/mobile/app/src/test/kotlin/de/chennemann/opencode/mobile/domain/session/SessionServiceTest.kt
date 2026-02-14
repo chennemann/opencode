@@ -584,9 +584,16 @@ class SessionServiceTest {
     }
 
     private class FakeLog : LogGateway {
-        override fun debug(tag: String, message: String) = Unit
-
-        override fun warn(tag: String, message: String) = Unit
+        override fun log(
+            level: LogLevel,
+            unit: LogUnit,
+            tag: String,
+            event: String,
+            message: String,
+            context: Map<String, String>,
+            error: Throwable?,
+        ) {
+        }
     }
 
     private class FakeNet : ConnectivityGateway {

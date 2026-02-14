@@ -14,9 +14,16 @@ import org.junit.jupiter.api.Test
 
 class SessionStreamCoordinatorTest {
     private class StubLog : LogGateway {
-        override fun debug(tag: String, message: String) {}
-
-        override fun warn(tag: String, message: String) {}
+        override fun log(
+            level: LogLevel,
+            unit: LogUnit,
+            tag: String,
+            event: String,
+            message: String,
+            context: Map<String, String>,
+            error: Throwable?,
+        ) {
+        }
     }
 
     private class StubConn : ConnectionGateway {
