@@ -14,6 +14,7 @@ data class SessionSummary(
     val title: String,
     val version: String,
     val directory: String,
+    val parentId: String? = null,
     val updatedAt: Long? = null,
     val archivedAt: Long? = null,
 )
