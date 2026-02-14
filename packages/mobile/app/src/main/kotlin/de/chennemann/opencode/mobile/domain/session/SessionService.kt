@@ -932,7 +932,7 @@ class SessionService(
                     .getOrDefault(emptyList())
                     .map { mapSessionSummary(it, directory) }
             }
-            .filter { it.archivedAt == null }
+            .filter { it.archivedAt == null && it.parentId == null }
     }
 
     private fun workspaceDirectoriesForProject(worktree: String): List<String> {
@@ -961,6 +961,7 @@ class SessionService(
             title = value.title,
             version = value.version,
             directory = workspaceId(if (value.directory.isBlank()) directory else value.directory),
+            parentId = value.parentId,
             updatedAt = value.updatedAt,
             archivedAt = value.archivedAt,
         )
@@ -1047,10 +1048,70 @@ class SessionService(
                 if (conn.status.value !is ConnectionState.Connected) {
                     conn.refresh(false)
                 }
-                val focused = local.value.focusedSession ?: return@mutate
-                syncRemote(focused)
+                syncTrackedSessions()
             }
         }
+    }
+
+    private fun syncTrackedSessions() {
+        syncTargets().forEach(::syncRemote)
+    }
+
+    private fun syncTargets(): List<SessionState> {
+        val current = local.value
+        val focused = current.focusedSession
+        val pinned = pinnedSessionsForFavoriteProjects(
+            sessions = active.values.toList(),
+            projects = current.projects,
+            include = current.quickPinInclude,
+            exclude = current.quickPinExclude,
+        )
+        if (focused == null) return pinned
+        return (listOf(focused) + pinned).distinctBy { it.id }
+    }
+
+    private fun pinnedSessionsForFavoriteProjects(
+        sessions: List<SessionState>,
+        projects: List<ProjectState>,
+        include: Set<String>,
+        exclude: Set<String>,
+    ): List<SessionState> {
+        val favorites = projects.filter { it.favorite }
+        if (favorites.isEmpty()) return emptyList()
+        val cutoff = System.currentTimeMillis() - SyncPinnedWindowMs
+        return favorites
+            .flatMap { project ->
+                val dirs = (listOf(project.worktree) + project.sandboxes)
+                    .map(::workspaceId)
+                    .toSet()
+                val rows = sessions
+                    .filter { it.archivedAt == null && dirs.contains(workspaceId(it.directory)) }
+                    .groupBy { it.id }
+                    .mapNotNull {
+                        it.value.maxWithOrNull(compareBy<SessionState>({ value -> value.updatedAt ?: 0L }, { value -> value.id }))
+                    }
+                    .sortedWith(
+                        compareByDescending<SessionState> { it.updatedAt ?: 0L }
+                            .thenByDescending { it.id }
+                    )
+                val system = favoriteSystemPins(rows, cutoff)
+                val forced = rows.filter { include.contains(it.id) }
+                (system.filterNot { exclude.contains(it.id) } + forced)
+                    .distinctBy { it.id }
+            }
+            .distinctBy { it.id }
+    }
+
+    private fun favoriteSystemPins(sessions: List<SessionState>, cutoff: Long): List<SessionState> {
+        val recent = sessions.filter { (it.updatedAt ?: 0L) >= cutoff }
+        if (recent.isNotEmpty()) return recent
+        val latest = sessions
+            .maxWithOrNull(compareBy<SessionState>({ it.updatedAt ?: 0L }, { it.id }))
+            ?: return emptyList()
+        val updatedAt = latest.updatedAt ?: return listOf(latest)
+        val window = sessions.filter { (it.updatedAt ?: Long.MIN_VALUE) >= updatedAt - SyncPinnedFavoriteWindowMs }
+        if (window.isEmpty()) return listOf(latest)
+        return window
     }
 
     private suspend fun onEvent(event: SessionStreamEvent) {
@@ -1071,7 +1132,7 @@ class SessionService(
             is SessionEventAction.ReloadProjects -> {
                 markSseApplied(event.type, null)
                 loadProjectsNow()
-                local.value.focusedSession?.let { syncRemote(it) }
+                syncTrackedSessions()
             }
 
             is SessionEventAction.SessionChanged -> {
@@ -1322,6 +1383,7 @@ class SessionService(
                 title = found.title,
                 version = found.version,
                 directory = found.directory,
+                parentId = found.parentId,
                 updatedAt = found.updatedAt,
                 archivedAt = found.archivedAt,
             )
@@ -1879,6 +1941,8 @@ private const val SessionLimitStep = 50
 private const val SessionFetchLimit = 50
 private const val FavoritePreloadLimit = 50
 private const val WorkspaceSessionDisplayLimit = 3
+private const val SyncPinnedWindowMs = 2 * 60 * 60 * 1000L
+private const val SyncPinnedFavoriteWindowMs = 30 * 60 * 1000L
 private const val LaneMutation = "mutation"
 private const val LaneIo = "io"
 private const val LaneCpu = "cpu"

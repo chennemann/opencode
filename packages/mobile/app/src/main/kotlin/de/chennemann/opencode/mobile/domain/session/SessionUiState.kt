@@ -19,6 +19,7 @@ data class SessionState(
     val title: String,
     val version: String,
     val directory: String,
+    val parentId: String? = null,
     val updatedAt: Long? = null,
     val archivedAt: Long? = null,
 )
@@ -38,6 +39,7 @@ data class ToolCallState(
     val title: String,
     val subtitle: String? = null,
     val status: String? = null,
+    val sessionId: String? = null,
     val details: List<String>,
 )
 

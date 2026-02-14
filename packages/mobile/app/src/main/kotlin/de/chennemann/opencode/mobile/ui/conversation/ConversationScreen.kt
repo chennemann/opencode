@@ -201,6 +201,7 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                                 callOpen = state.callOpen,
                                 onToggleSteps = { onEvent(ConversationEvent.ToggleSteps(turn.id)) },
                                 onToggleToolCall = { onEvent(ConversationEvent.ToggleToolCall(it)) },
+                                onToolCallSession = { onEvent(ConversationEvent.ToolCallSessionTapped(it)) },
                                 onEnsureToolVisible = { toolId, alignTop, topCompensation ->
                                     follow = false
                                     scope.launch {
@@ -313,6 +314,7 @@ private fun ConversationTurnItem(
     callOpen: Map<String, Boolean>,
     onToggleSteps: () -> Unit,
     onToggleToolCall: (String) -> Unit,
+    onToolCallSession: (String) -> Unit,
     onEnsureToolVisible: (String, Boolean, Int) -> Unit,
     onToolLayout: (String, Int, Int) -> Unit,
 ) {
@@ -346,6 +348,7 @@ private fun ConversationTurnItem(
                 callOpen = callOpen,
                 onToggleSteps = onToggleSteps,
                 onToggleToolCall = onToggleToolCall,
+                onToolCallSession = onToolCallSession,
                 onEnsureToolVisible = onEnsureToolVisible,
                 onToolLayout = onToolLayout,
             )
@@ -387,6 +390,7 @@ private fun ToolCallsSection(
     callOpen: Map<String, Boolean>,
     onToggleSteps: () -> Unit,
     onToggleToolCall: (String) -> Unit,
+    onToolCallSession: (String) -> Unit,
     onEnsureToolVisible: (String, Boolean, Int) -> Unit,
     onToolLayout: (String, Int, Int) -> Unit,
 ) {
@@ -398,11 +402,12 @@ private fun ToolCallsSection(
     val activeCall = if (active && !answerWriting) latest ?: fallback else null
     val selected = lifted?.takeIf { id -> calls.any { it.id == id } }
     val card = remember {
-        movableContentOf<ToolCallState, Boolean, () -> Unit> { call, expanded, onToggle ->
+        movableContentOf<ToolCallState, Boolean, () -> Unit, (() -> Unit)?> { call, expanded, onToggle, onOpenSession ->
             ToolCallCard(
                 call = call,
                 expanded = expanded,
                 onToggle = onToggle,
+                onOpenSession = onOpenSession,
             )
         }
     }
@@ -478,14 +483,16 @@ private fun ToolCallsSection(
                 card(
                     activeCall,
                     expanded,
-                ) {
-                    lifted = activeCall.id
-                    onToggleSteps()
-                    if (!expanded) {
-                        onToggleToolCall(activeCall.id)
-                    }
-                    onEnsureToolVisible(activeCall.id, true, 0)
-                }
+                    {
+                        lifted = activeCall.id
+                        onToggleSteps()
+                        if (!expanded) {
+                            onToggleToolCall(activeCall.id)
+                        }
+                        onEnsureToolVisible(activeCall.id, true, 0)
+                    },
+                    activeCall.sessionId?.let { id -> { onToolCallSession(id) } },
+                )
             }
         }
         AnimatedVisibility(
@@ -540,11 +547,12 @@ private fun ToolCallsSection(
                                 onEnsureToolVisible(call.id, true, topCompensation)
                             }
                         }
+                        val openSession = call.sessionId?.let { id -> { onToolCallSession(id) } }
                         if (call.id == selected) {
-                            card(call, expanded, toggle)
+                            card(call, expanded, toggle, openSession)
                             return@Box
                         }
-                        ToolCallCard(call = call, expanded = expanded, onToggle = toggle)
+                        ToolCallCard(call = call, expanded = expanded, onToggle = toggle, onOpenSession = openSession)
                     }
                 }
             }

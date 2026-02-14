@@ -151,6 +151,7 @@ class ServerServiceTest {
                     "title": "Session 1",
                     "version": "v1",
                     "directory": "/repo/a",
+                    "parentID": "parent-1",
                     "time": {
                       "updated": "1700000001000",
                       "archived": "1700000002000"
@@ -179,12 +180,14 @@ class ServerServiceTest {
         assertEquals("Session 1", sessions[0].title)
         assertEquals("v1", sessions[0].version)
         assertEquals("/repo/a", sessions[0].directory)
+        assertEquals("parent-1", sessions[0].parentId)
         assertEquals(1700000001000L, sessions[0].updatedAt)
         assertEquals(1700000002000L, sessions[0].archivedAt)
         assertEquals("s2", sessions[1].id)
         assertEquals("Session", sessions[1].title)
         assertEquals("unknown", sessions[1].version)
         assertEquals("", sessions[1].directory)
+        assertNull(sessions[1].parentId)
         assertNull(sessions[1].updatedAt)
         assertNull(sessions[1].archivedAt)
     }

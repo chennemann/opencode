@@ -32,7 +32,8 @@ import androidx.compose.ui.unit.dp
 import de.chennemann.opencode.mobile.domain.session.ToolCallState
 
 @Composable
-fun ToolCallCard(call: ToolCallState, expanded: Boolean, onToggle: () -> Unit) {
+fun ToolCallCard(call: ToolCallState, expanded: Boolean, onToggle: () -> Unit, onOpenSession: (() -> Unit)? = null) {
+    val openSession = onOpenSession
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -46,7 +47,7 @@ fun ToolCallCard(call: ToolCallState, expanded: Boolean, onToggle: () -> Unit) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClick = onToggle),
+                    .clickable(onClick = { if (openSession != null) openSession() else onToggle() }),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {

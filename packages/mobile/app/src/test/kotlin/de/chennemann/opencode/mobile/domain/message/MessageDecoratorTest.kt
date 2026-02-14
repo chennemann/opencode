@@ -79,4 +79,25 @@ class MessageDecoratorTest {
         assertEquals("hello", value.text)
         assertEquals(0, value.toolCalls.size)
     }
+
+    @Test
+    fun extractsSubagentSessionFromTaskToolMetadata() {
+        val parts = listOf(
+            MessagePart(
+                id = "task-1",
+                type = "tool",
+                text = "",
+                tool = "task",
+                metadata = buildJsonObject {
+                    put("sessionId", "session-subagent-1")
+                },
+            )
+        )
+
+        val value = decorator.decorate("assistant", "(streaming...)", parts)
+
+        assertEquals("Agent", value.toolCalls.single().title)
+        assertEquals("session-subagent-1", value.toolCalls.single().sessionId)
+        assertTrue(value.toolCalls.single().details.any { it == "Session: session-subagent-1" })
+    }
 }

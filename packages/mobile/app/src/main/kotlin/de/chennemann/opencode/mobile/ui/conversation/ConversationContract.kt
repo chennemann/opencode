@@ -66,6 +66,8 @@ sealed interface ConversationEvent {
 
     data class ToggleToolCall(val callId: String) : ConversationEvent
 
+    data class ToolCallSessionTapped(val sessionId: String) : ConversationEvent
+
     data class DraftChanged(val value: String) : ConversationEvent
 
     data class ModeChanged(val value: ConversationMode) : ConversationEvent

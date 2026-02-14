@@ -180,6 +180,10 @@ class ConversationViewModel(
                 }
             }
 
+            is ConversationEvent.ToolCallSessionTapped -> {
+                openToolCallSession(event.sessionId)
+            }
+
             is ConversationEvent.DraftChanged -> {
                 local.update {
                     it.copy(draft = event.value)
@@ -462,7 +466,7 @@ class ConversationViewModel(
             lookup[workspaceId(it.directory)] ?: workspaceId(it.directory)
         }
         val rows = sessions
-            .filter { it.archivedAt == null }
+            .filter { it.archivedAt == null && it.parentId == null }
             .groupBy {
                 val directory = workspaceId(it.directory)
                 lookup[directory] ?: directory
@@ -561,7 +565,7 @@ class ConversationViewModel(
         val worktree = workspaceId(menu.worktree)
         val favorite = projects.firstOrNull { workspaceId(it.worktree) == worktree }?.favorite == true
         val sessions = menu.sessions
-            .filter { it.archivedAt == null }
+            .filter { it.archivedAt == null && it.parentId == null }
             .groupBy { it.id }
             .mapNotNull {
                 it.value.maxWithOrNull(compareBy<SessionState>({ value -> value.updatedAt ?: 0L }, { value -> value.id }))
@@ -667,6 +671,28 @@ class ConversationViewModel(
 
     private fun workspaceId(path: String): String {
         return path.trimEnd('/', '\\')
+    }
+
+    private fun openToolCallSession(sessionId: String) {
+        val id = sessionId.trim()
+        if (id.isBlank()) return
+        val value = service.state.value
+        val known = (value.activeSessions + value.sessions)
+            .firstOrNull { it.id == id }
+        if (known != null) {
+            service.openSession(known)
+            return
+        }
+        val focused = value.focusedSession ?: return
+        service.openSession(
+            SessionState(
+                id = id,
+                title = "Subagent ${id.take(8)}",
+                version = focused.version,
+                directory = focused.directory,
+                parentId = focused.id,
+            )
+        )
     }
 }
 

@@ -317,6 +317,87 @@ class ConversationViewModelTest {
     }
 
     @Test
+    fun quickSwitchAndMenuHideSubagentSessions() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ConversationViewModel(service, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        val root = SessionState(
+            id = "s-root",
+            title = "Root",
+            version = "1",
+            directory = "/repo/main",
+            updatedAt = 200,
+        )
+        val subagent = SessionState(
+            id = "s-sub",
+            title = "Subagent",
+            version = "1",
+            directory = "/repo/main",
+            parentId = "s-root",
+            updatedAt = 300,
+        )
+        service.projectSessions["/repo/main"] = listOf(root, subagent)
+        service.state.value = state(
+            focusedSession = root,
+            projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
+            activeSessions = listOf(root, subagent),
+        )
+
+        advanceUntilIdle()
+        assertEquals(1, viewModel.state.value.quickSwitches.size)
+
+        viewModel.onEvent(ConversationEvent.QuickSwitchLongPressed("/repo/main"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("s-root"), viewModel.state.value.quickSwitchMenu?.sessions?.map { it.id })
+        collect.cancel()
+    }
+
+    @Test
+    fun toolCallSessionTappedOpensKnownOrFallbackSession() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ConversationViewModel(service, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        val focused = SessionState(
+            id = "s-root",
+            title = "Root",
+            version = "1",
+            directory = "/repo/main",
+            updatedAt = 100,
+        )
+        val knownSubagent = SessionState(
+            id = "s-sub-known",
+            title = "Known",
+            version = "1",
+            directory = "/repo/main",
+            parentId = "s-root",
+            updatedAt = 90,
+        )
+        service.state.value = state(
+            focusedSession = focused,
+            projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
+            activeSessions = listOf(focused, knownSubagent),
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.ToolCallSessionTapped("s-sub-known"))
+        viewModel.onEvent(ConversationEvent.ToolCallSessionTapped("s-sub-fallback"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("s-sub-known", "s-sub-fallback"), service.openRequests)
+        assertEquals("s-root", service.openedSessions[0].parentId)
+        assertEquals("s-root", service.openedSessions[1].parentId)
+        assertEquals("/repo/main", service.openedSessions[1].directory)
+        collect.cancel()
+    }
+
+    @Test
     fun sendTappedClearsDraftOnlyForNonBlankValues() = runTest(TestCoroutineScheduler()) {
         val main = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(main)
@@ -450,6 +531,7 @@ private class StubSessionService : SessionServiceApi {
     val cachedRequestLimits = mutableListOf<Int>()
     val archiveRequests = mutableListOf<String>()
     val openRequests = mutableListOf<String>()
+    val openedSessions = mutableListOf<SessionState>()
     val sentTexts = mutableListOf<String>()
     val sentAgents = mutableListOf<String>()
     val projectSessions = linkedMapOf<String, List<SessionState>>()
@@ -479,6 +561,7 @@ private class StubSessionService : SessionServiceApi {
 
     override fun openSession(session: SessionState) {
         openRequests += session.id
+        openedSessions += session
     }
 
     override fun send(text: String, agent: String) {
