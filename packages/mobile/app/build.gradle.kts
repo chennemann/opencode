@@ -18,7 +18,14 @@ android {
         versionName = "1.0"
     }
 
+    testBuildType = "uitest"
+
     buildTypes {
+        create("uitest") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".uitest"
+            matchingFallbacks += listOf("debug")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -99,4 +106,12 @@ tasks.withType<app.cash.sqldelight.gradle.VerifyMigrationTask>().configureEach {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+}
+
+tasks.register("testDebugUnitTest") {
+    dependsOn("testUitestUnitTest")
+}
+
+tasks.register("connectedDebugAndroidTest") {
+    dependsOn("connectedUitestAndroidTest")
 }
