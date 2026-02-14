@@ -116,6 +116,118 @@ class ManageViewModelTest {
         collect.cancel()
     }
 
+    @Test
+    fun filtersProjectsByQueryFromNameAndPath() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ManageViewModel(service, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        service.state.value = state(
+            projects = listOf(
+                ProjectState(id = "p1", worktree = "/repo/alpha", name = "Alpha", favorite = true),
+                ProjectState(id = "p2", worktree = "/workspaces/beta", name = "Beta", favorite = false),
+            ),
+            selectedProject = "/repo/alpha",
+        )
+        advanceUntilIdle()
+
+        viewModel.onEvent(ManageEvent.ProjectQueryChanged("  ALPha  "))
+        advanceUntilIdle()
+        assertEquals(listOf("alpha"), viewModel.state.value.favoriteProjects.map { it.name })
+        assertEquals(emptyList<ProjectState>(), viewModel.state.value.otherProjects)
+
+        viewModel.onEvent(ManageEvent.ProjectQueryChanged("WORKSPACES"))
+        advanceUntilIdle()
+        assertEquals(emptyList<ProjectState>(), viewModel.state.value.favoriteProjects)
+        assertEquals(listOf("beta"), viewModel.state.value.otherProjects.map { it.name })
+        collect.cancel()
+    }
+
+    @Test
+    fun fallsBackToSelectedProjectWhenWorkspaceProjectMissing() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ManageViewModel(service, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        service.state.value = state(
+            projects = listOf(ProjectState(id = "p1", worktree = "/repo/known", name = "Known", favorite = true)),
+            selectedProject = "/repo/missing/",
+            sessions = listOf(SessionState(id = "s1", title = "One", version = "1", directory = "/repo/missing", updatedAt = 10)),
+        )
+        advanceUntilIdle()
+
+        val value = viewModel.state.value
+        assertEquals(listOf("/repo/missing"), value.workspaceOptions.map { it.directory })
+        assertEquals("/repo/missing", value.selectedWorkspace)
+        assertEquals("Local: missing", value.selectedWorkspaceName)
+        assertEquals(listOf("s1"), value.sessionSections.first().sessions.map { it.id })
+        collect.cancel()
+    }
+
+    @Test
+    fun fallsBackToFirstWorkspaceWhenSelectionDoesNotExist() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ManageViewModel(service, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        service.state.value = state(
+            projects = listOf(
+                ProjectState(id = "p1", worktree = "/repo/main", name = "Main", sandboxes = listOf("/repo/main/s1"), favorite = true),
+            ),
+            selectedProject = "/repo/main",
+        )
+        advanceUntilIdle()
+
+        val nav = async { viewModel.nav.first() }
+        viewModel.onEvent(ManageEvent.WorkspaceSelected("/repo/unknown"))
+        viewModel.onEvent(ManageEvent.CreateSessionTapped)
+        advanceUntilIdle()
+
+        assertEquals("/repo/main", viewModel.state.value.selectedWorkspace)
+        assertEquals(listOf("/repo/main"), service.createRequests)
+        assertTrue(nav.await() is NavEvent.ToConversation)
+        collect.cancel()
+    }
+
+    @Test
+    fun triggersConnectAndUseDiscoveredActions() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ManageViewModel(service, lanes(main, worker))
+
+        viewModel.onEvent(ManageEvent.ConnectTapped)
+        viewModel.onEvent(ManageEvent.UseDiscoveredTapped)
+
+        assertEquals(1, service.refreshCalls)
+        assertEquals(1, service.useDiscoveredCalls)
+    }
+
+    @Test
+    fun opensSessionAndNavigatesToConversation() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ManageViewModel(service, lanes(main, worker))
+        val session = SessionState(id = "s1", title = "One", version = "1", directory = "/repo/main", updatedAt = 100)
+
+        val nav = async { viewModel.nav.first() }
+        advanceUntilIdle()
+        viewModel.onEvent(ManageEvent.OpenSessionTapped(session))
+        advanceUntilIdle()
+
+        assertEquals(listOf("s1"), service.openRequests.map { it.id })
+        assertTrue(nav.await() is NavEvent.ToConversation)
+    }
+
     private fun state(
         projects: List<ProjectState> = emptyList(),
         selectedProject: String? = null,
@@ -180,8 +292,11 @@ private class StubSessionService : SessionServiceApi {
         )
     )
     var startCalls = 0
+    var useDiscoveredCalls = 0
+    var refreshCalls = 0
     val createRequests = mutableListOf<String>()
     val removeRequests = mutableListOf<String>()
+    val openRequests = mutableListOf<SessionState>()
 
     override fun start(scope: CoroutineScope) {
         startCalls += 1
@@ -189,9 +304,13 @@ private class StubSessionService : SessionServiceApi {
 
     override fun updateUrl(value: String) = Unit
 
-    override fun useDiscovered() = Unit
+    override fun useDiscovered() {
+        useDiscoveredCalls += 1
+    }
 
-    override fun refresh() = Unit
+    override fun refresh() {
+        refreshCalls += 1
+    }
 
     override fun selectProject(worktree: String) = Unit
 
@@ -208,7 +327,9 @@ private class StubSessionService : SessionServiceApi {
         return true
     }
 
-    override fun openSession(session: SessionState) = Unit
+    override fun openSession(session: SessionState) {
+        openRequests += session
+    }
 
     override fun send(text: String, agent: String) = Unit
 

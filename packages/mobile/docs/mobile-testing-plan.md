@@ -24,8 +24,8 @@
 
 - [x] Guard session orchestration in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/domain/session/SessionService.kt` for optimistic messages, SSE actions, sync/reconcile loops, cache persistence, and failure recovery
 - [x] Guard API consumption in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/ServerService.kt` and `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/ServerRepository.kt` for payload parsing, cursor handling, endpoint normalization, and error mapping
-- [ ] Guard cache correctness in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/SessionCacheRepository.kt` for dedupe/order/removal and project preference state
-- [ ] Guard UI contract behavior in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationViewModel.kt` and `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/manage/ManageViewModel.kt` for event handling and state transitions
+- [x] Guard cache correctness in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/SessionCacheRepository.kt` for dedupe/order/removal and project preference state
+- [x] Guard UI contract behavior in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationViewModel.kt` and `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/manage/ManageViewModel.kt` for event handling and state transitions
 - [ ] Guard Android-only integrations in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/navigation/AppNavHost.kt`, `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/MainActivity.kt`, `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/NetworkService.kt`, and `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/MdnsService.kt`
 
 ---
@@ -40,9 +40,9 @@
 - [x] Add `packages/mobile/api/src/test/kotlin/de/chennemann/opencode/mobile/api/GeneratedClientSmokeTest.kt` after creating `packages/mobile/api/src/test/kotlin` to validate generated client serialization/deserialization and one request-path smoke with mocked transport
 
 - [ ] **P1 - Close ViewModel, cache, and UI interaction gaps**
-- [ ] Expand `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationViewModelTest.kt` for quick switch cycle ordering, menu load failure fallback, send event draft-clearing rules, and slash filtering edge cases
-- [ ] Expand `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/manage/ManageViewModelTest.kt` for filtering, workspace fallback rules, connect/discovered actions, and open-session navigation events
-- [ ] Expand `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/data/SessionCacheRepositoryTest.kt` for favorites/hidden/quick-pin dedupe semantics, `recentSession` mapping, and delete-message/session cleanup edge cases
+- [x] Expand `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationViewModelTest.kt` for quick switch cycle ordering, menu load failure fallback, send event draft-clearing rules, and slash filtering edge cases
+- [x] Expand `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/manage/ManageViewModelTest.kt` for filtering, workspace fallback rules, connect/discovered actions, and open-session navigation events
+- [x] Expand `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/data/SessionCacheRepositoryTest.kt` for favorites/hidden/quick-pin dedupe semantics, `recentSession` mapping, and delete-message/session cleanup edge cases
 - [ ] Add `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/navigation/AppNavHostTest.kt` to verify back stack transitions between conversation/manage routes and `NavEvent` handling
 - [ ] Expand `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationScreenStreamingMarkdownTest.kt` for long-turn rendering, tool call expansion state, and load-more interaction signals
 
