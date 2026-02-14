@@ -16,13 +16,13 @@
 - [x] Message transformation coverage exists in `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/domain/message/MessagePartParserTest.kt`, `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/domain/message/MessageDecoratorTest.kt`, and `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/domain/session/FocusedMessageProjectorTest.kt`
 - [x] ViewModel mapping coverage exists in `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationViewModelTest.kt`, `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationRenderMapperTest.kt`, and `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/manage/ManageViewModelTest.kt`
 - [x] One Compose instrumentation suite exists in `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationScreenStreamingMarkdownTest.kt`
-- [ ] Critical gaps remain: no direct `SessionService` suite, no tests for `NetworkService`/`MdnsService`, no nav/DI/activity tests, and no tests inside `packages/mobile/api`
+- [ ] Critical gaps remain: no tests for `NetworkService`/`MdnsService`, and no nav/DI/activity tests
 
 ---
 
 ## Protect critical paths
 
-- [ ] Guard session orchestration in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/domain/session/SessionService.kt` for optimistic messages, SSE actions, sync/reconcile loops, cache persistence, and failure recovery
+- [x] Guard session orchestration in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/domain/session/SessionService.kt` for optimistic messages, SSE actions, sync/reconcile loops, cache persistence, and failure recovery
 - [x] Guard API consumption in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/ServerService.kt` and `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/ServerRepository.kt` for payload parsing, cursor handling, endpoint normalization, and error mapping
 - [ ] Guard cache correctness in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/SessionCacheRepository.kt` for dedupe/order/removal and project preference state
 - [ ] Guard UI contract behavior in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationViewModel.kt` and `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/manage/ManageViewModel.kt` for event handling and state transitions
@@ -32,12 +32,12 @@
 
 ## Implement by priority
 
-- [ ] **P0 - Harden domain and API integration**
-- [ ] Add `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/domain/session/SessionServiceTest.kt` covering start idempotency, project/session loading, send command/message success-failure paths, quick pin persistence rollback, archive behavior, and event-driven state updates
+- [x] **P0 - Harden domain and API integration**
+- [x] Add `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/domain/session/SessionServiceTest.kt` covering start idempotency, project/session loading, send command/message success-failure paths, quick pin persistence rollback, archive behavior, and event-driven state updates
 - [x] Add `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/data/ServerServiceTest.kt` using `MockEngine` to cover `health`, `projects`, `sessions`, `commands`, `sessionMessages`, `sendMessage`, `sendCommand`, and SSE parsing/cursor continuation
 - [x] Expand `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/data/ServerRepositoryTest.kt` for `refresh` success/failure transitions, `normalizeUrl` behavior via public methods, stream cursor keying by URL, and network-change triggered refresh
 - [x] Expand `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/domain/session/SessionStreamCoordinatorTest.kt` for retry-after-failure, wait-for-network-change behavior, cursor persistence, and callback ordering
-- [ ] Add `packages/mobile/api/src/test/kotlin/de/chennemann/opencode/mobile/api/GeneratedClientSmokeTest.kt` after creating `packages/mobile/api/src/test/kotlin` to validate generated client serialization/deserialization and one request-path smoke with mocked transport
+- [x] Add `packages/mobile/api/src/test/kotlin/de/chennemann/opencode/mobile/api/GeneratedClientSmokeTest.kt` after creating `packages/mobile/api/src/test/kotlin` to validate generated client serialization/deserialization and one request-path smoke with mocked transport
 
 - [ ] **P1 - Close ViewModel, cache, and UI interaction gaps**
 - [ ] Expand `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationViewModelTest.kt` for quick switch cycle ordering, menu load failure fallback, send event draft-clearing rules, and slash filtering edge cases
