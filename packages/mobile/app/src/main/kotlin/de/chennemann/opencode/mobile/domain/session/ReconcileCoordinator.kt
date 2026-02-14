@@ -7,7 +7,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class ReconcileCoordinator(
-    private val interval: Long = 10000,
+    private val interval: Long = 15000,
 ) {
     fun start(scope: CoroutineScope, block: suspend () -> Unit): Job {
         return scope.launch {
