@@ -46,19 +46,19 @@
 - [x] Add `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/navigation/AppNavHostTest.kt` to verify back stack transitions between conversation/manage routes and `NavEvent` handling
 - [x] Expand `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationScreenStreamingMarkdownTest.kt` for long-turn rendering, tool call expansion state, and load-more interaction signals
 
-- [ ] **P2 - Add platform and wiring confidence**
+- [x] **P2 - Add platform and wiring confidence**
 - [x] Add `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/di/AppModuleTest.kt` to validate Koin graph wiring for `SessionServiceApi`, repositories, gateways, and view models
-- [ ] Add `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/MainActivityTest.kt` for launch smoke and initial Compose host rendering
+- [x] Add `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/MainActivityTest.kt` for launch smoke and initial Compose host rendering
 - [x] Add `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/data/NetworkServiceTest.kt` with fakes or Robolectric to verify connectivity state and `changed` increments
 - [x] Add `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/data/MdnsEntryTest.kt` for URL formatting and IPv6 normalization, and add `MdnsService` instrumentation coverage only if testability hooks are introduced
     - `MdnsService` instrumentation coverage deferred because no additional testability hooks were introduced.
-- [ ] Add `packages/mobile/streaming-markdown/src/androidTest/kotlin/de/chennemann/opencode/mobile/streamingmarkdown/StreamingMarkdownComposeTest.kt` for Compose rendering parity between streaming and snapshot modes
+- [x] Add `packages/mobile/streaming-markdown/src/androidTest/kotlin/de/chennemann/opencode/mobile/streamingmarkdown/StreamingMarkdownComposeTest.kt` for Compose rendering parity between streaming and snapshot modes
 
 ---
 
 ## Run commands
 
-- [ ] Run all JVM unit tests in mobile workspace with `cd packages/mobile && ./gradlew test`
+- [x] Run all JVM unit tests in mobile workspace with `cd packages/mobile && ./gradlew test`
 - [x] Run app unit tests only with `cd packages/mobile && ./gradlew :app:testDebugUnitTest`
 - [x] Run streaming markdown unit tests only with `cd packages/mobile && ./gradlew :streaming-markdown:testDebugUnitTest`
 - [x] Run API module tests only with `cd packages/mobile && ./gradlew :api:test`
