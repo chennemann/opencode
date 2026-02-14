@@ -238,7 +238,10 @@ class ManageViewModel(
         if (sessions.isEmpty() || options.isEmpty()) return emptyList()
         return options.mapNotNull { option ->
             val list = sessions
-                .filter { workspaceId(it.directory) == workspaceId(option.directory) }
+                .filter {
+                    workspaceId(it.directory) == workspaceId(option.directory) &&
+                        it.parentId == null
+                }
                 .sortedWith(
                     compareByDescending<SessionState> { it.updatedAt ?: 0L }
                         .thenByDescending { it.id }

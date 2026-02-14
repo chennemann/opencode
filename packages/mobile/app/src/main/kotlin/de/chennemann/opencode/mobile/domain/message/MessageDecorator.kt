@@ -37,9 +37,23 @@ class MessageDecorator {
                     title = toolTitle(tool),
                     subtitle = toolSubtitle(tool, part),
                     status = part.status,
+                    sessionId = toolSessionId(tool, part),
                     details = toolDetails(tool, part),
                 )
             }
+    }
+
+    private fun toolSessionId(tool: String, part: MessagePart): String? {
+        if (tool != "task") return null
+        val metadata = part.metadata
+        return metadata?.string("sessionId")
+            ?: metadata?.string("session_id")
+            ?: part.output?.lineSequence()
+                ?.map { it.trim() }
+                ?.firstOrNull { it.startsWith("session_id:") }
+                ?.substringAfter(':')
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
     }
 
     private fun toolTitle(tool: String): String {
@@ -122,6 +136,10 @@ class MessageDecorator {
 
         if (tool == "webfetch") {
             input?.string("format")?.let { details.add("Format: ${it.line()}") }
+        }
+
+        if (tool == "task") {
+            toolSessionId(tool, part)?.let { details.add("Session: ${it.line()}") }
         }
 
         if (tool == "edit" || tool == "write") {

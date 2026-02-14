@@ -5,6 +5,7 @@ data class ToolCallRender(
     val title: String,
     val subtitle: String? = null,
     val status: String? = null,
+    val sessionId: String? = null,
     val details: List<String>,
 )
 

@@ -49,6 +49,7 @@ data class SessionInfo(
     val title: String,
     val version: String,
     val directory: String,
+    val parentId: String? = null,
     val updatedAt: Long? = null,
     val archivedAt: Long? = null,
 )
@@ -183,6 +184,9 @@ class ServerService(
                 val title = obj["title"]?.jsonPrimitive?.contentOrNull ?: "Session"
                 val version = obj["version"]?.jsonPrimitive?.contentOrNull ?: "unknown"
                 val directory = obj["directory"]?.jsonPrimitive?.contentOrNull ?: ""
+                val parentId = obj["parentID"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["parentId"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["parent_id"]?.jsonPrimitive?.contentOrNull
                 val updatedAt = (obj["time"] as? JsonObject)
                     ?.get("updated")
                     ?.jsonPrimitive
@@ -198,6 +202,7 @@ class ServerService(
                     title = title,
                     version = version,
                     directory = directory,
+                    parentId = parentId,
                     updatedAt = updatedAt,
                     archivedAt = archivedAt,
                 )

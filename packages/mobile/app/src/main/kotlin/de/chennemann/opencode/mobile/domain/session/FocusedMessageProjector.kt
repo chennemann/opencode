@@ -67,6 +67,7 @@ class FocusedMessageProjector(
                         title = call.title,
                         subtitle = call.subtitle,
                         status = call.status,
+                        sessionId = call.sessionId,
                         details = call.details,
                     )
                 }

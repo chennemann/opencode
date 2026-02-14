@@ -113,6 +113,7 @@ class ServerRepository(
                     title = it.title,
                     version = it.version,
                     directory = it.directory,
+                    parentId = it.parentId,
                     updatedAt = it.updatedAt,
                     archivedAt = it.archivedAt,
                 )
