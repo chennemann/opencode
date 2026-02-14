@@ -292,6 +292,14 @@ private class StubServer : ServerGateway {
         return emptyList()
     }
 
+    override suspend fun sessionUpdatedAt(baseUrl: String, sessionId: String, directory: String): Long? {
+        return null
+    }
+
+    override suspend fun sessionStatus(baseUrl: String, directory: String): Map<String, String> {
+        return emptyMap()
+    }
+
     override suspend fun streamEvents(
         baseUrl: String,
         lastEventId: String?,

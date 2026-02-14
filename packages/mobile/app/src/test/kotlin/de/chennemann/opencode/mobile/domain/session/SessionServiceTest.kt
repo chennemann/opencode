@@ -462,6 +462,8 @@ class SessionServiceTest {
         )
 
         val messagesBySession = linkedMapOf<String, List<SessionMessage>>()
+        val updatedAtBySession = linkedMapOf<String, Long?>()
+        val statusByDirectory = linkedMapOf<String, Map<String, String>>()
         val messagesCalls = mutableListOf<Pair<String, Int?>>()
         val commandCalls = mutableListOf<Call>()
         var sendCommandError: Throwable? = null
@@ -472,6 +474,14 @@ class SessionServiceTest {
             messagesCalls += sessionId to limit
             val values = messagesBySession[sessionId].orEmpty()
             return if (limit == null) values else values.take(limit)
+        }
+
+        override suspend fun updatedAt(sessionId: String, directory: String): Long? {
+            return updatedAtBySession[sessionId]
+        }
+
+        override suspend fun status(directory: String): Map<String, String> {
+            return statusByDirectory[directory].orEmpty()
         }
 
         override suspend fun sendMessage(sessionId: String, directory: String, text: String, agent: String) {

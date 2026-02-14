@@ -61,6 +61,25 @@ class SessionService(
         val message: String? = null,
     )
 
+    private data class SyncPolicy(
+        val interval: Long = SyncBackoffBaseMs,
+        val lastCheckAt: Long = 0L,
+        val lastSyncAt: Long = 0L,
+        val lastSseAt: Long = 0L,
+        val lastUpdatedAt: Long? = null,
+        val status: String = "unknown",
+        val tool: String? = null,
+        val toolAt: Long = 0L,
+        val checks: Boolean = true,
+        val activatedAt: Long = 0L,
+    )
+
+    private data class DirectoryPolicy(
+        val interval: Long = SyncBackoffBaseMs,
+        val lastCheckAt: Long = 0L,
+        val checks: Boolean = true,
+    )
+
     private val input = MutableStateFlow(conn.endpoint.value)
     private val local = MutableStateFlow(LocalState())
     private val output = MutableStateFlow(
@@ -97,6 +116,8 @@ class SessionService(
     private val stickySort = linkedMapOf<String, MutableMap<String, String>>()
     private val order = linkedMapOf<String, String>()
     private val messageLimit = linkedMapOf<String, Int>()
+    private val policy = linkedMapOf<String, SyncPolicy>()
+    private val directoryPolicy = linkedMapOf<String, DirectoryPolicy>()
     private val seq = AtomicLong(System.currentTimeMillis() * 1000)
     private var manual = false
     private var stream: Job? = null
@@ -283,6 +304,7 @@ class SessionService(
             )
             preloadFavoriteSessions(projects)
             if (next == null) return@onSuccess
+            markProjectActivated(next)
             loadSessions(next)
             loadCommands(next)
         }
@@ -294,6 +316,7 @@ class SessionService(
     override fun selectProject(worktree: String) {
         mutate {
             val selected = workspaceId(worktree)
+            markProjectActivated(selected)
             local.value = local.value.copy(
                 selectedProject = selected,
                 commands = emptyList(),
@@ -326,6 +349,7 @@ class SessionService(
                 favoriteProjects = next,
             )
             if (next.contains(value)) {
+                markProjectActivated(value)
                 preloadFavoriteSessions(local.value.projects)
             }
 
@@ -504,7 +528,7 @@ class SessionService(
                     }
                     result.onSuccess {
                         mutate {
-                            scheduleSync(focused.id)
+                            scheduleSync(focused.id, force = true)
                         }
                     }
                     result.onFailure {
@@ -549,7 +573,7 @@ class SessionService(
                     }
                 result.onSuccess {
                     mutate {
-                        scheduleSync(focused.id)
+                        scheduleSync(focused.id, force = true)
                     }
                 }
                 result.onFailure {
@@ -641,6 +665,7 @@ class SessionService(
     fun focusSession(sessionId: String) {
         mutate {
             val entry = active.entries.find { it.value.id == sessionId } ?: return@mutate
+            markActivated(sessionId)
             focusedKey = entry.key
             local.value = local.value.copy(
                 focusedSession = entry.value,
@@ -650,6 +675,7 @@ class SessionService(
                 loadingMoreMessages = false,
             )
             observeFocused()
+            syncRemote(entry.value, force = true)
         }
     }
 
@@ -659,6 +685,10 @@ class SessionService(
         active[key] = session
         sessionProject[key] = project
         messageLimit[key] = messageLimit[key] ?: MessageSyncLimit
+        val current = policy[session.id] ?: SyncPolicy()
+        policy[session.id] = current.copy(
+            lastUpdatedAt = current.lastUpdatedAt ?: session.updatedAt,
+        )
         if (persist) {
             scope?.launch(ioLane) {
                 cache.upsertSession(server, sessionProject[key], session)
@@ -669,6 +699,7 @@ class SessionService(
 
     private fun focusSession(session: SessionState, project: String?) {
         val key = upsertActiveSession(session, project)
+        markActivated(session.id)
         val previous = focusedKey
         if (previous != null && previous != key) {
             flush.remove(previous)?.cancel()
@@ -690,13 +721,22 @@ class SessionService(
             loadCommands(project)
         }
         observeFocused()
-        syncRemote(session)
+        syncRemote(session, force = true)
     }
 
-    private fun syncRemote(session: SessionState, more: Boolean = false) {
+    private fun syncRemote(session: SessionState, more: Boolean = false, force: Boolean = false) {
         if (conn.status.value !is ConnectionState.Connected) return
         val scope = scope ?: return
         scope.launch(mutationLane) {
+            val gate = if (more) {
+                SyncGate(fetch = true, reason = "more")
+            } else {
+                syncGate(session, force)
+            }
+            if (!gate.fetch) {
+                log.debug(LogTag, "sync skip session=${session.id} reason=${gate.reason}")
+                return@launch
+            }
             if (!beginSync(session.id)) {
                 log.debug(LogTag, "sync skip session=${session.id} reason=already_active")
                 return@launch
@@ -824,6 +864,8 @@ class SessionService(
 
                         clearOverlay(key)
                         trimPending(key)
+                        markSync(session.id)
+                        syncToolState(session.id, key)
                         if (focusedKey == key) {
                             if (plan.claimed) {
                                 observeFocused()
@@ -856,6 +898,7 @@ class SessionService(
             }
             local.value = local.value.copy(loadingSessions = false)
             result.onSuccess { list ->
+                resetProjectBackoff(worktree, list)
                 runCatching {
                     persistProjectSessionCache(worktree, list)
                 }.onFailure {
@@ -1053,8 +1096,50 @@ class SessionService(
         }
     }
 
-    private fun syncTrackedSessions() {
+    private suspend fun syncTrackedSessions() {
+        discoverFavoriteRunningSessions()
         syncTargets().forEach(::syncRemote)
+    }
+
+    private suspend fun discoverFavoriteRunningSessions() {
+        val favorites = local.value.projects.filter { it.favorite }
+        favorites
+            .flatMap { workspaceDirectoriesForProject(it.worktree) }
+            .distinct()
+            .forEach { directory ->
+                if (!shouldCheckDirectory(directory)) return@forEach
+                val result = runCatching {
+                    withTimeout(SyncFetchTimeoutMs) {
+                        withContext(ioLane) {
+                            msg.status(directory)
+                        }
+                    }
+                }
+                result.onFailure {
+                    if (!unsupportedCheck(it)) {
+                        return@onFailure
+                    }
+                    val current = directoryPolicy[directory] ?: DirectoryPolicy()
+                    directoryPolicy[directory] = current.copy(
+                        checks = false,
+                        interval = nextInterval(current.interval),
+                        lastCheckAt = System.currentTimeMillis(),
+                    )
+                }
+                val status = result.getOrNull() ?: return@forEach
+                val running = status
+                    .filterValues { it == "busy" || it == "retry" }
+                    .keys
+                markDirectoryChecked(directory, running.isNotEmpty())
+                running.forEach { sessionId ->
+                    if (keyForSession(sessionId) == null) {
+                        ensureSessionTracked(sessionId, directory)
+                        resolveSession(sessionId, directory)
+                    }
+                    setProcessing(sessionId, true)
+                    scheduleSync(sessionId, force = true)
+                }
+            }
     }
 
     private fun syncTargets(): List<SessionState> {
@@ -1350,13 +1435,13 @@ class SessionService(
         local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
     }
 
-    private fun scheduleSync(sessionId: String, burst: Boolean = false) {
+    private fun scheduleSync(sessionId: String, burst: Boolean = false, force: Boolean = false) {
         val scope = scope ?: return
         sync.schedule(scope, sessionId, if (burst) SyncBurstDelayMs else SyncDelayMs) {
             val entry = active.values.find { value -> value.id == sessionId }
                 ?: local.value.focusedSession?.takeIf { it.id == sessionId }
             if (entry != null) {
-                syncRemote(entry)
+                syncRemote(entry, force = force)
             }
         }
     }
@@ -1539,6 +1624,7 @@ class SessionService(
     }
 
     private fun removeSession(sessionId: String) {
+        policy.remove(sessionId)
         clearSessionQuickPin(sessionId)
         setProcessing(sessionId, false)
         local.value = local.value.copy(
@@ -1767,7 +1853,228 @@ class SessionService(
         sync.end(sessionId)
     }
 
+    private data class SyncGate(
+        val fetch: Boolean,
+        val reason: String,
+    )
+
+    private suspend fun syncGate(session: SessionState, force: Boolean): SyncGate {
+        val now = System.currentTimeMillis()
+        val current = policy[session.id] ?: SyncPolicy(lastUpdatedAt = session.updatedAt)
+        policy[session.id] = current
+        if (force) {
+            return checkFirst(session, current, now, force = true)
+        }
+        val due = now - current.lastCheckAt >= current.interval
+        if (!due) {
+            return SyncGate(fetch = false, reason = "backoff")
+        }
+        val running = isRunning(session.id, current)
+        if (running && now - current.lastSseAt <= SyncSseQuietWindowMs) {
+            return SyncGate(fetch = false, reason = "recent_sse")
+        }
+        return checkFirst(session, current, now, force = false)
+    }
+
+    private suspend fun checkFirst(session: SessionState, current: SyncPolicy, now: Long, force: Boolean): SyncGate {
+        val latest = current.copy(lastCheckAt = now)
+        policy[session.id] = latest
+        if (!latest.checks) {
+            policy[session.id] = latest.copy(interval = nextInterval(latest.interval))
+            return SyncGate(fetch = true, reason = if (force) "forced_fallback" else "fallback")
+        }
+        val status = runCatching {
+            withTimeout(SyncFetchTimeoutMs) {
+                withContext(ioLane) {
+                    msg.status(session.directory)
+                }
+            }
+        }
+        val withStatus = status.fold(
+            onSuccess = {
+                latest.copy(status = it[session.id] ?: latest.status)
+            },
+            onFailure = {
+                if (unsupportedCheck(it)) {
+                    latest.copy(checks = false)
+                } else {
+                    latest
+                }
+            },
+        )
+        policy[session.id] = withStatus
+        if (!withStatus.checks) {
+            policy[session.id] = withStatus.copy(interval = nextInterval(withStatus.interval))
+            return SyncGate(fetch = true, reason = if (force) "forced_fallback" else "fallback")
+        }
+        val updated = runCatching {
+            withTimeout(SyncFetchTimeoutMs) {
+                withContext(ioLane) {
+                    msg.updatedAt(session.id, session.directory)
+                }
+            }
+        }
+        return updated.fold(
+            onSuccess = { value ->
+                val known = withStatus.lastUpdatedAt
+                val initial = known == null && withStatus.lastSyncAt == 0L
+                val changed = value != null && known != null && value != known
+                val discovered = value != null && known == null
+                if (initial || changed || discovered) {
+                    val next = withStatus.copy(
+                        lastUpdatedAt = value ?: known,
+                        interval = SyncBackoffBaseMs,
+                    )
+                    policy[session.id] = next
+                    return@fold SyncGate(fetch = true, reason = if (known == null) "initial" else "changed")
+                }
+                val next = withStatus.copy(interval = nextInterval(withStatus.interval))
+                policy[session.id] = next
+                SyncGate(fetch = false, reason = "unchanged")
+            },
+            onFailure = {
+                if (unsupportedCheck(it)) {
+                    policy[session.id] = withStatus.copy(
+                        checks = false,
+                        interval = nextInterval(withStatus.interval),
+                    )
+                    return@fold SyncGate(fetch = true, reason = if (force) "forced_fallback" else "fallback")
+                }
+                SyncGate(fetch = false, reason = "check_error")
+            },
+        )
+    }
+
+    private fun unsupportedCheck(error: Throwable): Boolean {
+        val message = error.message?.lowercase() ?: return false
+        return message.contains("404") || message.contains("405")
+    }
+
+    private fun nextInterval(current: Long): Long {
+        val doubled = current * 2
+        if (doubled > SyncBackoffMaxMs) return SyncBackoffMaxMs
+        return doubled
+    }
+
+    private fun shouldCheckDirectory(directory: String): Boolean {
+        val now = System.currentTimeMillis()
+        val current = directoryPolicy[directory] ?: DirectoryPolicy()
+        directoryPolicy[directory] = current
+        if (!current.checks) return false
+        return now - current.lastCheckAt >= current.interval
+    }
+
+    private fun markDirectoryChecked(directory: String, active: Boolean) {
+        val now = System.currentTimeMillis()
+        val current = directoryPolicy[directory] ?: DirectoryPolicy()
+        directoryPolicy[directory] = current.copy(
+            lastCheckAt = now,
+            interval = if (active) SyncBackoffBaseMs else nextInterval(current.interval),
+        )
+    }
+
+    private fun markProjectActivated(worktree: String) {
+        workspaceDirectoriesForProject(worktree).forEach(::markDirectoryActivated)
+    }
+
+    private fun markDirectoryActivated(directory: String) {
+        val current = directoryPolicy[directory] ?: DirectoryPolicy()
+        directoryPolicy[directory] = current.copy(
+            interval = SyncBackoffBaseMs,
+            lastCheckAt = 0L,
+            checks = true,
+        )
+    }
+
+    private fun markActivated(sessionId: String) {
+        val now = System.currentTimeMillis()
+        val current = policy[sessionId] ?: SyncPolicy()
+        policy[sessionId] = current.copy(
+            interval = SyncBackoffBaseMs,
+            lastCheckAt = 0L,
+            activatedAt = now,
+        )
+        active.values
+            .firstOrNull { it.id == sessionId }
+            ?.let { markDirectoryActivated(it.directory) }
+    }
+
+    private fun resetProjectBackoff(worktree: String, sessions: List<SessionState>) {
+        val dirs = workspaceDirectoriesForProject(worktree)
+        dirs.forEach(::markDirectoryActivated)
+        val now = System.currentTimeMillis()
+        sessions
+            .filter { dirs.contains(workspaceId(it.directory)) }
+            .forEach {
+                val current = policy[it.id] ?: SyncPolicy(lastUpdatedAt = it.updatedAt)
+                policy[it.id] = current.copy(
+                    interval = SyncBackoffBaseMs,
+                    lastCheckAt = 0L,
+                    activatedAt = now,
+                )
+            }
+    }
+
+    private fun markSync(sessionId: String) {
+        val now = System.currentTimeMillis()
+        val current = policy[sessionId] ?: SyncPolicy()
+        policy[sessionId] = current.copy(
+            lastSyncAt = now,
+            interval = if (current.checks) SyncBackoffBaseMs else current.interval,
+        )
+    }
+
+    private fun syncToolState(sessionId: String, key: String) {
+        val now = System.currentTimeMillis()
+        val tool = synchronized(mapLock) {
+            part.entries
+                .asSequence()
+                .filter { it.key.startsWith("$key::") }
+                .flatMap { it.value.values.asSequence() }
+                .firstOrNull { it.type == "tool" && it.completedAt == null }
+        }
+        val current = policy[sessionId] ?: SyncPolicy()
+        if (tool == null) {
+            policy[sessionId] = current.copy(tool = null, toolAt = 0L)
+            return
+        }
+        val since = if (current.tool == tool.id) {
+            if (current.toolAt == 0L) now else current.toolAt
+        } else {
+            now
+        }
+        val status = if (now - since >= SyncToolStuckMs) {
+            "idle"
+        } else {
+            current.status
+        }
+        policy[sessionId] = current.copy(
+            tool = tool.id,
+            toolAt = since,
+            status = status,
+        )
+    }
+
+    private fun isRunning(sessionId: String, current: SyncPolicy): Boolean {
+        if (current.tool != null && current.toolAt > 0L) {
+            val now = System.currentTimeMillis()
+            return now - current.toolAt < SyncToolStuckMs
+        }
+        if (local.value.quickProcessing.contains(sessionId)) return true
+        if (current.status == "busy" || current.status == "retry") return true
+        return false
+    }
+
     private fun markSseApplied(type: String, sessionId: String?) {
+        if (sessionId != null) {
+            val now = System.currentTimeMillis()
+            val current = policy[sessionId] ?: SyncPolicy()
+            policy[sessionId] = current.copy(
+                lastSseAt = now,
+                interval = SyncBackoffBaseMs,
+                lastCheckAt = 0L,
+            )
+        }
         log.debug(LogTag, "sse apply type=$type session=$sessionId")
     }
 
@@ -1809,6 +2116,8 @@ class SessionService(
         sync.cancelAll()
         flush.values.forEach { it.cancel() }
         flush.clear()
+        policy.clear()
+        directoryPolicy.clear()
     }
 }
 
@@ -1929,9 +2238,12 @@ private const val StreamRestartDelayMs = 3000L
 private const val SyncDelayMs = 300L
 private const val SyncBurstDelayMs = 1200L
 private const val SyncFetchTimeoutMs = 15000L
+private const val SyncBackoffBaseMs = 15000L
+private const val SyncBackoffMaxMs = 30 * 60 * 1000L
+private const val SyncSseQuietWindowMs = 20000L
+private const val SyncToolStuckMs = 5 * 60 * 1000L
 private const val OverlayFlushDelayMs = 500L
 private const val MessageSyncLimit = 400
-private const val ReconcileIntervalMs = 10000L
 private const val ReconcileKeepPasses = 1
 private const val OptimisticKeepPasses = 1
 private const val LogTag = "SessionService"

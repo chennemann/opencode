@@ -180,6 +180,18 @@ class ServerRepository(
         }
     }
 
+    override suspend fun updatedAt(sessionId: String, directory: String): Long? {
+        return withContext(dispatchers.io) {
+            service.sessionUpdatedAt(url.value, sessionId, directory)
+        }
+    }
+
+    override suspend fun status(directory: String): Map<String, String> {
+        return withContext(dispatchers.io) {
+            service.sessionStatus(url.value, directory)
+        }
+    }
+
     override suspend fun streamEvents(lastEventId: String?, onRawEvent: suspend (String) -> Unit, onEvent: suspend (SessionStreamEvent) -> Unit): String? {
         return withContext(dispatchers.io) {
             service.streamEvents(url.value, lastEventId, onRawEvent) {
