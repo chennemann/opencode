@@ -33,6 +33,23 @@ CREATE TABLE message_cache (
   PRIMARY KEY (server_url, session_id, message_id)
 );
 
+CREATE TABLE app_log (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  created_at INTEGER NOT NULL,
+  level TEXT NOT NULL,
+  logical_unit TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  event TEXT NOT NULL,
+  message TEXT NOT NULL,
+  context_json TEXT NOT NULL,
+  throwable TEXT,
+  redacted INTEGER NOT NULL
+);
+
+CREATE INDEX app_log_created_at_idx ON app_log(created_at DESC, id DESC);
+CREATE INDEX app_log_logical_unit_idx ON app_log(logical_unit, created_at DESC, id DESC);
+CREATE INDEX app_log_level_idx ON app_log(level, created_at DESC, id DESC);
+
 selectSetting:
 SELECT value FROM settings WHERE key = ?;
 
@@ -145,3 +162,51 @@ WHERE server_url = ? AND session_id = ? AND message_id = ?;
 deleteMessageCacheSession:
 DELETE FROM message_cache
 WHERE server_url = ? AND session_id = ?;
+
+insertAppLog:
+INSERT INTO app_log(
+  created_at,
+  level,
+  logical_unit,
+  tag,
+  event,
+  message,
+  context_json,
+  throwable,
+  redacted
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+listAppLog:
+SELECT id, created_at, level, logical_unit, tag, event, message, context_json, throwable, redacted
+FROM app_log
+WHERE (?1 IS NULL OR logical_unit = ?1)
+  AND (?2 IS NULL OR level = ?2)
+  AND (
+    ?3 IS NULL
+    OR message LIKE '%' || ?3 || '%'
+    OR event LIKE '%' || ?3 || '%'
+    OR tag LIKE '%' || ?3 || '%'
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT ?4;
+
+countAppLog:
+SELECT count(*)
+FROM app_log;
+
+deleteAppLogBefore:
+DELETE FROM app_log
+WHERE created_at < ?;
+
+deleteAppLogOverflow:
+DELETE FROM app_log
+WHERE id IN (
+  SELECT id
+  FROM app_log
+  ORDER BY created_at DESC, id DESC
+  LIMIT -1 OFFSET ?
+);
+
+deleteAppLogAll:
+DELETE FROM app_log;

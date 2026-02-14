@@ -1,6 +1,5 @@
 package de.chennemann.opencode.mobile.data
 
-import android.util.Log
 import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.session.CommandGateway
@@ -14,6 +13,8 @@ import de.chennemann.opencode.mobile.domain.session.SessionProject
 import de.chennemann.opencode.mobile.domain.session.SessionStreamEvent
 import de.chennemann.opencode.mobile.domain.session.SessionSummary
 import de.chennemann.opencode.mobile.domain.session.ConnectionState
+import de.chennemann.opencode.mobile.domain.session.LogGateway
+import de.chennemann.opencode.mobile.domain.session.LogUnit
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,6 +31,7 @@ class ServerRepository(
     private val service: ServerGateway,
     private val network: ConnectivityGateway,
     private val dispatchers: DispatcherProvider,
+    private val log: LogGateway,
 ) : ConnectionGateway, ProjectGateway, MessageGateway, StreamGateway, CommandGateway {
     private val state = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     private val url = MutableStateFlow(DefaultUrl)
@@ -73,7 +75,14 @@ class ServerRepository(
             }
         }
         result.exceptionOrNull()?.let {
-            Log.e("ServerRepository", "health failed for $endpoint", it)
+            log.error(
+                unit = LogUnit.network,
+                tag = LogTag,
+                event = "health_failed",
+                message = "Health check failed",
+                context = mapOf("endpoint" to endpoint),
+                error = it,
+            )
         }
         state.value = withContext(dispatchers.default) {
             result.fold(
@@ -250,6 +259,8 @@ class ServerRepository(
         }
     }
 }
+
+private const val LogTag = "ServerRepository"
 
 private fun normalizeUrl(input: String): String? {
     val trimmed = input.trim()

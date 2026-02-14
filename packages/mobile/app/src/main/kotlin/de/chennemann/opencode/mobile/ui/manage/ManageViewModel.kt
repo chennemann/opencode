@@ -166,6 +166,10 @@ class ManageViewModel(
                 navFlow.tryEmit(NavEvent.ToConversation)
             }
 
+            is ManageEvent.OpenLogsTapped -> {
+                navFlow.tryEmit(NavEvent.ToLogs)
+            }
+
             is ManageEvent.BackTapped -> {
                 navFlow.tryEmit(NavEvent.Back)
             }

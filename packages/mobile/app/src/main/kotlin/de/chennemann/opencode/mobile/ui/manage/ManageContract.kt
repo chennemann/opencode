@@ -63,5 +63,7 @@ sealed interface ManageEvent {
 
     data class OpenSessionTapped(val session: SessionState) : ManageEvent
 
+    data object OpenLogsTapped : ManageEvent
+
     data object BackTapped : ManageEvent
 }

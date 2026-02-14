@@ -8,3 +8,6 @@ data object ConversationRoute : NavKey
 
 @Serializable
 data object ManageProjectsRoute : NavKey
+
+@Serializable
+data object LogsRoute : NavKey
