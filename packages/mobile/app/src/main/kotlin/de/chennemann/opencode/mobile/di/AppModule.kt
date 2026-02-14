@@ -63,7 +63,7 @@ val appModule = module {
         )
     }
     single<MdnsGateway> { MdnsService(get()) }
-    single { NetworkService(get()) }
+    single { NetworkService(get<android.content.Context>()) }
     single<DispatcherProvider> { DefaultDispatcherProvider() }
     single<CoroutineRolloutFlag> { DefaultCoroutineRolloutFlag() }
     single<CoroutineScope>(named(AppScopeName)) {

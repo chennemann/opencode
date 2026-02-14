@@ -158,7 +158,10 @@ class SessionServiceTest {
         assertEquals("hello world", optimistic.first().text)
 
         gate.complete(Unit)
-        await { fx.service.state.value.message == "send failed" }
+        await {
+            fx.service.state.value.message == "send failed" &&
+                fx.service.state.value.focusedMessages.none { it.id.startsWith("local-") }
+        }
 
         assertTrue(fx.service.state.value.focusedMessages.none { it.id.startsWith("local-") })
         assertEquals("send failed", fx.service.state.value.message)

@@ -9,42 +9,87 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class NetworkService(context: Context) : ConnectivityGateway {
-    private val manager = context.getSystemService(ConnectivityManager::class.java)
-    private val connected = MutableStateFlow(isConnected())
+class NetworkService internal constructor(
+    private val source: ConnectivitySource,
+) : ConnectivityGateway {
+    constructor(context: Context) : this(AndroidConnectivitySource(context))
+
+    private val connected = MutableStateFlow(source.isConnected())
     private val change = MutableStateFlow(0L)
 
     override val online: StateFlow<Boolean> = connected.asStateFlow()
     override val changed: StateFlow<Long> = change.asStateFlow()
 
-    private val callback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            mark()
-        }
-
-        override fun onLost(network: Network) {
-            mark()
-        }
-
-        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
-            mark()
-        }
-
-        override fun onUnavailable() {
-            mark()
-        }
-    }
-
     init {
-        manager.registerDefaultNetworkCallback(callback)
+        source.register(
+            object : ConnectivitySource.Callback {
+                override fun onAvailable() {
+                    mark()
+                }
+
+                override fun onLost() {
+                    mark()
+                }
+
+                override fun onCapabilitiesChanged() {
+                    mark()
+                }
+
+                override fun onUnavailable() {
+                    mark()
+                }
+            }
+        )
     }
 
     private fun mark() {
-        connected.value = isConnected()
+        connected.value = source.isConnected()
         change.value = change.value + 1
     }
+}
 
-    private fun isConnected(): Boolean {
+internal interface ConnectivitySource {
+    fun register(callback: Callback)
+
+    fun isConnected(): Boolean
+
+    interface Callback {
+        fun onAvailable()
+
+        fun onLost()
+
+        fun onCapabilitiesChanged()
+
+        fun onUnavailable()
+    }
+}
+
+private class AndroidConnectivitySource(context: Context) : ConnectivitySource {
+    private val manager = context.getSystemService(ConnectivityManager::class.java)
+
+    override fun register(callback: ConnectivitySource.Callback) {
+        manager.registerDefaultNetworkCallback(
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    callback.onAvailable()
+                }
+
+                override fun onLost(network: Network) {
+                    callback.onLost()
+                }
+
+                override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                    callback.onCapabilitiesChanged()
+                }
+
+                override fun onUnavailable() {
+                    callback.onUnavailable()
+                }
+            }
+        )
+    }
+
+    override fun isConnected(): Boolean {
         val network = manager.activeNetwork ?: return false
         val capabilities = manager.getNetworkCapabilities(network) ?: return false
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
