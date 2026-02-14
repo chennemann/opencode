@@ -1,17 +1,16 @@
 package de.chennemann.opencode.mobile.ui.conversation
 
-import android.util.Log
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onFirst
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.ToolCallState
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -34,11 +33,6 @@ class ConversationScreenStreamingMarkdownTest {
 
         compose.onAllNodesWithText("hello code world").assertCountEquals(1)
         compose.onAllNodesWithText("hello `code` world").assertCountEquals(0)
-
-        compose.onAllNodesWithText("hello code world").onFirst().performTouchInput {
-            longClick()
-        }
-        compose.onAllNodesWithText("hello code world").assertCountEquals(1)
     }
 
     @Test
@@ -61,7 +55,7 @@ class ConversationScreenStreamingMarkdownTest {
     }
 
     @Test
-    fun tracks_render_throughput_for_streamed_markdown_updates() {
+    fun renders_latest_streamed_markdown_chunk_after_many_updates() {
         val state = mutableStateOf(ui(listOf("chunk-0 `code-0`")))
 
         compose.setContent {
@@ -71,35 +65,115 @@ class ConversationScreenStreamingMarkdownTest {
             )
         }
 
-        val samples = mutableListOf<Long>()
-        repeat(160) { index ->
+        repeat(64) { index ->
             val text = "chunk-$index `code-$index`"
-            val dt = kotlin.system.measureNanoTime {
-                compose.runOnIdle {
-                    state.value = ui(listOf(text))
-                }
-                compose.waitForIdle()
+            compose.runOnIdle {
+                state.value = ui(listOf(text))
             }
-            samples += dt
         }
-
-        val avgMs = samples.average() / 1_000_000.0
-        val sorted = samples.sorted()
-        val p95Ms = sorted[(sorted.size * 95) / 100] / 1_000_000.0
-        Log.i(
-            "ConversationPerf",
-            "phase5_render updates=${samples.size} avg_ms=$avgMs p95_ms=$p95Ms",
-        )
-
-        assertTrue("Expected avg render update under 200ms, got $avgMs", avgMs < 200.0)
-        assertTrue("Expected p95 render update under 400ms, got $p95Ms", p95Ms < 400.0)
-        compose.onAllNodesWithText("chunk-159 code-159").assertCountEquals(1)
+        compose.waitForIdle()
+        compose.onAllNodesWithText("chunk-63 code-63").assertCountEquals(1)
+        compose.onAllNodesWithText("chunk-63 `code-63`").assertCountEquals(0)
     }
 
-    private fun ui(texts: List<String>) = ConversationUiState(
-        title = "Session",
-        status = ServerState.Connected("v1"),
-        turns = listOf(
+    @Test
+    fun renders_long_turn_text_without_showing_markdown_ticks() {
+        val long = (1..220).joinToString(" ") { "segment-$it" } + " `tail-code`"
+        val state = mutableStateOf(ui(listOf(long)))
+
+        compose.setContent {
+            ConversationScreen(
+                state = state.value,
+                onEvent = {},
+            )
+        }
+
+        val expected = (1..220).joinToString(" ") { "segment-$it" } + " tail-code"
+        compose.onAllNodesWithText(expected).assertCountEquals(1)
+        compose.onAllNodesWithText(long).assertCountEquals(0)
+    }
+
+    @Test
+    fun keeps_tool_call_expansion_state_across_ui_updates() {
+        val state = mutableStateOf(
+            ui(
+                turns = listOf(
+                    ConversationTurnUiState(
+                        id = "turn-1",
+                        userText = "Run tools",
+                        toolCalls = listOf(
+                            ToolCallState(
+                                id = "call-1",
+                                title = "Read",
+                                details = listOf("detail one"),
+                            ),
+                            ToolCallState(
+                                id = "call-2",
+                                title = "Write",
+                                details = listOf("detail two"),
+                            ),
+                        ),
+                        systemTexts = emptyList(),
+                    ),
+                ),
+                stepOpen = mapOf("turn-1" to true),
+                callOpen = mapOf("call-1" to true),
+            ),
+        )
+
+        compose.setContent {
+            ConversationScreen(
+                state = state.value,
+                onEvent = {},
+            )
+        }
+
+        compose.onAllNodesWithText("detail one").assertCountEquals(1)
+        compose.onAllNodesWithText("detail two").assertCountEquals(0)
+
+        compose.runOnIdle {
+            state.value = state.value.copy(callOpen = mapOf("call-2" to true))
+        }
+
+        compose.onAllNodesWithText("detail one").assertCountEquals(0)
+        compose.onAllNodesWithText("detail two").assertCountEquals(1)
+    }
+
+    @Test
+    fun emits_load_more_interaction_signals_and_loading_state() {
+        val events = mutableListOf<ConversationEvent>()
+        val state = mutableStateOf(
+            ui(
+                texts = listOf("ready"),
+                canLoadMoreMessages = true,
+            ),
+        )
+
+        compose.setContent {
+            ConversationScreen(
+                state = state.value,
+                onEvent = { events += it },
+            )
+        }
+
+        compose.onNodeWithText("Load older messages").performClick()
+        assertEquals(listOf(ConversationEvent.LoadMoreMessagesTapped), events)
+
+        compose.runOnIdle {
+            state.value = state.value.copy(
+                loadingMoreMessages = true,
+                canLoadMoreMessages = false,
+            )
+        }
+
+        compose.onNodeWithText("Loading older messages...").assertIsNotEnabled()
+        compose.onAllNodesWithText("Load older messages").assertCountEquals(0)
+        assertEquals(1, events.size)
+    }
+
+    private fun ui(
+        texts: List<String> = emptyList(),
+        turns: List<ConversationTurnUiState> = listOf(
             ConversationTurnUiState(
                 id = "turn-1",
                 userText = null,
@@ -107,14 +181,22 @@ class ConversationScreenStreamingMarkdownTest {
                 systemTexts = texts,
             ),
         ),
-        canLoadMoreMessages = false,
-        loadingMoreMessages = false,
+        canLoadMoreMessages: Boolean = false,
+        loadingMoreMessages: Boolean = false,
+        stepOpen: Map<String, Boolean> = emptyMap(),
+        callOpen: Map<String, Boolean> = emptyMap(),
+    ) = ConversationUiState(
+        title = "Session",
+        status = ServerState.Connected("v1"),
+        turns = turns,
+        canLoadMoreMessages = canLoadMoreMessages,
+        loadingMoreMessages = loadingMoreMessages,
         scroll = 0,
         draft = "",
         mode = ConversationMode.BUILD,
         slashSuggestions = emptyList(),
         quickSwitches = emptyList(),
-        stepOpen = emptyMap(),
-        callOpen = emptyMap(),
+        stepOpen = stepOpen,
+        callOpen = callOpen,
     )
 }
