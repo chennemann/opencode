@@ -278,6 +278,8 @@ private class StubServer : ServerGateway {
 
     override suspend fun archiveSession(baseUrl: String, sessionId: String, directory: String) = Unit
 
+    override suspend fun renameSession(baseUrl: String, sessionId: String, directory: String, title: String) = Unit
+
     override suspend fun createSession(baseUrl: String, worktree: String, title: String): SessionInfo {
         return SessionInfo(id = "s1", title = title, version = "1", directory = worktree)
     }

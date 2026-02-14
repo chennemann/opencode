@@ -70,9 +70,11 @@ import de.chennemann.opencode.mobile.domain.session.CommandState
 import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.icons.Icons
 import de.chennemann.opencode.mobile.icons.Add
+import de.chennemann.opencode.mobile.icons.Archive
 import de.chennemann.opencode.mobile.icons.CircleSlash
 import de.chennemann.opencode.mobile.icons.Pin
 import de.chennemann.opencode.mobile.icons.PinOutline
+import de.chennemann.opencode.mobile.icons.Rename
 import de.chennemann.opencode.mobile.icons.Send
 import de.chennemann.opencode.mobile.ui.conversation.QuickSwitchMenuState
 import de.chennemann.opencode.mobile.ui.conversation.QuickSwitchState
@@ -118,6 +120,7 @@ fun MessageComposer(
     onQuickSwitchSession: (SessionState) -> Unit,
     onQuickSwitchPin: (SessionState, Boolean) -> Unit,
     onQuickSwitchArchive: (SessionState) -> Unit,
+    onQuickSwitchRename: (SessionState, String) -> Unit,
     onQuickSwitchLoadMore: () -> Unit,
     onQuickSwitchCreate: () -> Unit,
 ) {
@@ -375,6 +378,7 @@ fun MessageComposer(
             onQuickSwitchSession = onQuickSwitchSession,
             onQuickSwitchPin = onQuickSwitchPin,
             onQuickSwitchArchive = onQuickSwitchArchive,
+            onQuickSwitchRename = onQuickSwitchRename,
             onQuickSwitchLoadMore = onQuickSwitchLoadMore,
             onQuickSwitchCreate = onQuickSwitchCreate,
         )
@@ -389,11 +393,14 @@ private fun QuickSwitchPanel(
     onQuickSwitchSession: (SessionState) -> Unit,
     onQuickSwitchPin: (SessionState, Boolean) -> Unit,
     onQuickSwitchArchive: (SessionState) -> Unit,
+    onQuickSwitchRename: (SessionState, String) -> Unit,
     onQuickSwitchLoadMore: () -> Unit,
     onQuickSwitchCreate: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    var renameId by remember { mutableStateOf<String?>(null) }
+    var renameDraft by remember { mutableStateOf("") }
     val rows = menu.sessions
         .sortedWith(
             compareByDescending<SessionState> { menu.pinned.contains(it.id) }
@@ -483,45 +490,102 @@ private fun QuickSwitchPanel(
                 items(rows, key = { it.id }) { session ->
                     val pinned = menu.pinned.contains(session.id)
                     val systemPinned = menu.systemPinned.contains(session.id)
-                    Row(
+                    val renaming = renameId == session.id
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onQuickSwitchSession(session) }
                             .padding(vertical = 2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = session.title,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = quickSwitchSessionSubtitle(session, folderName(menu.project), menu.worktree),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        TextButton(onClick = { onQuickSwitchArchive(session) }) {
-                            Text("Archive")
-                        }
-                        IconButton(onClick = { onQuickSwitchPin(session, systemPinned) }) {
-                            Icon(
-                                imageVector = if (pinned) Icons.Pin else Icons.PinOutline,
-                                contentDescription = if (pinned) {
-                                    "Remove from quick switch"
-                                } else {
-                                    "Pin in quick switch"
+                        Row(
+                            modifier = if (renaming) {
+                                Modifier.fillMaxWidth()
+                            } else {
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onQuickSwitchSession(session) }
+                            },
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = session.title,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = quickSwitchSessionSubtitle(session, folderName(menu.project), menu.worktree),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    renameId = session.id
+                                    renameDraft = session.title
                                 },
-                                tint = if (pinned) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rename,
+                                    contentDescription = "Rename session",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            IconButton(onClick = { onQuickSwitchArchive(session) }) {
+                                Icon(
+                                    imageVector = Icons.Archive,
+                                    contentDescription = "Archive session",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            IconButton(onClick = { onQuickSwitchPin(session, systemPinned) }) {
+                                Icon(
+                                    imageVector = if (pinned) Icons.Pin else Icons.PinOutline,
+                                    contentDescription = if (pinned) {
+                                        "Remove from quick switch"
+                                    } else {
+                                        "Pin in quick switch"
+                                    },
+                                    tint = if (pinned) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                        }
+                        if (renaming) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                TextField(
+                                    value = renameDraft,
+                                    onValueChange = { renameDraft = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                ) {
+                                    TextButton(onClick = { renameId = null }) {
+                                        Text("Cancel")
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            onQuickSwitchRename(session, renameDraft)
+                                            renameId = null
+                                        },
+                                        enabled = renameDraft.trim().isNotBlank(),
+                                    ) {
+                                        Text("Save")
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -661,6 +725,7 @@ private fun MessageComposerPreview() {
             onQuickSwitchSession = {},
             onQuickSwitchPin = { _, _ -> },
             onQuickSwitchArchive = {},
+            onQuickSwitchRename = { _, _ -> },
             onQuickSwitchLoadMore = {},
             onQuickSwitchCreate = {},
         )

@@ -31,6 +31,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -79,6 +81,7 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
     var viewportBottom by remember { mutableIntStateOf(0) }
     val tools = remember { mutableStateMapOf<String, ToolPosition>() }
     val offset = if (state.canLoadMoreMessages || state.loadingMoreMessages) 1 else 0
+    val snack = remember { SnackbarHostState() }
     val turns = state.turns
     val current = {
         (list.firstVisibleItemIndex - offset)
@@ -111,6 +114,11 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
         follow = true
     }
 
+    LaunchedEffect(state.message) {
+        val message = state.message ?: return@LaunchedEffect
+        snack.showSnackbar(message)
+    }
+
     LaunchedEffect(list, turns.size, offset) {
         snapshotFlow { isAtEnd(list, turns.size + offset) }
             .distinctUntilChanged()
@@ -141,138 +149,150 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
         ensureEndVisible(list, count - 1)
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        ConversationHeader(
-            title = state.title,
-            onOpenWirelessDebug = { openWirelessDebugSettings(context) },
-            onOpenManage = { onEvent(ConversationEvent.OpenManageTapped) },
-        )
-
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .imePadding(),
+            modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Box(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .onGloballyPositioned {
-                            viewportTop = it.positionInRoot().y.roundToInt()
-                            viewportBottom = (it.positionInRoot().y + it.size.height).roundToInt()
-                        },
-                    state = list,
-                ) {
-                    if (state.canLoadMoreMessages || state.loadingMoreMessages) {
-                        item("load-more") {
-                            Button(
-                                onClick = { onEvent(ConversationEvent.LoadMoreMessagesTapped) },
-                                enabled = !state.loadingMoreMessages,
-                            ) {
-                                val label = if (state.loadingMoreMessages) {
-                                    "Loading older messages..."
-                                } else {
-                                    "Load older messages"
+            ConversationHeader(
+                title = state.title,
+                onOpenWirelessDebug = { openWirelessDebugSettings(context) },
+                onOpenManage = { onEvent(ConversationEvent.OpenManageTapped) },
+            )
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .imePadding(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Box(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .onGloballyPositioned {
+                                viewportTop = it.positionInRoot().y.roundToInt()
+                                viewportBottom = (it.positionInRoot().y + it.size.height).roundToInt()
+                            },
+                        state = list,
+                    ) {
+                        if (state.canLoadMoreMessages || state.loadingMoreMessages) {
+                            item("load-more") {
+                                Button(
+                                    onClick = { onEvent(ConversationEvent.LoadMoreMessagesTapped) },
+                                    enabled = !state.loadingMoreMessages,
+                                ) {
+                                    val label = if (state.loadingMoreMessages) {
+                                        "Loading older messages..."
+                                    } else {
+                                        "Load older messages"
+                                    }
+                                    Text(label)
                                 }
-                                Text(label)
                             }
                         }
+                        itemsIndexed(turns, key = { _, it -> it.id }) { index, turn ->
+                            ConversationTurnItem(
+                                turn = turn,
+                                active = index == turns.lastIndex,
+                                stepOpen = state.stepOpen[turn.id] == true,
+                                callOpen = state.callOpen,
+                                onToggleSteps = { onEvent(ConversationEvent.ToggleSteps(turn.id)) },
+                                onToggleToolCall = { onEvent(ConversationEvent.ToggleToolCall(it)) },
+                                onEnsureToolVisible = { toolId, alignTop, topCompensation ->
+                                    follow = false
+                                    scope.launch {
+                                        ensureToolVisible(
+                                            list = list,
+                                            toolId = toolId,
+                                            tools = tools,
+                                            viewportTop = viewportTop,
+                                            viewportBottom = viewportBottom,
+                                            alignTop = alignTop,
+                                            topCompensation = topCompensation,
+                                        )
+                                    }
+                                },
+                                onToolLayout = { toolId, top, bottom ->
+                                    tools[toolId] = ToolPosition(top = top, bottom = bottom)
+                                },
+                            )
+                        }
+                        item("bottom-spacer") {
+                            Spacer(modifier = Modifier.height(24.dp))
+                        }
                     }
-                    itemsIndexed(turns, key = { _, it -> it.id }) { index, turn ->
-                        ConversationTurnItem(
-                            turn = turn,
-                            active = index == turns.lastIndex,
-                            stepOpen = state.stepOpen[turn.id] == true,
-                            callOpen = state.callOpen,
-                            onToggleSteps = { onEvent(ConversationEvent.ToggleSteps(turn.id)) },
-                            onToggleToolCall = { onEvent(ConversationEvent.ToggleToolCall(it)) },
-                            onEnsureToolVisible = { toolId, alignTop, topCompensation ->
-                                follow = false
-                                scope.launch {
-                                    ensureToolVisible(
-                                        list = list,
-                                        toolId = toolId,
-                                        tools = tools,
-                                        viewportTop = viewportTop,
-                                        viewportBottom = viewportBottom,
-                                        alignTop = alignTop,
-                                        topCompensation = topCompensation,
-                                    )
+
+                    NavigationButtons(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(bottom = 8.dp),
+                        following = follow,
+                        onPrevious = {
+                            follow = false
+                            val target = previous() ?: return@NavigationButtons
+                            scope.launch {
+                                list.scrollToItem(target + offset)
+                            }
+                        },
+                        onNext = {
+                            scope.launch {
+                                if (!follow) {
+                                    val target = nextUser()
+                                    if (target != null) {
+                                        list.animateScrollToItem(target + offset)
+                                        if (isAtEnd(list, turns.size + offset)) {
+                                            follow = true
+                                        }
+                                        return@launch
+                                    }
                                 }
-                            },
-                            onToolLayout = { toolId, top, bottom ->
-                                tools[toolId] = ToolPosition(top = top, bottom = bottom)
-                            },
-                        )
-                    }
-                    item("bottom-spacer") {
-                        Spacer(modifier = Modifier.height(24.dp))
-                    }
+                                follow = true
+                                val count = turns.size + offset
+                                if (count <= 0) return@launch
+                                ensureEndVisible(list, count - 1)
+                            }
+                        },
+                    )
                 }
 
-                NavigationButtons(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(bottom = 8.dp),
-                    following = follow,
-                    onPrevious = {
-                        follow = false
-                        val target = previous() ?: return@NavigationButtons
-                        scope.launch {
-                            list.scrollToItem(target + offset)
-                        }
+                MessageComposer(
+                    draft = state.draft,
+                    mode = state.mode,
+                    connected = state.status is ServerState.Connected,
+                    suggestions = state.slashSuggestions,
+                    quickSwitches = state.quickSwitches,
+                    quickSwitchMenu = state.quickSwitchMenu,
+                    onDraftChange = { onEvent(ConversationEvent.DraftChanged(it)) },
+                    onModeChange = { onEvent(ConversationEvent.ModeChanged(it)) },
+                    onSend = { onEvent(ConversationEvent.SendTapped) },
+                    onReload = { onEvent(ConversationEvent.ReloadTapped) },
+                    onCommandSelect = { onEvent(ConversationEvent.SlashCommandSelected(it.name)) },
+                    onQuickSwitch = { onEvent(ConversationEvent.QuickSwitchTapped(it)) },
+                    onQuickSwitchLongPress = { onEvent(ConversationEvent.QuickSwitchLongPressed(it)) },
+                    onQuickSwitchDismiss = { onEvent(ConversationEvent.QuickSwitchMenuDismissed) },
+                    onQuickSwitchSession = { onEvent(ConversationEvent.QuickSwitchMenuSessionTapped(it)) },
+                    onQuickSwitchPin = { session, system ->
+                        onEvent(ConversationEvent.QuickSwitchMenuPinTapped(session, system))
                     },
-                    onNext = {
-                        scope.launch {
-                            if (!follow) {
-                                val target = nextUser()
-                                if (target != null) {
-                                    list.animateScrollToItem(target + offset)
-                                    if (isAtEnd(list, turns.size + offset)) {
-                                        follow = true
-                                    }
-                                    return@launch
-                                }
-                            }
-                            follow = true
-                            val count = turns.size + offset
-                            if (count <= 0) return@launch
-                            ensureEndVisible(list, count - 1)
-                        }
+                    onQuickSwitchArchive = { onEvent(ConversationEvent.QuickSwitchMenuArchiveTapped(it)) },
+                    onQuickSwitchRename = { session, title ->
+                        onEvent(ConversationEvent.QuickSwitchMenuRenameSubmitted(session, title))
                     },
+                    onQuickSwitchLoadMore = { onEvent(ConversationEvent.QuickSwitchMenuLoadMoreTapped) },
+                    onQuickSwitchCreate = { onEvent(ConversationEvent.QuickSwitchMenuCreateTapped) },
                 )
             }
-
-            MessageComposer(
-                draft = state.draft,
-                mode = state.mode,
-                connected = state.status is ServerState.Connected,
-                suggestions = state.slashSuggestions,
-                quickSwitches = state.quickSwitches,
-                quickSwitchMenu = state.quickSwitchMenu,
-                onDraftChange = { onEvent(ConversationEvent.DraftChanged(it)) },
-                onModeChange = { onEvent(ConversationEvent.ModeChanged(it)) },
-                onSend = { onEvent(ConversationEvent.SendTapped) },
-                onReload = { onEvent(ConversationEvent.ReloadTapped) },
-                onCommandSelect = { onEvent(ConversationEvent.SlashCommandSelected(it.name)) },
-                onQuickSwitch = { onEvent(ConversationEvent.QuickSwitchTapped(it)) },
-                onQuickSwitchLongPress = { onEvent(ConversationEvent.QuickSwitchLongPressed(it)) },
-                onQuickSwitchDismiss = { onEvent(ConversationEvent.QuickSwitchMenuDismissed) },
-                onQuickSwitchSession = { onEvent(ConversationEvent.QuickSwitchMenuSessionTapped(it)) },
-                onQuickSwitchPin = { session, system ->
-                    onEvent(ConversationEvent.QuickSwitchMenuPinTapped(session, system))
-                },
-                onQuickSwitchArchive = { onEvent(ConversationEvent.QuickSwitchMenuArchiveTapped(it)) },
-                onQuickSwitchLoadMore = { onEvent(ConversationEvent.QuickSwitchMenuLoadMoreTapped) },
-                onQuickSwitchCreate = { onEvent(ConversationEvent.QuickSwitchMenuCreateTapped) },
-            )
         }
+        SnackbarHost(
+            hostState = snack,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(16.dp)
+                .imePadding(),
+        )
     }
 }
 

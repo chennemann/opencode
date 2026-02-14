@@ -7,5 +7,7 @@ interface ProjectGateway {
 
     suspend fun archiveSession(sessionId: String, directory: String)
 
+    suspend fun renameSession(sessionId: String, directory: String, title: String)
+
     suspend fun createSession(worktree: String, title: String): SessionSummary
 }

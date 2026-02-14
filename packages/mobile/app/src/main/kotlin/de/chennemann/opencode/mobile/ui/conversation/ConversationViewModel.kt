@@ -31,6 +31,7 @@ class ConversationViewModel(
     private data class GlobalRenderState(
         val title: String,
         val status: ServerState,
+        val message: String?,
         val focusedSession: SessionState?,
         val turns: List<ConversationTurnUiState>,
         val commands: List<CommandState>,
@@ -78,6 +79,7 @@ class ConversationViewModel(
             GlobalRenderState(
                 title = it.focusedSession?.title ?: "No session selected",
                 status = it.status,
+                message = it.message,
                 focusedSession = it.focusedSession,
                 turns = mapper.map(it.focusedMessages),
                 commands = mergeCommands(it.commands),
@@ -106,6 +108,7 @@ class ConversationViewModel(
         ConversationUiState(
             title = global.title,
             status = global.status,
+            message = global.message,
             turns = global.turns,
             canLoadMoreMessages = global.canLoadMoreMessages,
             loadingMoreMessages = global.loadingMoreMessages,
@@ -131,6 +134,7 @@ class ConversationViewModel(
             initialValue = ConversationUiState(
                 title = "No session selected",
                 status = service.state.value.status,
+                message = service.state.value.message,
                 turns = emptyList(),
                 canLoadMoreMessages = false,
                 loadingMoreMessages = false,
@@ -219,6 +223,10 @@ class ConversationViewModel(
 
             is ConversationEvent.QuickSwitchMenuArchiveTapped -> {
                 quickSwitchArchive(event.session)
+            }
+
+            is ConversationEvent.QuickSwitchMenuRenameSubmitted -> {
+                quickSwitchRename(event.session, event.title)
             }
 
             is ConversationEvent.QuickSwitchMenuLoadMoreTapped -> {
@@ -360,6 +368,28 @@ class ConversationViewModel(
             )
         }
         service.archiveSession(session)
+    }
+
+    private fun quickSwitchRename(session: SessionState, title: String) {
+        val next = title.trim()
+        if (next.isBlank()) return
+        val menu = local.value.quickSwitchMenu ?: return
+        local.update {
+            val current = it.quickSwitchMenu ?: return@update it
+            if (current.key != menu.key) return@update it
+            it.copy(
+                quickSwitchMenu = current.copy(
+                    sessions = current.sessions.map {
+                        if (it.id == session.id) {
+                            it.copy(title = next)
+                        } else {
+                            it
+                        }
+                    },
+                ),
+            )
+        }
+        service.renameSession(session, next)
     }
 
     private fun quickSwitchLoadMore() {

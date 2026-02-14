@@ -32,6 +32,8 @@ interface SessionServiceApi {
 
     fun archiveSession(session: SessionState)
 
+    fun renameSession(session: SessionState, title: String)
+
     suspend fun cachedSessionsForProject(worktree: String, limit: Int? = null): List<SessionState>
 
     suspend fun sessionsForProject(worktree: String, limit: Int? = null): List<SessionState>

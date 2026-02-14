@@ -337,6 +337,8 @@ private class StubSessionService : SessionServiceApi {
 
     override fun archiveSession(session: SessionState) = Unit
 
+    override fun renameSession(session: SessionState, title: String) = Unit
+
     override suspend fun cachedSessionsForProject(worktree: String, limit: Int?): List<SessionState> {
         return emptyList()
     }

@@ -18,6 +18,7 @@ data class ConversationTurnUiState(
 data class ConversationUiState(
     val title: String,
     val status: ServerState,
+    val message: String?,
     val turns: List<ConversationTurnUiState>,
     val canLoadMoreMessages: Boolean,
     val loadingMoreMessages: Boolean,
@@ -82,6 +83,8 @@ sealed interface ConversationEvent {
     data class QuickSwitchMenuPinTapped(val session: SessionState, val systemPinned: Boolean) : ConversationEvent
 
     data class QuickSwitchMenuArchiveTapped(val session: SessionState) : ConversationEvent
+
+    data class QuickSwitchMenuRenameSubmitted(val session: SessionState, val title: String) : ConversationEvent
 
     data object QuickSwitchMenuLoadMoreTapped : ConversationEvent
 

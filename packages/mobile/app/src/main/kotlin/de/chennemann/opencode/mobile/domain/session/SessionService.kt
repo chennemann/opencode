@@ -611,6 +611,33 @@ class SessionService(
         }
     }
 
+    override fun renameSession(session: SessionState, title: String) {
+        mutate {
+            val id = session.id.trim()
+            val next = title.trim()
+            if (id.isBlank() || next.isBlank()) return@mutate
+            val current = sessionById(id) ?: session
+            val previous = current.title
+            if (previous == next) return@mutate
+            applySessionRename(id, next)
+            persistSession(current.copy(title = next))
+            val directory = workspaceId(session.directory)
+            val worktree = projectForDirectory(directory) ?: directory
+            val scope = scope ?: return@mutate
+            scope.launch(ioLane) {
+                val result = runCatching { proj.renameSession(id, directory, next) }
+                result.onFailure {
+                    mutate {
+                        applySessionRename(id, previous)
+                        persistSession(current.copy(title = previous))
+                        local.value = local.value.copy(message = it.message ?: "Failed to rename session")
+                        loadSessions(worktree)
+                    }
+                }
+            }
+        }
+    }
+
     fun focusSession(sessionId: String) {
         mutate {
             val entry = active.entries.find { it.value.id == sessionId } ?: return@mutate
@@ -1487,6 +1514,55 @@ class SessionService(
             return
         }
         local.value = local.value.copy(activeSessions = active.values.sortedByDescending { it.id })
+    }
+
+    private fun sessionById(sessionId: String): SessionState? {
+        return local.value.focusedSession?.takeIf { it.id == sessionId }
+            ?: local.value.sessions.firstOrNull { it.id == sessionId }
+            ?: active.values.firstOrNull { it.id == sessionId }
+    }
+
+    private fun persistSession(session: SessionState) {
+        val scope = scope ?: return
+        val server = serverForCache()
+        val project = projectForDirectory(session.directory)
+        scope.launch(ioLane) {
+            cache.upsertSession(server, project, session)
+        }
+    }
+
+    private fun applySessionRename(sessionId: String, title: String) {
+        active.entries
+            .filter { it.value.id == sessionId }
+            .forEach {
+                active[it.key] = it.value.copy(title = title)
+            }
+        val current = local.value
+        local.value = current.copy(
+            focusedSession = current.focusedSession
+                ?.takeIf { it.id == sessionId }
+                ?.copy(title = title)
+                ?: current.focusedSession,
+            sessions = current.sessions.map {
+                if (it.id == sessionId) {
+                    it.copy(title = title)
+                } else {
+                    it
+                }
+            },
+            activeSessions = active.values.sortedByDescending { it.id },
+        )
+        val scope = scope ?: return
+        active.entries
+            .filter { it.value.id == sessionId }
+            .forEach {
+                val project = sessionProject[it.key]
+                val session = it.value
+                val server = it.key.substringBefore("::")
+                scope.launch(ioLane) {
+                    cache.upsertSession(server, project, session)
+                }
+            }
     }
 
     private fun setProcessing(sessionId: String, running: Boolean) {
