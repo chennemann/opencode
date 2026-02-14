@@ -94,6 +94,10 @@ interface ServerGateway {
 
     suspend fun sessionMessages(baseUrl: String, sessionId: String, directory: String, limit: Int?): List<SessionMessageInfo>
 
+    suspend fun sessionUpdatedAt(baseUrl: String, sessionId: String, directory: String): Long?
+
+    suspend fun sessionStatus(baseUrl: String, directory: String): Map<String, String>
+
     suspend fun streamEvents(
         baseUrl: String,
         lastEventId: String?,
@@ -329,6 +333,40 @@ class ServerService(
                     completedAt = completedAt,
                 )
             }
+    }
+
+    override suspend fun sessionUpdatedAt(baseUrl: String, sessionId: String, directory: String): Long? {
+        val res = http.get("$baseUrl/session/$sessionId") {
+            parameter("directory", directory)
+        }
+        if (res.status.value !in 200..299) {
+            throw IllegalStateException("Server returned ${res.status}")
+        }
+        val obj = json.parseToJsonElement(res.bodyAsText()).jsonObject
+        val time = obj["time"] as? JsonObject ?: return null
+        val value = time["updated"]?.jsonPrimitive?.contentOrNull ?: return null
+        return value.toLongOrNull()
+    }
+
+    override suspend fun sessionStatus(baseUrl: String, directory: String): Map<String, String> {
+        val res = http.get("$baseUrl/session/status") {
+            parameter("directory", directory)
+        }
+        if (res.status.value !in 200..299) {
+            throw IllegalStateException("Server returned ${res.status}")
+        }
+        val obj = json.parseToJsonElement(res.bodyAsText()).jsonObject
+        return obj.mapNotNull { row ->
+            val key = row.key.trim()
+            if (key.isBlank()) return@mapNotNull null
+            val value = (row.value as? JsonObject)
+                ?.get("type")
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?: row.value.jsonPrimitive.contentOrNull
+                ?: "unknown"
+            key to value
+        }.toMap()
     }
 
     override suspend fun streamEvents(
