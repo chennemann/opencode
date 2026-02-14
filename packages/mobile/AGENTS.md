@@ -28,6 +28,9 @@ adb logcat -d | grep -E "de\.chennemann\.opencode\.mobile|AndroidRuntime" # Chec
 # Testing
 ./gradlew clean test                   # Run unit tests
 
+# Icons
+bun run mobile:add-icon --source lucide --name pin --target PinLucide  # Generate ImageVector icon into app icons pack
+
 # Database
 # SQLDelight generates code in build/generated/sqldelight/
 ./gradlew generateSqlDelightInterface

@@ -431,6 +431,8 @@ class SessionServiceTest {
             archiveError?.let { throw it }
         }
 
+        override suspend fun renameSession(sessionId: String, directory: String, title: String) = Unit
+
         override suspend fun createSession(worktree: String, title: String): SessionSummary {
             return SessionSummary(
                 id = "new-session",

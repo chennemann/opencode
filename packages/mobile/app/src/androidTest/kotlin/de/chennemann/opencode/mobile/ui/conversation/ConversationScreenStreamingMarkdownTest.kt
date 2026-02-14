@@ -188,6 +188,7 @@ class ConversationScreenStreamingMarkdownTest {
     ) = ConversationUiState(
         title = "Session",
         status = ServerState.Connected("v1"),
+        message = null,
         turns = turns,
         canLoadMoreMessages = canLoadMoreMessages,
         loadingMoreMessages = loadingMoreMessages,

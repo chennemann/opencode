@@ -166,6 +166,8 @@ private class FakeSessionServiceApi(
 
     override fun archiveSession(session: SessionState) {}
 
+    override fun renameSession(session: SessionState, title: String) {}
+
     override suspend fun cachedSessionsForProject(worktree: String, limit: Int?): List<SessionState> {
         return sessions.filter { it.directory == worktree }.let {
             if (limit == null) it else it.take(limit)
