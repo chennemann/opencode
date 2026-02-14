@@ -39,12 +39,12 @@
 - [x] Expand `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/domain/session/SessionStreamCoordinatorTest.kt` for retry-after-failure, wait-for-network-change behavior, cursor persistence, and callback ordering
 - [x] Add `packages/mobile/api/src/test/kotlin/de/chennemann/opencode/mobile/api/GeneratedClientSmokeTest.kt` after creating `packages/mobile/api/src/test/kotlin` to validate generated client serialization/deserialization and one request-path smoke with mocked transport
 
-- [ ] **P1 - Close ViewModel, cache, and UI interaction gaps**
+- [x] **P1 - Close ViewModel, cache, and UI interaction gaps**
 - [x] Expand `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationViewModelTest.kt` for quick switch cycle ordering, menu load failure fallback, send event draft-clearing rules, and slash filtering edge cases
 - [x] Expand `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/manage/ManageViewModelTest.kt` for filtering, workspace fallback rules, connect/discovered actions, and open-session navigation events
 - [x] Expand `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/data/SessionCacheRepositoryTest.kt` for favorites/hidden/quick-pin dedupe semantics, `recentSession` mapping, and delete-message/session cleanup edge cases
-- [ ] Add `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/navigation/AppNavHostTest.kt` to verify back stack transitions between conversation/manage routes and `NavEvent` handling
-- [ ] Expand `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationScreenStreamingMarkdownTest.kt` for long-turn rendering, tool call expansion state, and load-more interaction signals
+- [x] Add `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/navigation/AppNavHostTest.kt` to verify back stack transitions between conversation/manage routes and `NavEvent` handling
+- [x] Expand `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationScreenStreamingMarkdownTest.kt` for long-turn rendering, tool call expansion state, and load-more interaction signals
 
 - [ ] **P2 - Add platform and wiring confidence**
 - [ ] Add `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/di/AppModuleTest.kt` to validate Koin graph wiring for `SessionServiceApi`, repositories, gateways, and view models
@@ -63,6 +63,7 @@
 - [x] Run API module tests only with `cd packages/mobile && ./gradlew :api:test`
 - [ ] Run Android instrumentation suites with `cd packages/mobile && ./gradlew :app:connectedDebugAndroidTest`
 - [ ] Run a focused instrumentation class during iteration with `cd packages/mobile && ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=de.chennemann.opencode.mobile.ui.conversation.ConversationScreenStreamingMarkdownTest`
+    - Attempted; currently blocked by `No connected devices!` in local environment.
 
 ---
 
