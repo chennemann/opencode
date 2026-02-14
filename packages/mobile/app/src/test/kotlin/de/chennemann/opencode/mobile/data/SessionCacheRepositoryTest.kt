@@ -18,6 +18,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -92,6 +93,99 @@ class SessionCacheRepositoryTest {
         assertTrue(show.isCompleted)
         show.await()
         assertEquals(emptySet<String>(), repo.hiddenProjects(server))
+    }
+
+    @Test
+    fun normalizesFavoritesHiddenAndQuickPins() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(TestCoroutineScheduler())
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val database = db()
+        val repo = SessionCacheRepository(
+            db = database,
+            dispatchers = lanes(main, worker),
+        )
+        val server = "http://localhost:4096"
+
+        database.appDatabaseQueries.upsertSetting(
+            "project_favorite:$server",
+            " /repo/main \n/repo/main\n\n /repo/aux ",
+        )
+        database.appDatabaseQueries.upsertSetting(
+            "project_hidden:$server",
+            " /repo/hide\n/repo/hide \n\n/repo/other",
+        )
+        database.appDatabaseQueries.upsertSetting(
+            "session_quick_include:$server",
+            " s2 \n\n s1 \ns1",
+        )
+        database.appDatabaseQueries.upsertSetting(
+            "session_quick_exclude:$server",
+            " s4\n\n s3\ns3 ",
+        )
+
+        assertEquals(setOf("/repo/main", "/repo/aux"), repo.projectFavorites(server))
+        assertEquals(setOf("/repo/hide", "/repo/other"), repo.hiddenProjects(server))
+        assertEquals(setOf("s1", "s2"), repo.sessionQuickPins(server).include)
+        assertEquals(setOf("s3", "s4"), repo.sessionQuickPins(server).exclude)
+
+        val write = async {
+            repo.setSessionQuickPins(
+                server = server,
+                include = setOf(" s2", "", "s1", "s1 "),
+                exclude = setOf("", " s3", "s3 "),
+            )
+        }
+        advanceUntilIdle()
+        assertTrue(write.isCompleted)
+        write.await()
+
+        assertEquals("s1\ns2", database.appDatabaseQueries.selectSetting("session_quick_include:$server").executeAsOneOrNull())
+        assertEquals("s3", database.appDatabaseQueries.selectSetting("session_quick_exclude:$server").executeAsOneOrNull())
+    }
+
+    @Test
+    fun mapsRecentSessionCacheToDomainModel() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(TestCoroutineScheduler())
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val database = db()
+        val repo = SessionCacheRepository(
+            db = database,
+            dispatchers = lanes(main, worker),
+        )
+        val server = "http://localhost:4096"
+
+        database.appDatabaseQueries.upsertSessionCache(
+            server,
+            "s-old",
+            "/repo/old",
+            "/repo/old",
+            "Old",
+            "1",
+            10,
+            100,
+        )
+        database.appDatabaseQueries.upsertSessionCache(
+            server,
+            "s-recent",
+            "/repo/main",
+            "/repo/main",
+            "Recent",
+            "2",
+            20,
+            200,
+        )
+
+        val recent = repo.recentSession()
+        assertNotNull(recent)
+        assertEquals(server, recent?.server)
+        assertEquals("/repo/main", recent?.project)
+        assertEquals("s-recent", recent?.session?.id)
+        assertEquals("Recent", recent?.session?.title)
+        assertEquals("2", recent?.session?.version)
+        assertEquals("/repo/main", recent?.session?.directory)
+        assertEquals(null, recent?.session?.updatedAt)
     }
 
     @Test
@@ -176,6 +270,116 @@ class SessionCacheRepositoryTest {
         advanceUntilIdle()
         assertTrue(read.isCompleted)
         assertTrue(read.await().isEmpty())
+    }
+
+    @Test
+    fun deleteMessageAndSessionCleanupOnlyAffectTargetScope() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(TestCoroutineScheduler())
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val repo = SessionCacheRepository(
+            db = db(),
+            dispatchers = lanes(main, worker),
+        )
+        val server = "http://localhost:4096"
+        val otherServer = "http://localhost:4097"
+
+        val seed = async {
+            repo.upsertSessionSnapshot(
+                server = server,
+                project = "/repo/main",
+                session = SessionState(
+                    id = "s1",
+                    title = "One",
+                    version = "1",
+                    directory = "/repo/main",
+                    updatedAt = 100,
+                ),
+            )
+            repo.upsertSessionSnapshot(
+                server = server,
+                project = "/repo/main",
+                session = SessionState(
+                    id = "s2",
+                    title = "Two",
+                    version = "1",
+                    directory = "/repo/main",
+                    updatedAt = 200,
+                ),
+            )
+            repo.upsertMessage(
+                server = server,
+                sessionId = "s1",
+                message = MessageState(
+                    id = "m1",
+                    role = "assistant",
+                    text = "one",
+                    sort = "0001",
+                    createdAt = 1,
+                    completedAt = 2,
+                ),
+                updatedAt = 3,
+            )
+            repo.upsertMessage(
+                server = server,
+                sessionId = "s1",
+                message = MessageState(
+                    id = "m2",
+                    role = "assistant",
+                    text = "two",
+                    sort = "0002",
+                    createdAt = 2,
+                    completedAt = 3,
+                ),
+                updatedAt = 4,
+            )
+            repo.upsertMessage(
+                server = server,
+                sessionId = "s2",
+                message = MessageState(
+                    id = "m3",
+                    role = "assistant",
+                    text = "other-session",
+                    sort = "0001",
+                    createdAt = 1,
+                    completedAt = 2,
+                ),
+                updatedAt = 3,
+            )
+            repo.upsertMessage(
+                server = otherServer,
+                sessionId = "s1",
+                message = MessageState(
+                    id = "m4",
+                    role = "assistant",
+                    text = "other-server",
+                    sort = "0001",
+                    createdAt = 1,
+                    completedAt = 2,
+                ),
+                updatedAt = 3,
+            )
+        }
+        advanceUntilIdle()
+        assertTrue(seed.isCompleted)
+        seed.await()
+
+        val deletes = async {
+            repo.deleteMessage(server, "s1", "missing")
+            repo.deleteMessage(server, "s1", "m1")
+            repo.deleteSession(server, "missing")
+            repo.deleteSession(server, "s1")
+            repo.deleteSessionMessages(server, "missing")
+            repo.deleteSessionMessages(server, "s1")
+        }
+        advanceUntilIdle()
+        assertTrue(deletes.isCompleted)
+        deletes.await()
+
+        assertEquals(listOf("s2"), repo.listProjectSessions(server, "/repo/main").map { it.id })
+        assertTrue(repo.listMessages(server, "s1").isEmpty())
+        assertEquals(listOf("m3"), repo.listMessages(server, "s2").map { it.id })
+        assertEquals(listOf("m4"), repo.listMessages(otherServer, "s1").map { it.id })
     }
 
     @Test

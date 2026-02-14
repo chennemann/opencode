@@ -233,6 +233,151 @@ class ConversationViewModelTest {
         collect.cancel()
     }
 
+    @Test
+    fun quickSwitchCycleKeepsStableOrderAcrossStateRefresh() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ConversationViewModel(service, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        val sessions = listOf(
+            SessionState(id = "s3", title = "Session 3", version = "1", directory = "/repo/main", updatedAt = 300),
+            SessionState(id = "s2", title = "Session 2", version = "1", directory = "/repo/main", updatedAt = 200),
+            SessionState(id = "s1", title = "Session 1", version = "1", directory = "/repo/main", updatedAt = 100),
+        )
+        service.state.value = state(
+            focusedSession = sessions[0],
+            projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
+            activeSessions = sessions,
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.QuickSwitchTapped("/repo/main"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("s2"), service.openRequests)
+
+        val refreshed = listOf(
+            SessionState(id = "s1", title = "Session 1", version = "1", directory = "/repo/main", updatedAt = 900),
+            SessionState(id = "s3", title = "Session 3", version = "1", directory = "/repo/main", updatedAt = 800),
+            SessionState(id = "s2", title = "Session 2", version = "1", directory = "/repo/main", updatedAt = 700),
+        )
+        service.state.value = state(
+            focusedSession = refreshed[2],
+            projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
+            activeSessions = refreshed,
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.QuickSwitchTapped("/repo/main"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("s2", "s1"), service.openRequests)
+        collect.cancel()
+    }
+
+    @Test
+    fun quickSwitchLongPressFailureKeepsCachedSessions() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ConversationViewModel(service, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        val focused = SessionState(
+            id = "s2",
+            title = "Focused",
+            version = "1",
+            directory = "/repo/main",
+            updatedAt = 200,
+        )
+        service.projectSessions["/repo/main"] = listOf(
+            SessionState(id = "s2", title = "Focused", version = "1", directory = "/repo/main", updatedAt = 200),
+            SessionState(id = "s1", title = "Old", version = "1", directory = "/repo/main", updatedAt = 100),
+        )
+        service.failSessionRequests = true
+        service.state.value = state(
+            focusedSession = focused,
+            projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
+            activeSessions = listOf(focused),
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.QuickSwitchLongPressed("/repo/main"))
+        advanceUntilIdle()
+
+        val menu = viewModel.state.value.quickSwitchMenu
+        assertTrue(menu != null)
+        assertFalse(menu!!.loading)
+        assertEquals(listOf("s2", "s1"), menu.sessions.map { it.id })
+        assertEquals(listOf(11), service.cachedRequestLimits)
+        assertEquals(listOf(11), service.sessionRequestLimits)
+        collect.cancel()
+    }
+
+    @Test
+    fun sendTappedClearsDraftOnlyForNonBlankValues() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ConversationViewModel(service, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.DraftChanged("hello"))
+        viewModel.onEvent(ConversationEvent.SendTapped)
+        advanceUntilIdle()
+
+        assertEquals(listOf("hello"), service.sentTexts)
+        assertEquals("", viewModel.state.value.draft)
+        assertEquals(1L, viewModel.state.value.scroll)
+
+        viewModel.onEvent(ConversationEvent.DraftChanged("   "))
+        viewModel.onEvent(ConversationEvent.SendTapped)
+        advanceUntilIdle()
+
+        assertEquals(listOf("hello", "   "), service.sentTexts)
+        assertEquals("   ", viewModel.state.value.draft)
+        assertEquals(1L, viewModel.state.value.scroll)
+        collect.cancel()
+    }
+
+    @Test
+    fun slashSuggestionsHandleEdgeCases() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ConversationViewModel(service, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        service.state.value = state(
+            commands = listOf(
+                CommandState(name = "help", description = "General help"),
+                CommandState(name = "deploy", description = "Ship release"),
+            ),
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.DraftChanged("/"))
+        advanceUntilIdle()
+        assertEquals(listOf("new", "help", "deploy"), viewModel.state.value.slashSuggestions.map { it.name })
+
+        viewModel.onEvent(ConversationEvent.DraftChanged("/GEN"))
+        advanceUntilIdle()
+        assertEquals(listOf("help"), viewModel.state.value.slashSuggestions.map { it.name })
+
+        viewModel.onEvent(ConversationEvent.DraftChanged("/help now"))
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.slashSuggestions.isEmpty())
+
+        viewModel.onEvent(ConversationEvent.DraftChanged(" /help"))
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.slashSuggestions.isEmpty())
+        collect.cancel()
+    }
+
     private fun state(
         status: ServerState = ServerState.Idle,
         commands: List<CommandState> = emptyList(),
@@ -304,7 +449,11 @@ private class StubSessionService : SessionServiceApi {
     val sessionRequestLimits = mutableListOf<Int>()
     val cachedRequestLimits = mutableListOf<Int>()
     val archiveRequests = mutableListOf<String>()
+    val openRequests = mutableListOf<String>()
+    val sentTexts = mutableListOf<String>()
+    val sentAgents = mutableListOf<String>()
     val projectSessions = linkedMapOf<String, List<SessionState>>()
+    var failSessionRequests = false
 
     override fun start(scope: CoroutineScope) {
         startCalls += 1
@@ -328,9 +477,14 @@ private class StubSessionService : SessionServiceApi {
         return true
     }
 
-    override fun openSession(session: SessionState) = Unit
+    override fun openSession(session: SessionState) {
+        openRequests += session.id
+    }
 
-    override fun send(text: String, agent: String) = Unit
+    override fun send(text: String, agent: String) {
+        sentTexts += text
+        sentAgents += agent
+    }
 
     override fun loadMoreMessages() = Unit
 
@@ -351,6 +505,9 @@ private class StubSessionService : SessionServiceApi {
         sessionRequests += worktree
         if (limit != null) {
             sessionRequestLimits += limit
+        }
+        if (failSessionRequests) {
+            throw IllegalStateException("fail")
         }
         return projectSessions[worktree].orEmpty().let {
             if (limit == null) it else it.take(limit)
