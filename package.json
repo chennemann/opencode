@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "bun run --cwd packages/opencode --conditions=browser src/index.ts",
     "typecheck": "bun turbo typecheck",
+    "mobile:add-icon": "bun ./packages/mobile/script/add-icon.ts",
     "prepare": "husky",
     "random": "echo 'Random script'",
     "hello": "echo 'Hello World!'",

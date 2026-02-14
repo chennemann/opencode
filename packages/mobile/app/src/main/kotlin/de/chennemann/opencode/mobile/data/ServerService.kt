@@ -85,6 +85,8 @@ interface ServerGateway {
 
     suspend fun archiveSession(baseUrl: String, sessionId: String, directory: String)
 
+    suspend fun renameSession(baseUrl: String, sessionId: String, directory: String, title: String)
+
     suspend fun createSession(baseUrl: String, worktree: String, title: String): SessionInfo
 
     suspend fun commands(baseUrl: String, directory: String): List<CommandInfo>
@@ -210,6 +212,19 @@ class ServerService(
                 time = SessionUpdateRequestTime(
                     archived = BigDecimal(System.currentTimeMillis()),
                 )
+            ),
+        )
+        if (!res.success) {
+            throw IllegalStateException("Server returned ${res.status}")
+        }
+    }
+
+    override suspend fun renameSession(baseUrl: String, sessionId: String, directory: String, title: String) {
+        val res = client(baseUrl).sessionUpdate(
+            sessionId,
+            directory,
+            SessionUpdateRequest(
+                title = title,
             ),
         )
         if (!res.success) {

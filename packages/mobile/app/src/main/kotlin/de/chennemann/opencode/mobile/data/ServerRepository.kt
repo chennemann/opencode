@@ -126,6 +126,12 @@ class ServerRepository(
         }
     }
 
+    override suspend fun renameSession(sessionId: String, directory: String, title: String) {
+        withContext(dispatchers.io) {
+            service.renameSession(url.value, sessionId, directory, title)
+        }
+    }
+
     override suspend fun createSession(worktree: String, title: String): SessionSummary {
         val row = withContext(dispatchers.io) {
             service.createSession(url.value, worktree, title)

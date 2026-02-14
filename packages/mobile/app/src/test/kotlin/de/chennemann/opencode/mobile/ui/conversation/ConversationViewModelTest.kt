@@ -492,6 +492,8 @@ private class StubSessionService : SessionServiceApi {
         archiveRequests += session.id
     }
 
+    override fun renameSession(session: SessionState, title: String) = Unit
+
     override suspend fun cachedSessionsForProject(worktree: String, limit: Int?): List<SessionState> {
         if (limit != null) {
             cachedRequestLimits += limit
