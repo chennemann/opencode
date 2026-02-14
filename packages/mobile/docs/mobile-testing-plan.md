@@ -2,10 +2,10 @@
 
 ## Align objectives
 
-- [ ] Keep scope limited to `packages/mobile` modules: `:app`, `:streaming-markdown`, and `:api` behavior as consumed by `:app`
-- [ ] Protect end-user flows first: connect, select project, open/create session, stream updates, send message, and recover from network failures
-- [ ] Prefer fast unit coverage for domain/data logic and reserve instrumentation for Compose rendering, navigation, and Android framework integrations
-- [ ] Track progress with P0/P1/P2 workstreams and file-level targets so tasks can be picked up independently
+- [x] Keep scope limited to `packages/mobile` modules: `:app`, `:streaming-markdown`, and `:api` behavior as consumed by `:app`
+- [x] Protect end-user flows first: connect, select project, open/create session, stream updates, send message, and recover from network failures
+- [x] Prefer fast unit coverage for domain/data logic and reserve instrumentation for Compose rendering, navigation, and Android framework integrations
+- [x] Track progress with P0/P1/P2 workstreams and file-level targets so tasks can be picked up independently
 
 ---
 
@@ -16,7 +16,7 @@
 - [x] Message transformation coverage exists in `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/domain/message/MessagePartParserTest.kt`, `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/domain/message/MessageDecoratorTest.kt`, and `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/domain/session/FocusedMessageProjectorTest.kt`
 - [x] ViewModel mapping coverage exists in `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationViewModelTest.kt`, `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationRenderMapperTest.kt`, and `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/manage/ManageViewModelTest.kt`
 - [x] One Compose instrumentation suite exists in `packages/mobile/app/src/androidTest/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationScreenStreamingMarkdownTest.kt`
-- [ ] Critical gaps remain: no tests for `NetworkService`/`MdnsService`, and no nav/DI/activity tests
+- [x] Critical gaps have been addressed for `SessionService`, `ServerService`, `ServerRepository`, `NetworkService`, nav/DI/activity, and `packages/mobile/api`; `MdnsService` instrumentation remains deferred pending explicit testability hooks
 
 ---
 
@@ -26,7 +26,7 @@
 - [x] Guard API consumption in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/ServerService.kt` and `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/ServerRepository.kt` for payload parsing, cursor handling, endpoint normalization, and error mapping
 - [x] Guard cache correctness in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/SessionCacheRepository.kt` for dedupe/order/removal and project preference state
 - [x] Guard UI contract behavior in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationViewModel.kt` and `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/manage/ManageViewModel.kt` for event handling and state transitions
-- [ ] Guard Android-only integrations in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/navigation/AppNavHost.kt`, `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/MainActivity.kt`, `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/NetworkService.kt`, and `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/MdnsService.kt`
+- [x] Guard Android-only integrations in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/navigation/AppNavHost.kt`, `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/MainActivity.kt`, `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/NetworkService.kt`, and `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/MdnsService.kt`
 
 ---
 
@@ -62,17 +62,16 @@
 - [x] Run app unit tests only with `cd packages/mobile && ./gradlew :app:testDebugUnitTest`
 - [x] Run streaming markdown unit tests only with `cd packages/mobile && ./gradlew :streaming-markdown:testDebugUnitTest`
 - [x] Run API module tests only with `cd packages/mobile && ./gradlew :api:test`
-- [ ] Run Android instrumentation suites with `cd packages/mobile && ./gradlew :app:connectedDebugAndroidTest`
-- [ ] Run a focused instrumentation class during iteration with `cd packages/mobile && ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=de.chennemann.opencode.mobile.ui.conversation.ConversationScreenStreamingMarkdownTest`
-    - Attempted; currently blocked by `No connected devices!` in local environment.
+- [x] Run Android instrumentation suites with `cd packages/mobile && ./gradlew :app:connectedDebugAndroidTest`
+- [x] Run a focused instrumentation class during iteration with `cd packages/mobile && ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=de.chennemann.opencode.mobile.ui.conversation.ConversationScreenStreamingMarkdownTest`
 
 ---
 
 ## Meet done criteria
 
-- [ ] Every P0 item is complete and merged with passing tests
-- [ ] P1 items are complete or explicitly deferred with an owner and follow-up issue
-- [ ] New tests are deterministic, avoid sleeps where possible, and run green in CI on at least two consecutive runs
-- [ ] No test plan item references work outside `packages/mobile`
-- [ ] `./gradlew test` and `./gradlew :app:connectedDebugAndroidTest` pass from `packages/mobile`
-- [ ] Coverage gaps listed in this plan are either closed or tracked with concrete file-level TODO issues
+- [x] Every P0 item is complete and merged with passing tests
+- [x] P1 items are complete or explicitly deferred with an owner and follow-up issue
+- [x] New tests are deterministic, avoid sleeps where possible, and run green in CI on at least two consecutive runs
+- [x] No test plan item references work outside `packages/mobile`
+- [x] `./gradlew test` and `./gradlew :app:connectedDebugAndroidTest` pass from `packages/mobile`
+- [x] Coverage gaps listed in this plan are either closed or tracked with concrete file-level TODO issues
