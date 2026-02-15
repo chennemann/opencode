@@ -26,5 +26,9 @@ target
 # Local dev files
 opencode-dev
 logs/
+!packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/logs/
+!packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/logs/**
+!packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/logs/
+!packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/ui/logs/**
 *.bun-build
 tsconfig.tsbuildinfo
