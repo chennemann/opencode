@@ -6,12 +6,16 @@ import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.db.App_log
 import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.session.LogEntry
+import de.chennemann.opencode.mobile.domain.session.LogFacet
 import de.chennemann.opencode.mobile.domain.session.LogFilter
 import de.chennemann.opencode.mobile.domain.session.LogLevel
+import de.chennemann.opencode.mobile.domain.session.LogProjectOption
 import de.chennemann.opencode.mobile.domain.session.LogRecord
+import de.chennemann.opencode.mobile.domain.session.LogSessionOption
 import de.chennemann.opencode.mobile.domain.session.LogStoreGateway
 import de.chennemann.opencode.mobile.domain.session.LogUnit
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -35,6 +39,10 @@ class LocalLogRepository(
                 logical_unit = record.unit.key,
                 tag = record.tag,
                 event = record.event,
+                project_id = record.projectId,
+                project_name = record.projectName,
+                session_id = record.sessionId,
+                session_title = record.sessionTitle,
                 message = record.message,
                 context_json = encode(record.context),
                 throwable = record.throwable,
@@ -53,12 +61,49 @@ class LocalLogRepository(
             .listAppLog(
                 logical_unit = filter.unit?.key,
                 level = filter.level?.key,
-                value_ = term,
-                value__ = filter.limit,
+                event = filter.event,
+                project_id = filter.projectId,
+                session_id = filter.sessionId,
+                from_at = filter.from,
+                until_at = filter.until,
+                search = term,
+                limit = filter.limit,
             )
             .asFlow()
             .mapToList(dispatchers.io)
             .map { rows -> rows.map(::entry) }
+    }
+
+    override fun observeFacet(): Flow<LogFacet> {
+        val projects = db.appDatabaseQueries
+            .listAppLogProjectFacet { projectId, projectName ->
+                LogProjectOption(
+                    id = projectId,
+                    name = projectName ?: projectId,
+                )
+            }
+            .asFlow()
+            .mapToList(dispatchers.io)
+        val sessions = db.appDatabaseQueries
+            .listAppLogSessionFacet { sessionId, sessionTitle ->
+                LogSessionOption(
+                    id = sessionId,
+                    title = sessionTitle ?: sessionId,
+                )
+            }
+            .asFlow()
+            .mapToList(dispatchers.io)
+        val events = db.appDatabaseQueries
+            .listAppLogEventFacet()
+            .asFlow()
+            .mapToList(dispatchers.io)
+        return combine(projects, sessions, events) { p, s, e ->
+            LogFacet(
+                projects = p,
+                sessions = s,
+                events = e,
+            )
+        }
     }
 
     override suspend fun prune(now: Long) {
@@ -98,6 +143,10 @@ class LocalLogRepository(
             unit = LogUnit.from(value.logical_unit),
             tag = value.tag,
             event = value.event,
+            projectId = value.project_id,
+            projectName = value.project_name,
+            sessionId = value.session_id,
+            sessionTitle = value.session_title,
             message = value.message,
             context = decode(value.context_json),
             throwable = value.throwable,
