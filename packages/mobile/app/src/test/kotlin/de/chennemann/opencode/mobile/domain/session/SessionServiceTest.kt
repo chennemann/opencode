@@ -25,6 +25,7 @@ import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -169,6 +170,51 @@ class SessionServiceTest {
     }
 
     @Test
+    fun newSessionIsDeferredUntilFirstMessageSend() = runTest {
+        val fx = fixture(testScope = this)
+        fx.proj.projects = listOf(project(id = "p1", worktree = "/repo/main", name = "Main"))
+
+        fx.service.start(fx.scope)
+        fx.service.loadProjects()
+        await { fx.service.state.value.selectedProject == "/repo/main" }
+
+        assertTrue(fx.service.createSessionAndFocus("/repo/main"))
+        await { fx.service.state.value.selectedProject == "/repo/main" }
+
+        assertNull(fx.service.state.value.focusedSession)
+        assertTrue(fx.proj.createCalls.isEmpty())
+
+        fx.service.send("hello from mobile", "agent")
+        await { fx.msg.messageCalls.isNotEmpty() }
+
+        assertEquals(1, fx.proj.createCalls.size)
+        assertEquals("hello from mobile", fx.proj.createCalls.first().second)
+        assertEquals("new-session", fx.msg.messageCalls.first().sessionId)
+        assertEquals("hello from mobile", fx.msg.messageCalls.first().text)
+        fx.close()
+    }
+
+    @Test
+    fun slashNewClearsFocusWithoutCreatingSession() = runTest {
+        val fx = fixture(testScope = this)
+        fx.proj.projects = listOf(project(id = "p1", worktree = "/repo/main", name = "Main"))
+        fx.proj.sessionsByDir["/repo/main"] = listOf(summary(id = "s1", directory = "/repo/main", updatedAt = 10))
+
+        fx.service.start(fx.scope)
+        fx.service.loadProjects()
+        await { fx.service.state.value.sessions.isNotEmpty() }
+        fx.service.openSession(fx.service.state.value.sessions.first())
+        await { fx.service.state.value.focusedSession != null }
+
+        fx.service.send("/new", "agent")
+        await { fx.service.state.value.focusedSession == null }
+
+        assertTrue(fx.proj.createCalls.isEmpty())
+        assertTrue(fx.msg.messageCalls.isEmpty())
+        fx.close()
+    }
+
+    @Test
     fun quickPinRollbackOnCacheFailure() = runTest {
         val fx = fixture(testScope = this)
         fx.proj.projects = listOf(project(id = "p1", worktree = "/repo/main", name = "Main"))
@@ -283,6 +329,46 @@ class SessionServiceTest {
             )
         )
         await { !fx.service.state.value.quickProcessing.contains(focused.id) }
+        assertFalse(fx.service.state.value.quickProcessing.contains(focused.id))
+        fx.close()
+    }
+
+    @Test
+    fun syncStatusClearsStaleProcessingWhenSessionIsMissingFromStatusMap() = runTest {
+        val fx = fixture(testScope = this)
+        fx.conn.connect()
+        fx.proj.projects = listOf(project(id = "p1", worktree = "/repo/main", name = "Main"))
+        fx.proj.sessionsByDir["/repo/main"] = listOf(summary(id = "s1", directory = "/repo/main", updatedAt = 10))
+        fx.msg.statusByDirectory["/repo/main"] = mapOf("s1" to "busy")
+
+        fx.service.start(fx.scope)
+        fx.service.loadProjects()
+        await { fx.service.state.value.sessions.isNotEmpty() }
+
+        val focused = fx.service.state.value.sessions.first()
+        fx.service.openSession(focused)
+        await { fx.msg.statusCalls.isNotEmpty() }
+
+        fx.stream.emit(
+            event(
+                type = "session.status",
+                directory = "/repo/main",
+                properties = buildJsonObject {
+                    put("sessionID", focused.id)
+                    put("status", buildJsonObject { put("type", "busy") })
+                },
+            )
+        )
+        await { fx.service.state.value.quickProcessing.contains(focused.id) }
+
+        fx.msg.statusByDirectory["/repo/main"] = emptyMap()
+        val calls = fx.msg.statusCalls.size
+        fx.service.focusSession(focused.id)
+
+        await {
+            fx.msg.statusCalls.size > calls &&
+                !fx.service.state.value.quickProcessing.contains(focused.id)
+        }
         assertFalse(fx.service.state.value.quickProcessing.contains(focused.id))
         fx.close()
     }
@@ -413,6 +499,7 @@ class SessionServiceTest {
         var projects = emptyList<SessionProject>()
         var projectCalls = 0
         val sessionsByDir = linkedMapOf<String, List<SessionSummary>>()
+        val createCalls = mutableListOf<Pair<String, String>>()
         var archiveError: Throwable? = null
         var archiveGate: CompletableDeferred<Unit>? = null
 
@@ -434,6 +521,7 @@ class SessionServiceTest {
         override suspend fun renameSession(sessionId: String, directory: String, title: String) = Unit
 
         override suspend fun createSession(worktree: String, title: String): SessionSummary {
+            createCalls += worktree to title
             return SessionSummary(
                 id = "new-session",
                 title = title,
@@ -461,11 +549,20 @@ class SessionServiceTest {
             val agent: String,
         )
 
+        data class Send(
+            val sessionId: String,
+            val directory: String,
+            val text: String,
+            val agent: String,
+        )
+
         val messagesBySession = linkedMapOf<String, List<SessionMessage>>()
         val updatedAtBySession = linkedMapOf<String, Long?>()
         val statusByDirectory = linkedMapOf<String, Map<String, String>>()
+        val statusCalls = mutableListOf<String>()
         val messagesCalls = mutableListOf<Pair<String, Int?>>()
         val commandCalls = mutableListOf<Call>()
+        val messageCalls = mutableListOf<Send>()
         var sendCommandError: Throwable? = null
         var sendMessageError: Throwable? = null
         var sendMessageGate: CompletableDeferred<Unit>? = null
@@ -481,10 +578,12 @@ class SessionServiceTest {
         }
 
         override suspend fun status(directory: String): Map<String, String> {
+            statusCalls += directory
             return statusByDirectory[directory].orEmpty()
         }
 
         override suspend fun sendMessage(sessionId: String, directory: String, text: String, agent: String) {
+            messageCalls += Send(sessionId, directory, text, agent)
             sendMessageGate?.await()
             sendMessageError?.let { throw it }
         }
