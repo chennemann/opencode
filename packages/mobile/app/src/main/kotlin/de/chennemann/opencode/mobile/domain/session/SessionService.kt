@@ -487,13 +487,35 @@ class SessionService(
     }
 
     private suspend fun createSessionAndFocusNow(worktree: String): Boolean {
+        val selected = workspaceId(worktree)
+        markProjectActivated(selected)
+        val previous = focusedKey
+        if (previous != null) {
+            flush.remove(previous)?.cancel()
+        }
+        focusedKey = null
+        local.value = local.value.copy(
+            selectedProject = selected,
+            focusedSession = null,
+            focusedMessages = emptyList(),
+            canLoadMoreMessages = false,
+            loadingMoreMessages = false,
+            message = null,
+        )
+        loadSessions(selected)
+        loadCommands(selected)
+        return true
+    }
+
+    private suspend fun createSessionForMessage(worktree: String, text: String): SessionState? {
         local.value = local.value.copy(loadingSessions = true, message = null)
-        val result = withContext(ioLane) { runCatching { proj.createSession(worktree, "Mobile session") } }
+        val title = generatedSessionTitle(text)
+        val result = withContext(ioLane) { runCatching { proj.createSession(worktree, title) } }
         local.value = local.value.copy(loadingSessions = false)
         result.onFailure {
             local.value = local.value.copy(message = it.message ?: "Failed to create session")
         }
-        val created = result.getOrNull() ?: return false
+        val created = result.getOrNull() ?: return null
         val session = SessionState(
             id = created.id,
             title = created.title,
@@ -504,7 +526,7 @@ class SessionService(
         )
         focusSession(session, session.directory)
         loadSessions(local.value.selectedProject ?: worktree)
-        return true
+        return session
     }
 
     override fun openSession(session: SessionState) {
@@ -524,7 +546,10 @@ class SessionService(
                 return@mutate
             }
             val scope = scope ?: return@mutate
-            val focused = local.value.focusedSession ?: return@mutate
+            val focused = local.value.focusedSession ?: run {
+                val worktree = local.value.selectedProject ?: return@mutate
+                createSessionForMessage(worktree, value) ?: return@mutate
+            }
             val command = resolveCommand(value)
             if (command != null) {
                 scope.launch(ioLane) {
@@ -821,9 +846,6 @@ class SessionService(
                                 ),
                             )
                         }
-
-                        reconcileCompletedProcessing(session.id, incoming)
-
                         val plan = timed(
                             LaneMutation,
                             "sync.plan",
@@ -1190,7 +1212,16 @@ class SessionService(
                 val running = status
                     .filterValues { it == "busy" || it == "retry" }
                     .keys
+                val tracked = active.values
+                    .filter { workspaceId(it.directory) == workspaceId(directory) }
+                    .map { it.id }
+                    .toSet()
                 markDirectoryChecked(directory, running.isNotEmpty())
+                tracked
+                    .filterNot(running::contains)
+                    .forEach {
+                        setProcessing(it, false)
+                    }
                 running.forEach { sessionId ->
                     if (keyForSession(sessionId) == null) {
                         ensureSessionTracked(sessionId, directory)
@@ -1355,9 +1386,6 @@ class SessionService(
             action.createdAt,
             action.completedAt,
         )
-        if (action.role == "assistant") {
-            setProcessing(action.sessionId, action.completedAt == null)
-        }
         markSseApplied(type, action.sessionId)
         scheduleSync(action.sessionId, true)
     }
@@ -1812,19 +1840,6 @@ class SessionService(
         )
     }
 
-    private fun reconcileCompletedProcessing(sessionId: String, incoming: List<IncomingMessage>) {
-        if (!local.value.quickProcessing.contains(sessionId)) return
-        val stillRunning = incoming.any { it.role == "assistant" && it.completedAt == null }
-        if (stillRunning) return
-        debug(
-            unit = LogUnit.sync,
-            event = "sync_processing_reset",
-            message = "Corrected stale processing state",
-            context = mapOf("session" to sessionId),
-        )
-        setProcessing(sessionId, false)
-    }
-
     private fun clearSessionQuickPin(sessionId: String) {
         val current = local.value
         if (!current.quickPinInclude.contains(sessionId) && !current.quickPinExclude.contains(sessionId)) return
@@ -1922,6 +1937,16 @@ class SessionService(
         return name
     }
 
+    private fun generatedSessionTitle(text: String): String {
+        val line = text
+            .lineSequence()
+            .map(String::trim)
+            .firstOrNull { it.isNotBlank() }
+            ?: DefaultSessionTitle
+        if (line.length <= SessionTitleMaxLength) return line
+        return line.take(SessionTitleMaxLength).trimEnd()
+    }
+
     private fun key(server: String, sessionId: String): String {
         return "$server::$sessionId"
     }
@@ -1973,7 +1998,9 @@ class SessionService(
         }
         val withStatus = status.fold(
             onSuccess = {
-                latest.copy(status = it[session.id] ?: latest.status)
+                val next = it[session.id] ?: "idle"
+                setProcessing(session.id, next == "busy" || next == "retry")
+                latest.copy(status = next)
             },
             onFailure = {
                 if (unsupportedCheck(it)) {
@@ -2382,6 +2409,8 @@ private const val FavoritePreloadLimit = 50
 private const val WorkspaceSessionDisplayLimit = 3
 private const val SyncPinnedWindowMs = 2 * 60 * 60 * 1000L
 private const val SyncPinnedFavoriteWindowMs = 30 * 60 * 1000L
+private const val SessionTitleMaxLength = 80
+private const val DefaultSessionTitle = "New session"
 private const val LaneMutation = "mutation"
 private const val LaneIo = "io"
 private const val LaneCpu = "cpu"
