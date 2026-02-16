@@ -124,6 +124,14 @@ When a device is connected to the computer:
 
 the application.
 
+### 5. Device Launch Requirement (Mandatory)
+
+If an Android device is connected, always install and launch the app as part of task completion.
+
+- Do not stop after tests/build only.
+- Always run install + launch on the connected device.
+- If install or launch fails, report the failure and reason in the final response.
+
 ---
 
 Once all is done, **stop immediately**.
