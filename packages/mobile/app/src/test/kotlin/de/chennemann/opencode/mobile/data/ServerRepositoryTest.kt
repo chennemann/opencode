@@ -72,13 +72,14 @@ class ServerRepositoryTest {
             healthResults.addLast(Result.success(Health(healthy = false, version = "1.1")))
             healthResults.addLast(Result.success(Health(healthy = true, version = "1.2")))
         }
+        val log = StubLog()
         val repo = ServerRepository(
             db = db(),
             mdns = StubMdns(),
             service = service,
             network = StubNetwork(),
             dispatchers = lanes(main, worker),
-            log = StubLog(),
+            log = log,
         )
         val states = mutableListOf<ConnectionState>()
         val collect = launch { repo.status.collect { states += it } }
@@ -109,6 +110,51 @@ class ServerRepositoryTest {
             ),
             states,
         )
+        assertEquals(
+            listOf(
+                "health_check_started",
+                "health_check_succeeded",
+                "health_check_started",
+                "health_check_unhealthy",
+                "health_check_started",
+                "health_check_succeeded",
+            ),
+            log.calls.map { it.event },
+        )
+        assertTrue(log.calls.all { it.context["trigger"] == "manual_connect" })
+    }
+
+    @Test
+    fun refreshLogsFailureEventAndContext() = runTest {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubServer().apply {
+            healthResults.addLast(Result.failure(IllegalStateException("boom")))
+        }
+        val log = StubLog()
+        val repo = ServerRepository(
+            db = db(),
+            mdns = StubMdns(),
+            service = service,
+            network = StubNetwork(),
+            dispatchers = lanes(main, worker),
+            log = log,
+        )
+
+        val run = async { repo.refresh(true) }
+        advanceUntilIdle()
+        run.await()
+
+        assertTrue(repo.status.value is ConnectionState.Failed)
+        assertEquals(
+            listOf("health_check_started", "health_check_failed"),
+            log.calls.map { it.event },
+        )
+        assertEquals("manual_connect", log.calls[0].context["trigger"])
+        assertEquals("manual_connect", log.calls[1].context["trigger"])
+        assertEquals("http://opencode.local:4096", log.calls[1].context["endpoint"])
+        assertTrue(log.calls[1].context.containsKey("duration_ms"))
     }
 
     @Test
@@ -210,6 +256,8 @@ private class StubNetwork : ConnectivityGateway {
 }
 
 private class StubLog : LogGateway {
+    val calls = mutableListOf<LogCall>()
+
     override fun log(
         level: LogLevel,
         unit: LogUnit,
@@ -219,8 +267,19 @@ private class StubLog : LogGateway {
         context: Map<String, String>,
         error: Throwable?,
     ) {
+        calls += LogCall(
+            level = level,
+            event = event,
+            context = context,
+        )
     }
 }
+
+private data class LogCall(
+    val level: LogLevel,
+    val event: String,
+    val context: Map<String, String>,
+)
 
 private class StubServer : ServerGateway {
     val healthCalls = mutableListOf<String>()

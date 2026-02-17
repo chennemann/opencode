@@ -45,11 +45,11 @@ class ServerRepository(
     override fun start(scope: CoroutineScope) {
         scope.launch {
             load()
-            refresh(true)
+            refresh("startup", true)
         }
         scope.launch {
             network.changed.drop(1).collect {
-                refresh(false)
+                refresh("network_change", false)
             }
         }
         scope.launch {
@@ -68,7 +68,23 @@ class ServerRepository(
     }
 
     override suspend fun refresh(loading: Boolean) {
+        val trigger = if (loading) "manual_connect" else "background_check"
+        refresh(trigger, loading)
+    }
+
+    private suspend fun refresh(trigger: String, loading: Boolean) {
         val endpoint = url.value
+        val startedAt = System.currentTimeMillis()
+        log.info(
+            unit = LogUnit.network,
+            tag = LogTag,
+            event = "health_check_started",
+            message = "Health check started",
+            context = mapOf(
+                "endpoint" to endpoint,
+                "trigger" to trigger,
+            ),
+        )
         if (loading) state.value = ConnectionState.Loading
         val result = runCatching {
             withContext(dispatchers.io) {
@@ -79,21 +95,53 @@ class ServerRepository(
             log.error(
                 unit = LogUnit.network,
                 tag = LogTag,
-                event = "health_failed",
+                event = "health_check_failed",
                 message = "Health check failed",
-                context = mapOf("endpoint" to endpoint),
+                context = mapOf(
+                    "endpoint" to endpoint,
+                    "trigger" to trigger,
+                    "duration_ms" to (System.currentTimeMillis() - startedAt).toString(),
+                ),
                 error = it,
             )
         }
-        state.value = withContext(dispatchers.default) {
+        val next = withContext(dispatchers.default) {
             result.fold(
                 onSuccess = {
-                    if (it.healthy) ConnectionState.Connected(it.version)
-                    else ConnectionState.Failed("Server is unhealthy")
+                    if (it.healthy) {
+                        log.info(
+                            unit = LogUnit.network,
+                            tag = LogTag,
+                            event = "health_check_succeeded",
+                            message = "Health check succeeded",
+                            context = mapOf(
+                                "endpoint" to endpoint,
+                                "trigger" to trigger,
+                                "version" to it.version,
+                                "duration_ms" to (System.currentTimeMillis() - startedAt).toString(),
+                            ),
+                        )
+                        ConnectionState.Connected(it.version)
+                    } else {
+                        log.warn(
+                            unit = LogUnit.network,
+                            tag = LogTag,
+                            event = "health_check_unhealthy",
+                            message = "Server reported unhealthy",
+                            context = mapOf(
+                                "endpoint" to endpoint,
+                                "trigger" to trigger,
+                                "version" to it.version,
+                                "duration_ms" to (System.currentTimeMillis() - startedAt).toString(),
+                            ),
+                        )
+                        ConnectionState.Failed("Server is unhealthy")
+                    }
                 },
                 onFailure = { ConnectionState.Failed(it.message ?: "Connection failed") },
             )
         }
+        state.value = next
     }
 
     override suspend fun projects(): List<SessionProject> {

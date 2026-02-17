@@ -1,11 +1,12 @@
 package de.chennemann.opencode.mobile.domain.service.session
 
 import de.chennemann.opencode.mobile.data.repository.CommandRepository
-import de.chennemann.opencode.mobile.data.repository.ConnectionRepository
 import de.chennemann.opencode.mobile.data.repository.MessagePageRequest
 import de.chennemann.opencode.mobile.data.repository.ProjectRepository
 import de.chennemann.opencode.mobile.data.repository.SessionListFilter
 import de.chennemann.opencode.mobile.data.repository.SessionRepository
+import de.chennemann.opencode.mobile.domain.session.ConnectionGateway
+import de.chennemann.opencode.mobile.domain.session.ConnectionState
 import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.domain.session.SessionUiState
@@ -20,7 +21,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 class DefaultSessionReadService(
-    private val connection: ConnectionRepository,
+    private val connection: ConnectionGateway,
     private val project: ProjectRepository,
     private val command: CommandRepository,
     private val session: SessionRepository,
@@ -35,8 +36,15 @@ class DefaultSessionReadService(
         if (it == null) return@flatMapLatest flowOf(emptyList())
         session.observeSessionList(it.id, SessionListFilter(limit = SessionLimit))
     }
+    private val connectionState = combine(connection.status, connection.endpoint, connection.found) { status, endpoint, discovered ->
+        ConnectionBaseState(
+            endpoint = endpoint,
+            discovered = discovered,
+            status = serverState(status),
+        )
+    }
     private val base = combine(
-        connection.observeConnection(),
+        connectionState,
         project.observeProjects(),
         selected,
         commands,
@@ -45,7 +53,7 @@ class DefaultSessionReadService(
         SessionBaseState(
             url = connection.endpoint,
             discovered = connection.discovered,
-            status = serverState(connection.status),
+            status = connection.status,
             projects = projects,
             selected = selected,
             commands = commands,
@@ -146,16 +154,24 @@ private data class SessionBaseState(
     val sessions: List<SessionState>,
 )
 
+private data class ConnectionBaseState(
+    val endpoint: String,
+    val discovered: String?,
+    val status: ServerState,
+)
+
 private data class SessionStateData(
     val base: SessionBaseState,
     val focused: SessionState?,
 )
 
-private fun serverState(value: String): ServerState {
-    if (value == "CONNECTED") return ServerState.Connected("connected")
-    if (value == "LOADING") return ServerState.Loading
-    if (value == "FAILED") return ServerState.Failed("Connection failed")
-    return ServerState.Idle
+private fun serverState(value: ConnectionState): ServerState {
+    return when (value) {
+        is ConnectionState.Connected -> ServerState.Connected(value.version)
+        is ConnectionState.Failed -> ServerState.Failed(value.reason)
+        is ConnectionState.Loading -> ServerState.Loading
+        is ConnectionState.Idle -> ServerState.Idle
+    }
 }
 
 private fun activeSessions(sessions: List<SessionState>, focused: SessionState?): List<SessionState> {

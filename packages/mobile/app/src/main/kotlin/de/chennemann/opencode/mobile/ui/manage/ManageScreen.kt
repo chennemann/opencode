@@ -179,6 +179,12 @@ private fun ServerCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    if (state.status is ServerState.Loading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    }
                     Text(
                         text = statusLabel(state.status),
                         color = statusColor(state.status),
