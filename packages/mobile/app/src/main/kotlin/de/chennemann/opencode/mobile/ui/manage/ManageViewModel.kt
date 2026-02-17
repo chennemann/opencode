@@ -153,7 +153,7 @@ class ManageViewModel(
                 val worktree = local.value.projectPath.trim()
                 if (worktree.isBlank()) return
                 viewModelScope.launch(lane) {
-                    selectProject(worktree)
+                    selectProject(projectId(worktree))
                 }
                 local.value = local.value.copy(
                     projectPath = worktree,
@@ -169,19 +169,19 @@ class ManageViewModel(
                     sessionScroll = local.value.sessionScroll + 1,
                 )
                 viewModelScope.launch(lane) {
-                    selectProject(event.worktree)
+                    selectProject(projectId(event.worktree))
                 }
             }
 
             is ManageEvent.ProjectFavoriteToggled -> {
                 viewModelScope.launch(lane) {
-                    toggleProjectFavorite(event.worktree)
+                    toggleProjectFavorite(projectId(event.worktree))
                 }
             }
 
             is ManageEvent.ProjectRemoved -> {
                 viewModelScope.launch(lane) {
-                    removeProject(event.worktree)
+                    removeProject(projectId(event.worktree))
                 }
             }
 
@@ -311,6 +311,14 @@ class ManageViewModel(
         val value = path.trimEnd('/', '\\')
         if (value.isBlank()) return path
         return value
+    }
+
+    private fun projectId(worktree: String): String {
+        val id = workspaceId(worktree)
+        return read.state.value.projects
+            .firstOrNull { workspaceId(it.worktree) == id }
+            ?.id
+            ?: worktree
     }
 }
 

@@ -118,6 +118,58 @@ class ManageViewModelTest {
     }
 
     @Test
+    fun projectSelectedUsesProjectIdFromReadState() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val project = RecordingProjectActionService()
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            project = project,
+        )
+        read.state.value = state(
+            projects = listOf(
+                ProjectState(id = "p-main", worktree = "/repo/main", name = "Main"),
+            ),
+            selectedProject = "/repo/main",
+        )
+
+        viewModel.onEvent(ManageEvent.ProjectSelected("/repo/main"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("p-main"), project.selectCalls)
+    }
+
+    @Test
+    fun projectFavoriteToggleUsesProjectIdFromReadState() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val project = RecordingProjectActionService()
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            project = project,
+        )
+        read.state.value = state(
+            projects = listOf(
+                ProjectState(id = "p-main", worktree = "/repo/main", name = "Main"),
+            ),
+            selectedProject = "/repo/main",
+        )
+
+        viewModel.onEvent(ManageEvent.ProjectFavoriteToggled("/repo/main"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("p-main"), project.favoriteCalls)
+    }
+
+    @Test
     fun openSessionTappedFocusesAndNavigates() = runTest(TestCoroutineScheduler()) {
         val main = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(main)
@@ -362,16 +414,20 @@ private class StubSessionReadService : SessionReadService {
 
 private class RecordingProjectActionService : ProjectActionService {
     val selectCalls = mutableListOf<String>()
+    val favoriteCalls = mutableListOf<String>()
+    val hiddenCalls = mutableListOf<String>()
 
     override suspend fun select(projectId: String) {
         selectCalls += projectId
     }
 
     override suspend fun toggleFavorite(projectId: String): Boolean {
+        favoriteCalls += projectId
         return true
     }
 
     override suspend fun toggleHidden(projectId: String): Boolean {
+        hiddenCalls += projectId
         return true
     }
 
