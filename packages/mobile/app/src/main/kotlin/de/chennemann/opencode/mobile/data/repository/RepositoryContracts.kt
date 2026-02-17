@@ -61,6 +61,7 @@ data class PrefsState(
 
 interface SessionRepository {
     fun observeSessionList(projectId: String, filter: SessionListFilter): Flow<List<SessionState>>
+    fun observeRecentSessionList(limit: Long): Flow<List<SessionState>>
     fun observeFocusedSession(): Flow<SessionState?>
     fun observeMessagePage(sessionId: String, request: MessagePageRequest): Flow<MessagePage>
     fun observeSyncState(sessionId: String): Flow<SessionSyncState>

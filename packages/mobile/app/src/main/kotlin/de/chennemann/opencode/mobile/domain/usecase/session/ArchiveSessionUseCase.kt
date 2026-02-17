@@ -5,9 +5,10 @@ import de.chennemann.opencode.mobile.domain.service.session.SessionActionService
 class ArchiveSessionUseCase(
     private val action: SessionActionService,
 ) {
-    suspend operator fun invoke(sessionId: String) {
+    suspend operator fun invoke(sessionId: String, directory: String? = null) {
         val id = sessionId.trim()
         if (id.isBlank()) return
-        action.archive(id)
+        val value = directory?.trim()?.takeIf { it.isNotBlank() }
+        action.archive(id, value)
     }
 }

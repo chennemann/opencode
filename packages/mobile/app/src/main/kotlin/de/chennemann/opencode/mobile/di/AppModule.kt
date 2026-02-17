@@ -48,6 +48,8 @@ import de.chennemann.opencode.mobile.domain.service.sync.ProjectSyncService
 import de.chennemann.opencode.mobile.domain.service.sync.ServerService as SyncServerService
 import de.chennemann.opencode.mobile.domain.service.sync.SessionStateSyncService
 import de.chennemann.opencode.mobile.domain.service.sync.SyncRuntime
+import de.chennemann.opencode.mobile.domain.message.MessageDecorator
+import de.chennemann.opencode.mobile.domain.message.MessagePartParser
 import de.chennemann.opencode.mobile.domain.session.CommandGateway
 import de.chennemann.opencode.mobile.domain.session.ConnectivityGateway
 import de.chennemann.opencode.mobile.domain.session.ConnectionGateway
@@ -122,7 +124,9 @@ val appModule = module {
     single<CommandGateway> { get<ServerRepository>() }
     single<MessageGateway> { get<ServerRepository>() }
     single<StreamGateway> { get<ServerRepository>() }
-    single<SessionRepository> { SqlDelightSessionRepository(get(), get(), get()) }
+    single { MessagePartParser() }
+    single { MessageDecorator() }
+    single<SessionRepository> { SqlDelightSessionRepository(get(), get(), get(), get(), get()) }
     single<ProjectRepository> { SqlDelightProjectRepository(get(), get(), get()) }
     single<CommandRepository> { SqlDelightCommandRepository(get(), get()) }
     single<ConnectionRepository> { SqlDelightConnectionRepository(get(), get()) }
@@ -136,15 +140,15 @@ val appModule = module {
     single(createdAtStart = true) {
         get<ConnectionGateway>().start(get(named(AppScopeName)))
     }
-    single<SyncServerService> { DefaultServerService(get(), get(), get()) }
-    single<ProjectSyncService> { DefaultProjectSyncService(get(), get(), get(), get()) }
+    single<SyncServerService> { DefaultServerService(get(), get(), get(), get()) }
+    single<ProjectSyncService> { DefaultProjectSyncService(get(), get(), get(), get(), get()) }
     single<SessionStateSyncService> { DefaultSessionStateSyncService(get(), get(), get(), get(), get()) }
     single<SyncRuntime>(createdAtStart = true) {
         DefaultSyncRuntime(get(), get(), get(), get(), get())
             .also { it.start(get(named(AppScopeName))) }
     }
     single<ProjectActionService> { DefaultProjectActionService(get(), get()) }
-    single<SessionActionService> { DefaultSessionActionService(get(), get()) }
+    single<SessionActionService> { DefaultSessionActionService(get(), get(), get()) }
     single<MessageActionService> { DefaultMessageActionService(get(), get(), get()) }
     single<OutboxService> { DefaultOutboxService(get(), get(), get(), get(), get(), get()) }
     single<ConnectionActionService> { DefaultConnectionActionService(get()) }

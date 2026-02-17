@@ -246,6 +246,13 @@ WHERE project_id = :project_id
 ORDER BY COALESCE(updated_at, 0) DESC, id DESC
 LIMIT :limit;
 
+observeRecentSessionList:
+SELECT id, title, version, directory, parent_id, updated_at, archived_at
+FROM session
+WHERE archived_at IS NULL
+ORDER BY COALESCE(updated_at, 0) DESC, id DESC
+LIMIT :limit;
+
 observeFocusedSession:
 SELECT id, title, version, directory, parent_id, updated_at, archived_at
 FROM session
@@ -359,8 +366,7 @@ ON CONFLICT(id) DO UPDATE SET
   directory = excluded.directory,
   parent_id = excluded.parent_id,
   updated_at = excluded.updated_at,
-  archived_at = excluded.archived_at,
-  focused = excluded.focused;
+  archived_at = excluded.archived_at;
 
 clearFocusedSession:
 UPDATE session
@@ -524,7 +530,7 @@ listDueSyncState:
 SELECT session_id, status, last_snapshot_at, last_stream_seen_at, last_error_at, next_sync_at, retry_count, expects_remote_updates, updated_at
 FROM sync_state
 WHERE next_sync_at <= :now
-  AND status IN ('QUEUED', 'BACKOFF')
+  AND status IN ('QUEUED', 'BACKOFF', 'IDLE')
 ORDER BY next_sync_at ASC, updated_at ASC, session_id ASC
 LIMIT :limit;
 

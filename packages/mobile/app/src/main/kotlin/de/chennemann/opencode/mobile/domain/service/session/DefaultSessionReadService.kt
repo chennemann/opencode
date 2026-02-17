@@ -11,6 +11,7 @@ import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.domain.session.SessionUiState
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class DefaultSessionReadService(
     private val connection: ConnectionGateway,
     private val project: ProjectRepository,
@@ -36,6 +38,7 @@ class DefaultSessionReadService(
         if (it == null) return@flatMapLatest flowOf(emptyList())
         session.observeSessionList(it.id, SessionListFilter(limit = SessionLimit))
     }
+    private val globalSessions = session.observeRecentSessionList(SessionLimit)
     private val connectionState = combine(connection.status, connection.endpoint, connection.found) { status, endpoint, discovered ->
         ConnectionBaseState(
             endpoint = endpoint,
@@ -58,7 +61,10 @@ class DefaultSessionReadService(
             selected = selected,
             commands = commands,
             sessions = sessions,
+            globalSessions = emptyList(),
         )
+    }.combine(globalSessions) { base, globalSessions ->
+        base.copy(globalSessions = globalSessions)
     }
 
     override val state: StateFlow<SessionUiState> = combine(base, session.observeFocusedSession()) { base, focused ->
@@ -74,9 +80,11 @@ class DefaultSessionReadService(
                         status = value.base.status,
                         projects = value.base.projects,
                         selectedProject = value.base.selected?.worktree,
+                        selectedProjectId = value.base.selected?.id,
                         commands = value.base.commands,
                         sessions = value.base.sessions,
-                        activeSessions = activeSessions(value.base.sessions, null),
+                        globalSessions = value.base.globalSessions,
+                        activeSessions = activeSessions(value.base.globalSessions, null),
                         focusedSession = null,
                         focusedMessages = emptyList(),
                         canLoadMoreMessages = false,
@@ -99,9 +107,11 @@ class DefaultSessionReadService(
                     status = value.base.status,
                     projects = value.base.projects,
                     selectedProject = value.base.selected?.worktree,
+                    selectedProjectId = value.base.selected?.id,
                     commands = value.base.commands,
                     sessions = value.base.sessions,
-                    activeSessions = activeSessions(value.base.sessions, focused),
+                    globalSessions = value.base.globalSessions,
+                    activeSessions = activeSessions(value.base.globalSessions, focused),
                     focusedSession = focused,
                     focusedMessages = page.items,
                     canLoadMoreMessages = page.hasMore,
@@ -152,6 +162,7 @@ private data class SessionBaseState(
     val selected: de.chennemann.opencode.mobile.domain.session.ProjectState?,
     val commands: List<de.chennemann.opencode.mobile.domain.session.CommandState>,
     val sessions: List<SessionState>,
+    val globalSessions: List<SessionState>,
 )
 
 private data class ConnectionBaseState(
@@ -189,8 +200,10 @@ private val InitialState = SessionUiState(
     status = ServerState.Idle,
     projects = emptyList(),
     selectedProject = null,
+    selectedProjectId = null,
     commands = emptyList(),
     sessions = emptyList(),
+    globalSessions = emptyList(),
     activeSessions = emptyList(),
     focusedSession = null,
     focusedMessages = emptyList(),

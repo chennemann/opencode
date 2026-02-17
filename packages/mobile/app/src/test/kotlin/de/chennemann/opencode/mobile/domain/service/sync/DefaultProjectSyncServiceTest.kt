@@ -1,9 +1,24 @@
 package de.chennemann.opencode.mobile.domain.service.sync
 
 import de.chennemann.opencode.mobile.data.repository.CommandRepository
+import de.chennemann.opencode.mobile.data.repository.AppendLocalMessageInput
+import de.chennemann.opencode.mobile.data.repository.ConfirmSentMessageInput
+import de.chennemann.opencode.mobile.data.repository.MessagePage
+import de.chennemann.opencode.mobile.data.repository.MessagePageRequest
+import de.chennemann.opencode.mobile.data.repository.PendingMessageRef
+import de.chennemann.opencode.mobile.data.repository.RemoteBatchSource
+import de.chennemann.opencode.mobile.data.repository.RepoResult
 import de.chennemann.opencode.mobile.data.repository.ProjectRepository
+import de.chennemann.opencode.mobile.data.repository.SessionListFilter
+import de.chennemann.opencode.mobile.data.repository.SessionRemoteBatch
+import de.chennemann.opencode.mobile.data.repository.SessionRepository
+import de.chennemann.opencode.mobile.data.repository.SessionSyncState
+import de.chennemann.opencode.mobile.data.repository.SessionSyncStatus
+import de.chennemann.opencode.mobile.data.repository.SyncReason
+import de.chennemann.opencode.mobile.domain.session.MessageState
 import de.chennemann.opencode.mobile.domain.session.CommandState
 import de.chennemann.opencode.mobile.domain.session.ProjectState
+import de.chennemann.opencode.mobile.domain.session.SessionState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
@@ -37,7 +52,8 @@ class DefaultProjectSyncServiceTest {
             )
         )
         val commands = ProjectSyncCommandRepo()
-        val service = DefaultProjectSyncService(server, projects, commands, json)
+        val sessions = ProjectSyncSessionRepo()
+        val service = DefaultProjectSyncService(server, projects, commands, sessions, json)
 
         service.run()
 
@@ -46,6 +62,10 @@ class DefaultProjectSyncServiceTest {
         assertEquals(
             listOf("p-1:build", "p-2:deploy"),
             commands.replaceCalls,
+        )
+        assertEquals(
+            listOf("p-1:SNAPSHOT_SYNC", "p-2:SNAPSHOT_SYNC"),
+            sessions.batchCalls,
         )
     }
 
@@ -63,16 +83,42 @@ class DefaultProjectSyncServiceTest {
         }
         val projects = ProjectSyncProjectRepo(emptyList())
         val commands = ProjectSyncCommandRepo()
-        val service = DefaultProjectSyncService(server, projects, commands, json)
+        val sessions = ProjectSyncSessionRepo()
+        val service = DefaultProjectSyncService(server, projects, commands, sessions, json)
 
         service.run("p-2")
 
         assertEquals(listOf("p-2:deploy"), commands.replaceCalls)
+        assertEquals(listOf("p-2:SNAPSHOT_SYNC"), sessions.batchCalls)
+    }
+
+    @Test
+    fun runWithUnknownProjectFilterFallsBackToAllProjects() = runTest {
+        val server = ProjectSyncServer().also {
+            it.projectsJson = """
+                [
+                  {"id":"p-1","worktree":"/repo/main","name":"Main","sandboxes":[]},
+                  {"id":"p-2","worktree":"/repo/aux","name":"Aux","sandboxes":[]}
+                ]
+            """.trimIndent()
+            it.commandsByProject["/repo/main"] = "[{\"name\":\"build\"}]"
+            it.commandsByProject["/repo/aux"] = "[{\"name\":\"deploy\"}]"
+        }
+        val projects = ProjectSyncProjectRepo(emptyList())
+        val commands = ProjectSyncCommandRepo()
+        val sessions = ProjectSyncSessionRepo()
+        val service = DefaultProjectSyncService(server, projects, commands, sessions, json)
+
+        service.run("unknown")
+
+        assertEquals(listOf("p-1:build", "p-2:deploy"), commands.replaceCalls)
+        assertEquals(listOf("p-1:SNAPSHOT_SYNC", "p-2:SNAPSHOT_SYNC"), sessions.batchCalls)
     }
 }
 
 private class ProjectSyncServer : ServerService {
     var projectsJson = "[]"
+    val sessionsByProject = linkedMapOf<String, String>()
     val commandsByProject = linkedMapOf<String, String>()
 
     override suspend fun connectStream(onEvent: suspend (StreamEvent) -> Unit) {
@@ -86,7 +132,7 @@ private class ProjectSyncServer : ServerService {
     }
 
     override suspend fun fetchSessions(projectId: String): String {
-        return "{}"
+        return sessionsByProject[projectId] ?: "{\"sessions\":[],\"messages\":[]}"
     }
 
     override suspend fun fetchCommands(projectId: String): String {
@@ -95,6 +141,61 @@ private class ProjectSyncServer : ServerService {
 
     override suspend fun sendOutbox(actionId: String): Boolean {
         return false
+    }
+}
+
+private class ProjectSyncSessionRepo : SessionRepository {
+    val batchCalls = mutableListOf<String>()
+
+    override fun observeSessionList(projectId: String, filter: SessionListFilter): Flow<List<SessionState>> {
+        return flowOf(emptyList())
+    }
+
+    override fun observeRecentSessionList(limit: Long): Flow<List<SessionState>> {
+        return flowOf(emptyList())
+    }
+
+    override fun observeFocusedSession(): Flow<SessionState?> {
+        return flowOf(null)
+    }
+
+    override fun observeMessagePage(sessionId: String, request: MessagePageRequest): Flow<MessagePage> {
+        return flowOf(MessagePage(emptyList<MessageState>(), false, null))
+    }
+
+    override fun observeSyncState(sessionId: String): Flow<SessionSyncState> {
+        return flowOf(SessionSyncState(sessionId, SessionSyncStatus.IDLE, null, null, null))
+    }
+
+    override suspend fun focus(sessionId: String) {
+    }
+
+    override suspend fun appendLocalMessage(input: AppendLocalMessageInput): PendingMessageRef {
+        return PendingMessageRef("local")
+    }
+
+    override suspend fun confirmSentMessage(input: ConfirmSentMessageInput): RepoResult {
+        return RepoResult(ok = true)
+    }
+
+    override suspend fun applyRemoteBatch(batch: SessionRemoteBatch): RepoResult {
+        batchCalls += "${batch.sessionId}:${batch.source}"
+        return RepoResult(ok = true)
+    }
+
+    override suspend fun requestMessagePage(sessionId: String, beforeMessageId: String?, limit: Long): RepoResult {
+        return RepoResult(ok = true)
+    }
+
+    override suspend fun archive(sessionId: String): RepoResult {
+        return RepoResult(ok = true)
+    }
+
+    override suspend fun rename(sessionId: String, title: String): RepoResult {
+        return RepoResult(ok = true)
+    }
+
+    override suspend fun requestSync(sessionId: String, reason: SyncReason) {
     }
 }
 

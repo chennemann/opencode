@@ -2,6 +2,9 @@ package de.chennemann.opencode.mobile.domain.service.sync
 
 import de.chennemann.opencode.mobile.data.repository.CommandRepository
 import de.chennemann.opencode.mobile.data.repository.ProjectRepository
+import de.chennemann.opencode.mobile.data.repository.RemoteBatchSource
+import de.chennemann.opencode.mobile.data.repository.SessionRemoteBatch
+import de.chennemann.opencode.mobile.data.repository.SessionRepository
 import de.chennemann.opencode.mobile.domain.session.CommandState
 import de.chennemann.opencode.mobile.domain.session.ProjectState
 import kotlinx.coroutines.flow.first
@@ -17,6 +20,7 @@ class DefaultProjectSyncService(
     private val server: ServerService,
     private val project: ProjectRepository,
     private val command: CommandRepository,
+    private val session: SessionRepository,
     private val json: Json,
 ) : ProjectSyncService {
     override suspend fun run(projectId: String?) {
@@ -27,12 +31,31 @@ class DefaultProjectSyncService(
             it.copy(favorite = pinned[it.id]?.favorite == true)
         }
         project.upsertProjects(merged)
+        val selected = project.observeSelectedProject().first()
+        val requested = if (projectId.isNullOrBlank()) {
+            null
+        } else {
+            merged.firstOrNull { it.id == projectId || it.worktree == projectId }?.id
+        }
+        val next = requested ?: selected?.id ?: merged.firstOrNull()?.id
+        if (next != null && selected?.id != next) {
+            project.select(next)
+        }
         val targets = if (projectId.isNullOrBlank()) {
             merged
         } else {
             merged.filter { it.id == projectId || it.worktree == projectId }
         }
-        targets.forEach {
+        val scoped = if (targets.isNotEmpty()) targets else merged
+        scoped.forEach {
+            session.applyRemoteBatch(
+                SessionRemoteBatch(
+                    sessionId = it.id,
+                    payloadJson = server.fetchSessions(it.worktree),
+                    receivedAt = System.currentTimeMillis(),
+                    source = RemoteBatchSource.SNAPSHOT_SYNC,
+                )
+            )
             command.replaceCommands(it.id, parseCommands(server.fetchCommands(it.worktree)))
         }
     }

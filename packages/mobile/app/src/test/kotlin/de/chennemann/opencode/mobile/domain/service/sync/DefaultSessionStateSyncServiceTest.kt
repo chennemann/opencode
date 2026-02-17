@@ -245,6 +245,10 @@ private class SessionSyncSessionRepo : SessionRepository {
         return flowOf(emptyList())
     }
 
+    override fun observeRecentSessionList(limit: Long): Flow<List<SessionState>> {
+        return flowOf(emptyList())
+    }
+
     override fun observeFocusedSession(): Flow<SessionState?> {
         return flowOf(null)
     }

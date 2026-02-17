@@ -21,6 +21,16 @@ class ArchiveSessionUseCaseTest {
     }
 
     @Test
+    fun forwardsDirectoryWhenProvided() = runTest {
+        val action = ArchiveSessionAction()
+        val useCase = ArchiveSessionUseCase(action)
+
+        useCase(" s-1 ", " /repo/main ")
+
+        assertEquals(listOf("s-1:/repo/main"), action.archiveCalls)
+    }
+
+    @Test
     fun ignoresBlankSessionId() = runTest {
         val action = ArchiveSessionAction()
         val useCase = ArchiveSessionUseCase(action)

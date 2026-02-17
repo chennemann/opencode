@@ -16,11 +16,20 @@ import de.chennemann.opencode.mobile.data.repository.SessionSyncStatus
 import de.chennemann.opencode.mobile.data.repository.SyncReason
 import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.di.DispatcherProvider
+import de.chennemann.opencode.mobile.domain.message.MessageDecorator
+import de.chennemann.opencode.mobile.domain.message.MessagePartParser
 import de.chennemann.opencode.mobile.domain.session.MessageState
 import de.chennemann.opencode.mobile.domain.session.SessionState
+import de.chennemann.opencode.mobile.domain.session.ToolCallState
 import java.util.UUID
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -29,11 +38,17 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class SqlDelightSessionRepository(
     private val db: AppDatabase,
     private val dispatchers: DispatcherProvider,
     private val json: Json,
+    private val parser: MessagePartParser,
+    private val decorator: MessageDecorator,
 ) : SessionRepository {
+    private val parts = MutableStateFlow<Map<String, List<JsonObject>>>(emptyMap())
+    private val loaded = MutableStateFlow<Map<String, Long>>(emptyMap())
+
     override fun observeSessionList(projectId: String, filter: SessionListFilter): Flow<List<SessionState>> {
         return db.appDatabaseQueries
             .observeSessionList(
@@ -42,6 +57,23 @@ class SqlDelightSessionRepository(
                 query = filter.query.trim(),
                 limit = filter.limit,
             ) { id, title, version, directory, parentId, updatedAt, archivedAt ->
+                SessionState(
+                    id = id,
+                    title = title,
+                    version = version,
+                    directory = directory,
+                    parentId = parentId,
+                    updatedAt = updatedAt,
+                    archivedAt = archivedAt,
+                )
+            }
+            .asFlow()
+            .mapToList(dispatchers.io)
+    }
+
+    override fun observeRecentSessionList(limit: Long): Flow<List<SessionState>> {
+        return db.appDatabaseQueries
+            .observeRecentSessionList(limit = limit) { id, title, version, directory, parentId, updatedAt, archivedAt ->
                 SessionState(
                     id = id,
                     title = title,
@@ -75,31 +107,38 @@ class SqlDelightSessionRepository(
     }
 
     override fun observeMessagePage(sessionId: String, request: MessagePageRequest): Flow<MessagePage> {
-        return db.appDatabaseQueries
-            .observeMessagePage(
-                session_id = sessionId,
-                before_message_id = request.beforeMessageId,
-                limit = request.limit + 1,
-            ) { id, role, text, sortKey, createdAt, completedAt ->
-                MessageState(
-                    id = id,
-                    role = role,
-                    text = text,
-                    sort = sortKey,
-                    createdAt = createdAt,
-                    completedAt = completedAt,
-                )
-            }
-            .asFlow()
-            .mapToList(dispatchers.io)
+        return loaded
             .map {
-                val hasMore = it.size > request.limit
-                val rows = it.take(request.limit.toInt())
-                MessagePage(
-                    items = rows.reversed(),
-                    hasMore = hasMore,
-                    nextBeforeMessageId = if (hasMore) rows.lastOrNull()?.id else null,
-                )
+                it[sessionId]?.coerceAtLeast(request.limit) ?: request.limit
+            }
+            .distinctUntilChanged()
+            .flatMapLatest { limit ->
+                db.appDatabaseQueries
+                    .observeMessagePage(
+                        session_id = sessionId,
+                        before_message_id = request.beforeMessageId,
+                        limit = limit + 1,
+                    ) { id, role, text, sortKey, createdAt, completedAt ->
+                        MessageState(
+                            id = id,
+                            role = role,
+                            text = text,
+                            sort = sortKey,
+                            createdAt = createdAt,
+                            completedAt = completedAt,
+                        )
+                    }
+                    .asFlow()
+                    .mapToList(dispatchers.io)
+                    .combine(parts) { messages, cached ->
+                        val hasMore = messages.size > limit
+                        val rows = messages.take(limit.toInt())
+                        MessagePage(
+                            items = rows.reversed().map { decorateMessage(sessionId, it, cached) },
+                            hasMore = hasMore,
+                            nextBeforeMessageId = if (hasMore) rows.lastOrNull()?.id else null,
+                        )
+                    }
             }
     }
 
@@ -190,8 +229,10 @@ class SqlDelightSessionRepository(
             val payload = runCatching {
                 json.parseToJsonElement(batch.payloadJson).jsonObject
             }.getOrNull() ?: return@withContext RepoResult(ok = false, reason = "invalid_payload")
+            val sessionRows = payload.sessions()
+            val messageRows = payload.messages()
             db.appDatabaseQueries.transaction {
-                payload.sessions().forEach {
+                sessionRows.forEach {
                     db.appDatabaseQueries.upsertSession(
                         id = it.id,
                         project_id = it.projectId,
@@ -204,7 +245,7 @@ class SqlDelightSessionRepository(
                         focused = 0,
                     )
                 }
-                payload.messages().forEach {
+                messageRows.forEach {
                     db.appDatabaseQueries.insertMessage(
                         id = it.id,
                         session_id = it.sessionId,
@@ -219,11 +260,32 @@ class SqlDelightSessionRepository(
                     )
                 }
             }
+            if (messageRows.isNotEmpty()) {
+                parts.update { cached ->
+                    cached.toMutableMap().apply {
+                        messageRows.forEach {
+                            val key = partKey(it.sessionId, it.id)
+                            if (it.parts.isEmpty()) {
+                                remove(key)
+                            } else {
+                                set(key, it.parts)
+                            }
+                        }
+                    }
+                }
+            }
             RepoResult(ok = true)
         }
     }
 
     override suspend fun requestMessagePage(sessionId: String, beforeMessageId: String?, limit: Long): RepoResult {
+        withContext(dispatchers.io) {
+            val step = limit.coerceAtLeast(1)
+            loaded.update {
+                val current = it[sessionId]?.coerceAtLeast(step) ?: step
+                it + (sessionId to (current + step))
+            }
+        }
         requestSync(sessionId, SyncReason.REFRESH)
         return RepoResult(ok = true)
     }
@@ -250,6 +312,25 @@ class SqlDelightSessionRepository(
         }
         return RepoResult(ok = true)
     }
+
+    private fun decorateMessage(sessionId: String, message: MessageState, cached: Map<String, List<JsonObject>>): MessageState {
+        val list = cached[partKey(sessionId, message.id)].orEmpty()
+        if (list.isEmpty()) return message
+        val rendered = decorator.decorate(message.role, message.text, parser.parseParts(list))
+        return message.copy(
+            text = rendered.text,
+            toolCalls = rendered.toolCalls.map {
+                ToolCallState(
+                    id = it.id,
+                    title = it.title,
+                    subtitle = it.subtitle,
+                    status = it.status,
+                    sessionId = it.sessionId,
+                    details = it.details,
+                )
+            },
+        )
+    }
 }
 
 private data class SessionBatch(
@@ -272,6 +353,7 @@ private data class MessageBatch(
     val createdAt: Long?,
     val completedAt: Long?,
     val updatedAt: Long?,
+    val parts: List<JsonObject>,
 )
 
 private fun JsonObject.sessions(): List<SessionBatch> {
@@ -304,12 +386,24 @@ private fun JsonObject.messages(): List<MessageBatch> {
             createdAt = obj.long("createdAt"),
             completedAt = obj.long("completedAt"),
             updatedAt = obj.long("updatedAt"),
+            parts = obj.parts(),
         )
     }
 }
 
+private fun JsonObject.parts(): List<JsonObject> {
+    return value(this["parts"])
+        .mapNotNull {
+            it as? JsonObject
+        }
+}
+
 private fun value(input: kotlinx.serialization.json.JsonElement?): JsonArray {
     return (input as? JsonArray) ?: JsonArray(emptyList())
+}
+
+private fun partKey(sessionId: String, messageId: String): String {
+    return "$sessionId::$messageId"
 }
 
 private fun JsonObject.text(key: String): String? {

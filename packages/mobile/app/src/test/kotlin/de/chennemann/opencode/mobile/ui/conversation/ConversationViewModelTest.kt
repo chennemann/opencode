@@ -94,7 +94,7 @@ class ConversationViewModelTest {
                 de.chennemann.opencode.mobile.domain.session.MessageState(id = "a1", role = "assistant", text = "Hello", sort = "2"),
             ),
             projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
-            activeSessions = listOf(focused),
+            globalSessions = listOf(focused),
         )
 
         advanceUntilIdle()
@@ -125,7 +125,7 @@ class ConversationViewModelTest {
         read.state.value = state(
             focusedSession = focused,
             projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
-            activeSessions = listOf(focused),
+            globalSessions = listOf(focused),
         )
 
         advanceUntilIdle()
@@ -136,6 +136,59 @@ class ConversationViewModelTest {
         assertTrue(menu != null)
         assertEquals(listOf("s2", "s1"), menu!!.sessions.map { it.id })
         assertEquals(listOf(11, 11), read.requestedLimits)
+    }
+
+    @Test
+    fun quickSwitchUsesGlobalSessionsAcrossProjects() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val viewModel = viewModel(read, main, worker)
+        read.state.value = state(
+            projects = listOf(
+                ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true),
+                ProjectState(id = "p2", worktree = "/repo/other", name = "Other", favorite = true),
+            ),
+            selectedProject = "/repo/main",
+            globalSessions = listOf(
+                SessionState(id = "s1", title = "Main", version = "1", directory = "/repo/main", updatedAt = 100),
+                SessionState(id = "s2", title = "Other", version = "1", directory = "/repo/other", updatedAt = 200),
+            ),
+        )
+
+        advanceUntilIdle()
+
+        assertEquals(setOf("/repo/main", "/repo/other"), viewModel.state.value.quickSwitches.map { it.worktree }.toSet())
+    }
+
+    @Test
+    fun quickSwitchPinTapUpdatesMenuPinnedStateImmediately() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val viewModel = viewModel(read, main, worker)
+        val rows = listOf(
+            SessionState(id = "s1", title = "One", version = "1", directory = "/repo/main", updatedAt = 100),
+            SessionState(id = "s2", title = "Two", version = "1", directory = "/repo/main", updatedAt = 200),
+        )
+        read.sessionsByWorktree["/repo/main"] = rows
+        read.state.value = state(
+            projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
+            selectedProject = "/repo/main",
+            globalSessions = rows,
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.QuickSwitchLongPressed("/repo/main"))
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.QuickSwitchMenuPinTapped(rows.first(), false))
+        advanceUntilIdle()
+
+        val menu = viewModel.state.value.quickSwitchMenu
+        assertTrue(menu != null)
+        assertTrue(menu!!.pinned.contains("s1"))
     }
 
     @Test
@@ -217,23 +270,112 @@ class ConversationViewModelTest {
         )
     }
 
+    @Test
+    fun quickSwitchArchiveForwardsSessionDirectory() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val session = RecordingSessionActionService()
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            archiveSession = ArchiveSessionUseCase(session),
+        )
+        val row = SessionState(id = "s1", title = "One", version = "1", directory = "/repo/main", updatedAt = 100)
+        read.sessionsByWorktree["/repo/main"] = listOf(row)
+        read.state.value = state(
+            projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
+            selectedProject = "/repo/main",
+            globalSessions = listOf(row),
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.QuickSwitchLongPressed("/repo/main"))
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.QuickSwitchMenuArchiveTapped(row))
+        advanceUntilIdle()
+
+        assertEquals(listOf("s1:/repo/main"), session.archiveCalls)
+    }
+
+    @Test
+    fun sendCommandUsesSelectedProjectId() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val message = RecordingMessageActionService()
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            sendMessage = SendMessageUseCase(message),
+            executeCommand = ExecuteCommandUseCase(message),
+        )
+        read.state.value = state(
+            selectedProject = "/repo/main",
+            selectedProjectId = "p-main",
+            commands = listOf(CommandState(name = "help", description = "Help")),
+            focusedSession = SessionState(id = "s-1", title = "Session 1", version = "1", directory = "/repo/main"),
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.DraftChanged("/help"))
+        viewModel.onEvent(ConversationEvent.SendTapped)
+        advanceUntilIdle()
+
+        assertEquals(listOf("p-main"), message.commandCalls.map { it.projectId })
+    }
+
+    @Test
+    fun builtinNewCreatesSessionFromFocusedDirectory() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val gateway = FakeProjectGateway()
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            createSession = CreateSessionUseCase(gateway, FakeProjectRepository(), FakeSessionRepository()),
+        )
+        read.state.value = state(
+            selectedProject = "/repo/fallback",
+            focusedSession = SessionState(id = "s-1", title = "Session 1", version = "1", directory = "/repo/main"),
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.DraftChanged("/new"))
+        viewModel.onEvent(ConversationEvent.SendTapped)
+        advanceUntilIdle()
+
+        assertEquals(listOf("/repo/main"), gateway.createCalls)
+    }
+
     private fun state(
         status: ServerState = ServerState.Idle,
         commands: List<CommandState> = emptyList(),
         focusedSession: SessionState? = null,
         focusedMessages: List<de.chennemann.opencode.mobile.domain.session.MessageState> = emptyList(),
         projects: List<ProjectState> = emptyList(),
-        activeSessions: List<SessionState> = emptyList(),
+        globalSessions: List<SessionState> = emptyList(),
+        selectedProject: String? = projects.firstOrNull()?.worktree,
+        selectedProjectId: String? = projects.firstOrNull()?.id,
     ): SessionUiState {
         return SessionUiState(
             url = "http://127.0.0.1",
             discovered = null,
             status = status,
             projects = projects,
-            selectedProject = projects.firstOrNull()?.worktree,
+            selectedProject = selectedProject,
+            selectedProjectId = selectedProjectId,
             commands = commands,
             sessions = emptyList(),
-            activeSessions = activeSessions,
+            globalSessions = globalSessions,
+            activeSessions = globalSessions,
             focusedSession = focusedSession,
             focusedMessages = focusedMessages,
             canLoadMoreMessages = false,
@@ -267,6 +409,7 @@ class ConversationViewModelTest {
         archiveSession: ArchiveSessionUseCase = ArchiveSessionUseCase(RecordingSessionActionService()),
         renameSession: RenameSessionUseCase = RenameSessionUseCase(RecordingSessionActionService()),
         focusSession: FocusSessionUseCase = FocusSessionUseCase(RecordingSessionActionService()),
+        createSession: CreateSessionUseCase = CreateSessionUseCase(FakeProjectGateway(), FakeProjectRepository(), FakeSessionRepository()),
     ): ConversationViewModel {
         return ConversationViewModel(
             read = read,
@@ -277,7 +420,7 @@ class ConversationViewModelTest {
             requestMessagePage = requestMessagePage,
             archiveSession = archiveSession,
             renameSession = renameSession,
-            createSession = CreateSessionUseCase(FakeProjectGateway(), FakeProjectRepository(), FakeSessionRepository()),
+            createSession = createSession,
             refreshServer = RefreshServerUseCase(FakeConnectionActionService()),
         )
     }
@@ -291,8 +434,10 @@ private class StubSessionReadService : SessionReadService {
             status = ServerState.Idle,
             projects = emptyList(),
             selectedProject = null,
+            selectedProjectId = null,
             commands = emptyList(),
             sessions = emptyList(),
+            globalSessions = emptyList(),
             activeSessions = emptyList(),
             focusedSession = null,
             focusedMessages = emptyList(),
@@ -323,6 +468,7 @@ private class StubSessionReadService : SessionReadService {
 
 private class RecordingSessionActionService : SessionActionService {
     val pageCalls = mutableListOf<MessagePageInput>()
+    val archiveCalls = mutableListOf<String>()
 
     override suspend fun focus(sessionId: String) = Unit
 
@@ -331,7 +477,9 @@ private class RecordingSessionActionService : SessionActionService {
         return MessagePageRequestResult(accepted = true, reason = null)
     }
 
-    override suspend fun archive(sessionId: String, directory: String?) = Unit
+    override suspend fun archive(sessionId: String, directory: String?) {
+        archiveCalls += "$sessionId:${directory.orEmpty()}"
+    }
 
     override suspend fun rename(input: RenameInput) = Unit
 
@@ -340,6 +488,7 @@ private class RecordingSessionActionService : SessionActionService {
 
 private class RecordingMessageActionService : MessageActionService {
     val sendCalls = mutableListOf<SendMessageInput>()
+    val commandCalls = mutableListOf<CommandInput>()
 
     override suspend fun send(input: SendMessageInput): SendMessageResult {
         sendCalls += input
@@ -347,6 +496,7 @@ private class RecordingMessageActionService : MessageActionService {
     }
 
     override suspend fun execute(input: CommandInput): CommandResult {
+        commandCalls += input
         return CommandResult(accepted = true, reason = null)
     }
 }
@@ -358,6 +508,7 @@ private class FakeConnectionActionService : ConnectionActionService {
 }
 
 private class FakeProjectGateway : ProjectGateway {
+    val createCalls = mutableListOf<String>()
     override suspend fun projects(): List<SessionProject> {
         return emptyList()
     }
@@ -373,6 +524,7 @@ private class FakeProjectGateway : ProjectGateway {
     }
 
     override suspend fun createSession(worktree: String, title: String): SessionSummary {
+        createCalls += worktree
         return SessionSummary(
             id = "created",
             title = title,
@@ -416,6 +568,10 @@ private class FakeSessionRepository : SessionRepository {
 
     override fun observeFocusedSession(): Flow<SessionState?> {
         return flowOf(null)
+    }
+
+    override fun observeRecentSessionList(limit: Long): Flow<List<SessionState>> {
+        return flowOf(emptyList())
     }
 
     override fun observeMessagePage(sessionId: String, request: MessagePageRequest): Flow<MessagePage> {

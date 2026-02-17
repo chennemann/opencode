@@ -10,6 +10,8 @@ import de.chennemann.opencode.mobile.data.repository.sql.SqlDelightProjectReposi
 import de.chennemann.opencode.mobile.data.repository.sql.SqlDelightSessionRepository
 import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.di.DispatcherProvider
+import de.chennemann.opencode.mobile.domain.message.MessageDecorator
+import de.chennemann.opencode.mobile.domain.message.MessagePartParser
 import de.chennemann.opencode.mobile.domain.session.CommandState
 import de.chennemann.opencode.mobile.domain.session.LogFilter
 import de.chennemann.opencode.mobile.domain.session.LogLevel
@@ -536,7 +538,7 @@ class RepositoryContractsTest {
         val json = json()
         return Ctx(
             db = db,
-            session = SqlDelightSessionRepository(db, dispatchers, json),
+            session = SqlDelightSessionRepository(db, dispatchers, json, MessagePartParser(), MessageDecorator()),
             project = SqlDelightProjectRepository(db, dispatchers, json),
             command = SqlDelightCommandRepository(db, dispatchers),
             connection = SqlDelightConnectionRepository(db, dispatchers),

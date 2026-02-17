@@ -8,6 +8,7 @@ import de.chennemann.opencode.mobile.domain.service.model.RenameInput
 import de.chennemann.opencode.mobile.domain.service.outbox.OutboxAction
 import de.chennemann.opencode.mobile.domain.service.outbox.OutboxService
 import de.chennemann.opencode.mobile.domain.service.outbox.OutboxType
+import de.chennemann.opencode.mobile.domain.service.sync.SessionStateSyncService
 import java.util.UUID
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -15,9 +16,13 @@ import kotlinx.serialization.json.put
 class DefaultSessionActionService(
     private val session: SessionRepository,
     private val outbox: OutboxService,
+    private val sync: SessionStateSyncService,
 ) : SessionActionService {
     override suspend fun focus(sessionId: String) {
         session.focus(sessionId)
+        session.requestSync(sessionId, SyncReason.FOCUS)
+        sync.onFocusedSessionChanged(sessionId)
+        sync.onExpectationChanged(sessionId, true)
     }
 
     override suspend fun requestMessagePage(input: MessagePageInput): MessagePageRequestResult {

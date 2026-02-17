@@ -291,12 +291,10 @@ class ManageViewModel(
 
     private fun sessionSections(sessions: List<SessionState>, options: List<WorkspaceOptionState>): List<SessionSectionState> {
         if (sessions.isEmpty() || options.isEmpty()) return emptyList()
-        return options.mapNotNull { option ->
-            val list = sessions
-                .filter {
-                    workspaceId(it.directory) == workspaceId(option.directory) &&
-                        it.parentId == null
-                }
+        val rows = sessions.filter { it.archivedAt == null }
+        val sections = options.mapNotNull { option ->
+            val list = rows
+                .filter { workspaceId(it.directory) == workspaceId(option.directory) }
                 .sortedWith(
                     compareByDescending<SessionState> { it.updatedAt ?: 0L }
                         .thenByDescending { it.id }
@@ -305,6 +303,18 @@ class ManageViewModel(
             if (list.isEmpty()) return@mapNotNull null
             SessionSectionState(workspace = option, sessions = list)
         }
+        if (sections.isNotEmpty()) return sections
+        return listOf(
+            SessionSectionState(
+                workspace = options.first(),
+                sessions = rows
+                    .sortedWith(
+                        compareByDescending<SessionState> { it.updatedAt ?: 0L }
+                            .thenByDescending { it.id }
+                    )
+                    .take(WorkspaceSessionLimit),
+            )
+        )
     }
 
     private fun workspaceId(path: String): String {

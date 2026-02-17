@@ -333,8 +333,10 @@ class ManageViewModelTest {
             status = ServerState.Connected("1"),
             projects = projects,
             selectedProject = selectedProject,
+            selectedProjectId = projects.firstOrNull { it.worktree == selectedProject }?.id,
             commands = emptyList(),
             sessions = sessions,
+            globalSessions = sessions,
             activeSessions = emptyList(),
             focusedSession = null,
             focusedMessages = emptyList(),
@@ -389,8 +391,10 @@ private class StubSessionReadService : SessionReadService {
             status = ServerState.Idle,
             projects = emptyList(),
             selectedProject = null,
+            selectedProjectId = null,
             commands = emptyList(),
             sessions = emptyList(),
+            globalSessions = emptyList(),
             activeSessions = emptyList(),
             focusedSession = null,
             focusedMessages = emptyList(),
@@ -532,6 +536,10 @@ private class FakeSessionRepository : SessionRepository {
 
     override fun observeFocusedSession(): Flow<SessionState?> {
         return flowOf(null)
+    }
+
+    override fun observeRecentSessionList(limit: Long): Flow<List<SessionState>> {
+        return flowOf(emptyList())
     }
 
     override fun observeMessagePage(sessionId: String, request: MessagePageRequest): Flow<MessagePage> {

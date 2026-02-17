@@ -57,7 +57,7 @@ class ConversationViewModel(
         val turns: List<ConversationTurnUiState>,
         val commands: List<CommandState>,
         val projects: List<ProjectState>,
-        val activeSessions: List<SessionState>,
+        val globalSessions: List<SessionState>,
         val quickPinInclude: Set<String>,
         val quickPinExclude: Set<String>,
         val quickProcessing: Set<String>,
@@ -73,6 +73,8 @@ class ConversationViewModel(
         val stepOpen: Map<String, Boolean> = emptyMap(),
         val callOpen: Map<String, Boolean> = emptyMap(),
         val quickSwitchMenu: QuickSwitchMenuState? = null,
+        val quickPinInclude: Set<String> = emptySet(),
+        val quickPinExclude: Set<String> = emptySet(),
     )
 
     private data class QuickSwitchProject(
@@ -105,7 +107,7 @@ class ConversationViewModel(
                 turns = mapper.map(it.focusedMessages),
                 commands = mergeCommands(it.commands),
                 projects = it.projects,
-                activeSessions = it.activeSessions,
+                globalSessions = it.globalSessions,
                 quickPinInclude = it.quickPinInclude,
                 quickPinExclude = it.quickPinExclude,
                 quickProcessing = it.quickProcessing,
@@ -117,12 +119,14 @@ class ConversationViewModel(
         .flowOn(lane)
 
     val state: StateFlow<ConversationUiState> = combine(global, local) { global, local ->
+        val include = effectiveInclude(global.quickPinInclude, local.quickPinInclude, local.quickPinExclude)
+        val exclude = effectiveExclude(global.quickPinExclude, local.quickPinExclude, local.quickPinInclude)
         val quick = quickSwitchModel(
             global.projects,
-            global.activeSessions,
+            global.globalSessions,
             global.focusedSession,
-            global.quickPinInclude,
-            global.quickPinExclude,
+            include,
+            exclude,
             global.quickProcessing,
             global.quickUnread,
         )
@@ -141,8 +145,8 @@ class ConversationViewModel(
             quickSwitchMenu = quickSwitchMenu(
                 local.quickSwitchMenu,
                 global.projects,
-                global.quickPinInclude,
-                global.quickPinExclude,
+                include,
+                exclude,
             ),
             stepOpen = local.stepOpen,
             callOpen = local.callOpen,
@@ -241,7 +245,7 @@ class ConversationViewModel(
             }
 
             is ConversationEvent.QuickSwitchMenuPinTapped -> {
-                Unit
+                quickSwitchPin(event.session, event.systemPinned)
             }
 
             is ConversationEvent.QuickSwitchMenuArchiveTapped -> {
@@ -271,6 +275,9 @@ class ConversationViewModel(
                     local.update { it.copy(draft = "", scroll = it.scroll + 1) }
                 }
                 viewModelScope.launch(lane) {
+                    if (handleBuiltinCommand(value)) {
+                        return@launch
+                    }
                     val command = commandInput(value, agent)
                     if (command != null) {
                         executeCommand(command)
@@ -322,9 +329,22 @@ class ConversationViewModel(
             raw = raw,
             sessionId = focused.id,
             directory = focused.directory,
-            projectId = read.state.value.selectedProject.orEmpty(),
+            projectId = read.state.value.selectedProjectId.orEmpty(),
             agent = agent,
         )
+    }
+
+    private suspend fun handleBuiltinCommand(value: String): Boolean {
+        val raw = value.trim()
+        if (!raw.startsWith("/")) return false
+        val name = raw.substringAfter('/').substringBefore(' ').trim().lowercase()
+        if (name != "new") return false
+        val focused = read.state.value.focusedSession?.directory?.trim().orEmpty()
+        val selected = read.state.value.selectedProject?.trim().orEmpty()
+        val directory = focused.ifBlank { selected }
+        if (directory.isBlank()) return false
+        createSession(directory)
+        return true
     }
 
     private fun earliestLoadedMessageId(messages: List<MessageState>): String? {
@@ -364,10 +384,10 @@ class ConversationViewModel(
         val value = read.state.value
         val model = quickSwitchModel(
             value.projects,
-            value.activeSessions,
+            value.globalSessions,
             value.focusedSession,
-            value.quickPinInclude,
-            value.quickPinExclude,
+            effectiveInclude(value.quickPinInclude, local.value.quickPinInclude, local.value.quickPinExclude),
+            effectiveExclude(value.quickPinExclude, local.value.quickPinExclude, local.value.quickPinInclude),
             value.quickProcessing,
             value.quickUnread,
         )
@@ -407,10 +427,10 @@ class ConversationViewModel(
         val value = read.state.value
         val model = quickSwitchModel(
             value.projects,
-            value.activeSessions,
+            value.globalSessions,
             value.focusedSession,
-            value.quickPinInclude,
-            value.quickPinExclude,
+            effectiveInclude(value.quickPinInclude, local.value.quickPinInclude, local.value.quickPinExclude),
+            effectiveExclude(value.quickPinExclude, local.value.quickPinExclude, local.value.quickPinInclude),
             value.quickProcessing,
             value.quickUnread,
         )
@@ -446,7 +466,31 @@ class ConversationViewModel(
             )
         }
         viewModelScope.launch(lane) {
-            archiveSession(session.id)
+            archiveSession(session.id, session.directory)
+        }
+    }
+
+    private fun quickSwitchPin(session: SessionState, systemPinned: Boolean) {
+        val menu = state.value.quickSwitchMenu ?: return
+        val id = session.id
+        val pinned = menu.pinned.contains(id)
+        local.update {
+            if (pinned) {
+                val include = it.quickPinInclude - id
+                val exclude = if (systemPinned || read.state.value.quickPinInclude.contains(id)) {
+                    it.quickPinExclude + id
+                } else {
+                    it.quickPinExclude - id
+                }
+                return@update it.copy(
+                    quickPinInclude = include,
+                    quickPinExclude = exclude,
+                )
+            }
+            it.copy(
+                quickPinInclude = it.quickPinInclude + id,
+                quickPinExclude = it.quickPinExclude - id,
+            )
         }
     }
 
@@ -747,9 +791,17 @@ class ConversationViewModel(
         return name
     }
 
-    private fun workspaceId(path: String): String {
-        return path.trimEnd('/', '\\')
-    }
+private fun workspaceId(path: String): String {
+    return path.trimEnd('/', '\\')
+}
+
+private fun effectiveInclude(base: Set<String>, include: Set<String>, exclude: Set<String>): Set<String> {
+    return (base + include) - exclude
+}
+
+private fun effectiveExclude(base: Set<String>, exclude: Set<String>, include: Set<String>): Set<String> {
+    return (base + exclude) - include
+}
 
     private fun openToolCallSession(sessionId: String) {
         val id = sessionId.trim()

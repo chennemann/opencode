@@ -9,6 +9,7 @@ class DefaultProjectActionService(
 ) : ProjectActionService {
     override suspend fun select(projectId: String) {
         project.select(projectId)
+        sync.run(projectId)
     }
 
     override suspend fun toggleFavorite(projectId: String): Boolean {

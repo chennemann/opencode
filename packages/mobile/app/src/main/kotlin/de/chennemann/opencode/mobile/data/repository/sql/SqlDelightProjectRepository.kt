@@ -50,9 +50,17 @@ class SqlDelightProjectRepository(
 
     override suspend fun select(projectId: String) {
         withContext(dispatchers.io) {
+            val id = db.appDatabaseQueries.selectProjectById(projectId) { id, _, _, _, _, _, _ ->
+                id
+            }.executeAsOneOrNull()
+                ?: db.appDatabaseQueries.selectProjectByWorktree(projectId) { id, _, _, _, _, _, _ ->
+                    id
+                }.executeAsOneOrNull()
+                ?: return@withContext
+            val now = System.currentTimeMillis()
             db.appDatabaseQueries.transaction {
                 db.appDatabaseQueries.clearProjectSelection()
-                db.appDatabaseQueries.setProjectSelected(System.currentTimeMillis(), projectId)
+                db.appDatabaseQueries.setProjectSelected(now, id)
             }
         }
     }

@@ -17,6 +17,8 @@ import de.chennemann.opencode.mobile.domain.service.model.RenameInput
 import de.chennemann.opencode.mobile.domain.service.outbox.OutboxAction
 import de.chennemann.opencode.mobile.domain.service.outbox.OutboxService
 import de.chennemann.opencode.mobile.domain.service.outbox.OutboxType
+import de.chennemann.opencode.mobile.domain.service.sync.SessionStateSyncService
+import de.chennemann.opencode.mobile.domain.service.sync.StreamEvent
 import de.chennemann.opencode.mobile.domain.session.SessionState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -36,7 +38,8 @@ class DefaultSessionActionServiceTest {
     fun requestMessagePageForwardsBeforeAndLimit() = runTest {
         val session = RecordingSessionRepository()
         val outbox = RecordingOutboxService()
-        val service = DefaultSessionActionService(session, outbox)
+        val sync = RecordingSessionStateSyncService()
+        val service = DefaultSessionActionService(session, outbox, sync)
 
         val result = service.requestMessagePage(
             MessagePageInput(
@@ -55,7 +58,8 @@ class DefaultSessionActionServiceTest {
         val session = RecordingSessionRepository()
         val calls = mutableListOf<String>()
         val outbox = RecordingOutboxService(calls)
-        val service = DefaultSessionActionService(session, outbox)
+        val sync = RecordingSessionStateSyncService()
+        val service = DefaultSessionActionService(session, outbox, sync)
 
         service.archive(" s-1 ", " /repo/main ")
 
@@ -74,7 +78,8 @@ class DefaultSessionActionServiceTest {
         val session = RecordingSessionRepository()
         val calls = mutableListOf<String>()
         val outbox = RecordingOutboxService(calls)
-        val service = DefaultSessionActionService(session, outbox)
+        val sync = RecordingSessionStateSyncService()
+        val service = DefaultSessionActionService(session, outbox, sync)
 
         service.rename(
             RenameInput(
@@ -98,7 +103,8 @@ class DefaultSessionActionServiceTest {
     fun archiveSkipsOutboxWhenDirectoryIsMissing() = runTest {
         val session = RecordingSessionRepository()
         val outbox = RecordingOutboxService(mutableListOf())
-        val service = DefaultSessionActionService(session, outbox)
+        val sync = RecordingSessionStateSyncService()
+        val service = DefaultSessionActionService(session, outbox, sync)
 
         service.archive("s-1", null)
 
@@ -111,13 +117,29 @@ class DefaultSessionActionServiceTest {
     fun renameRejectsBlankTitle() = runTest {
         val session = RecordingSessionRepository()
         val outbox = RecordingOutboxService(mutableListOf())
-        val service = DefaultSessionActionService(session, outbox)
+        val sync = RecordingSessionStateSyncService()
+        val service = DefaultSessionActionService(session, outbox, sync)
 
         service.rename(RenameInput(sessionId = "s-1", title = "   ", directory = "/repo/main"))
 
         assertTrue(session.renameCalls.isEmpty())
         assertTrue(outbox.actions.isEmpty())
         assertFalse(session.pageCalls.any())
+    }
+
+    @Test
+    fun focusUpdatesSessionSyncAndPolicy() = runTest {
+        val session = RecordingSessionRepository()
+        val outbox = RecordingOutboxService()
+        val sync = RecordingSessionStateSyncService()
+        val service = DefaultSessionActionService(session, outbox, sync)
+
+        service.focus("s-1")
+
+        assertEquals(listOf("s-1"), session.focusCalls)
+        assertEquals(listOf("s-1:${SyncReason.FOCUS}"), session.syncCalls)
+        assertEquals(listOf("s-1"), sync.focusedCalls)
+        assertEquals(listOf("s-1:true"), sync.expectationCalls)
     }
 }
 
@@ -142,8 +164,14 @@ private class RecordingSessionRepository : SessionRepository {
     val pageCalls = mutableListOf<String>()
     val archiveCalls = mutableListOf<String>()
     val renameCalls = mutableListOf<String>()
+    val focusCalls = mutableListOf<String>()
+    val syncCalls = mutableListOf<String>()
 
     override fun observeSessionList(projectId: String, filter: SessionListFilter): Flow<List<SessionState>> {
+        return flowOf(emptyList())
+    }
+
+    override fun observeRecentSessionList(limit: Long): Flow<List<SessionState>> {
         return flowOf(emptyList())
     }
 
@@ -168,6 +196,7 @@ private class RecordingSessionRepository : SessionRepository {
     }
 
     override suspend fun focus(sessionId: String) {
+        focusCalls += sessionId
     }
 
     override suspend fun appendLocalMessage(input: AppendLocalMessageInput): PendingMessageRef {
@@ -198,5 +227,28 @@ private class RecordingSessionRepository : SessionRepository {
     }
 
     override suspend fun requestSync(sessionId: String, reason: SyncReason) {
+        syncCalls += "$sessionId:$reason"
+    }
+}
+
+private class RecordingSessionStateSyncService : SessionStateSyncService {
+    val focusedCalls = mutableListOf<String?>()
+    val expectationCalls = mutableListOf<String>()
+
+    override suspend fun ingestEvent(event: StreamEvent) {
+    }
+
+    override suspend fun runDue(now: Long) {
+    }
+
+    override suspend fun onFocusedSessionChanged(sessionId: String?) {
+        focusedCalls += sessionId
+    }
+
+    override suspend fun onExpectationChanged(sessionId: String, expectsRemoteUpdates: Boolean) {
+        expectationCalls += "$sessionId:$expectsRemoteUpdates"
+    }
+
+    override suspend fun evaluateStreamPolicy(now: Long) {
     }
 }
