@@ -1,0 +1,92 @@
+CREATE TABLE project (
+  id TEXT NOT NULL PRIMARY KEY,
+  worktree TEXT NOT NULL,
+  name TEXT NOT NULL,
+  sandboxes_json TEXT NOT NULL,
+  favorite INTEGER NOT NULL DEFAULT 0,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  selected INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE session (
+  id TEXT NOT NULL PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  version TEXT NOT NULL,
+  directory TEXT NOT NULL,
+  parent_id TEXT,
+  updated_at INTEGER,
+  archived_at INTEGER,
+  focused INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE message (
+  id TEXT NOT NULL PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  text TEXT NOT NULL,
+  sort_key TEXT NOT NULL,
+  created_at INTEGER,
+  completed_at INTEGER,
+  local_message_id TEXT,
+  pending INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE command (
+  project_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  source TEXT,
+  PRIMARY KEY (project_id, name)
+);
+
+CREATE TABLE connection (
+  id INTEGER NOT NULL PRIMARY KEY,
+  endpoint TEXT NOT NULL,
+  discovered TEXT,
+  status TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE sync_state (
+  session_id TEXT NOT NULL PRIMARY KEY,
+  status TEXT NOT NULL,
+  last_snapshot_at INTEGER,
+  last_stream_seen_at INTEGER,
+  last_error_at INTEGER,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE preference (
+  id INTEGER NOT NULL PRIMARY KEY,
+  quick_switch_scope TEXT NOT NULL,
+  sort_mode TEXT NOT NULL,
+  logs_filter_json TEXT NOT NULL,
+  logs_retention_policy TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX project_worktree_idx ON project(worktree);
+CREATE INDEX project_selected_idx ON project(selected, updated_at DESC, id DESC);
+CREATE INDEX session_project_idx ON session(project_id, archived_at, updated_at DESC, id DESC);
+CREATE INDEX session_focused_idx ON session(focused, updated_at DESC, id DESC);
+CREATE INDEX message_session_sort_idx ON message(session_id, sort_key DESC, id DESC);
+CREATE INDEX message_local_idx ON message(local_message_id);
+CREATE INDEX command_project_idx ON command(project_id, name);
+CREATE INDEX sync_state_status_idx ON sync_state(status, updated_at DESC, session_id DESC);
+
+DELETE FROM meta;
+DELETE FROM settings;
+DELETE FROM session_cache;
+DELETE FROM message_cache;
+DELETE FROM app_log;
+
+DELETE FROM project;
+DELETE FROM session;
+DELETE FROM message;
+DELETE FROM command;
+DELETE FROM connection;
+DELETE FROM sync_state;
+DELETE FROM preference;

@@ -2,11 +2,12 @@ package de.chennemann.opencode.mobile.ui.logs
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import de.chennemann.opencode.mobile.data.repository.LogPage
 import de.chennemann.opencode.mobile.di.DispatcherProvider
+import de.chennemann.opencode.mobile.domain.service.logs.LogsService
 import de.chennemann.opencode.mobile.domain.session.LogFacet
 import de.chennemann.opencode.mobile.domain.session.LogFilter
 import de.chennemann.opencode.mobile.domain.session.LogLevel
-import de.chennemann.opencode.mobile.domain.session.LogStoreGateway
 import de.chennemann.opencode.mobile.domain.session.LogUnit
 import de.chennemann.opencode.mobile.navigation.NavEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -25,7 +26,7 @@ import java.time.ZoneId
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LogsViewModel(
-    private val store: LogStoreGateway,
+    private val logs: LogsService,
     private val dispatchers: DispatcherProvider,
 ) : ViewModel() {
     private data class LocalState(
@@ -44,7 +45,9 @@ class LogsViewModel(
     private val navFlow = MutableSharedFlow<NavEvent>(extraBufferCapacity = 1)
 
     val nav = navFlow.asSharedFlow()
-    private val facet = store.observeFacet()
+    private val facet = local
+        .map(::filter)
+        .flatMapLatest(logs::observeFacets)
         .flowOn(lane)
         .stateIn(
             scope = viewModelScope,
@@ -54,39 +57,27 @@ class LogsViewModel(
 
     val state: StateFlow<LogsUiState> = local
         .flatMapLatest {
-            store.observe(
-                LogFilter(
-                    unit = it.unit,
-                    level = it.level,
-                    event = it.event,
-                    projectId = it.projectId,
-                    sessionId = it.sessionId,
-                    from = it.from,
-                    until = it.until,
-                    query = it.query,
-                    limit = MaxRows,
-                )
-            ).map { rows ->
+            logs.observeLogs(filter(it), LogPage(size = MaxRows)).map { rows ->
                 it to rows
             }
         }
         .combine(facet) { pair, facet ->
             val filter = pair.first
             val rows = pair.second
-                LogsUiState(
-                    units = LogUnit.entries.filterNot { value -> value == LogUnit.system },
-                    levels = LogLevel.entries,
-                    facet = facet,
-                    selectedUnit = filter.unit,
-                    selectedLevel = filter.level,
-                    selectedProjectId = filter.projectId,
-                    selectedSessionId = filter.sessionId,
-                    selectedEvent = filter.event,
-                    selectedFrom = filter.from,
-                    selectedUntil = filter.until,
-                    query = filter.query,
-                    rows = rows,
-                )
+            LogsUiState(
+                units = LogUnit.entries.filterNot { value -> value == LogUnit.system },
+                levels = LogLevel.entries,
+                facet = facet,
+                selectedUnit = filter.unit,
+                selectedLevel = filter.level,
+                selectedProjectId = filter.projectId,
+                selectedSessionId = filter.sessionId,
+                selectedEvent = filter.event,
+                selectedFrom = filter.from,
+                selectedUntil = filter.until,
+                query = filter.query,
+                rows = rows,
+            )
         }
         .flowOn(lane)
         .stateIn(
@@ -174,6 +165,20 @@ class LogsViewModel(
                 navFlow.tryEmit(NavEvent.Back)
             }
         }
+    }
+
+    private fun filter(value: LocalState): LogFilter {
+        return LogFilter(
+            unit = value.unit,
+            level = value.level,
+            event = value.event,
+            projectId = value.projectId,
+            sessionId = value.sessionId,
+            from = value.from,
+            until = value.until,
+            query = value.query,
+            limit = MaxRows,
+        )
     }
 }
 

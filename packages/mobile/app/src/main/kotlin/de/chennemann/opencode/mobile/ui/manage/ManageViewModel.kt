@@ -3,9 +3,16 @@ package de.chennemann.opencode.mobile.ui.manage
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import de.chennemann.opencode.mobile.di.DispatcherProvider
+import de.chennemann.opencode.mobile.domain.service.session.SessionReadService
+import de.chennemann.opencode.mobile.domain.usecase.connection.RefreshServerUseCase
+import de.chennemann.opencode.mobile.domain.usecase.connection.SetServerUrlUseCase
+import de.chennemann.opencode.mobile.domain.usecase.project.RemoveProjectUseCase
+import de.chennemann.opencode.mobile.domain.usecase.project.SelectProjectUseCase
+import de.chennemann.opencode.mobile.domain.usecase.project.ToggleProjectFavoriteUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.CreateSessionUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.FocusSessionUseCase
 import de.chennemann.opencode.mobile.domain.session.ProjectState
 import de.chennemann.opencode.mobile.domain.session.ServerState
-import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.navigation.NavEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -19,8 +26,15 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class ManageViewModel(
-    private val service: SessionServiceApi,
+    private val read: SessionReadService,
     private val dispatchers: DispatcherProvider,
+    private val selectProject: SelectProjectUseCase,
+    private val focusSession: FocusSessionUseCase,
+    private val toggleProjectFavorite: ToggleProjectFavoriteUseCase,
+    private val removeProject: RemoveProjectUseCase,
+    private val setServerUrl: SetServerUrlUseCase,
+    private val refreshServer: RefreshServerUseCase,
+    private val createSession: CreateSessionUseCase,
 ) : ViewModel() {
     private val lane = dispatchers.default.limitedParallelism(1)
 
@@ -34,10 +48,10 @@ class ManageViewModel(
 
     private val local = MutableStateFlow(
         LocalState(
-            projectPath = service.state.value.selectedProject.orEmpty(),
+            projectPath = read.state.value.selectedProject.orEmpty(),
             projectQuery = "",
             projectsExpanded = false,
-            selectedWorkspace = service.state.value.selectedProject,
+            selectedWorkspace = read.state.value.selectedProject,
             sessionScroll = 0L,
         )
     )
@@ -45,7 +59,7 @@ class ManageViewModel(
 
     val nav = navFlow.asSharedFlow()
 
-    val state: StateFlow<ManageUiState> = combine(service.state, local) { global, local ->
+    val state: StateFlow<ManageUiState> = combine(read.state, local) { global, local ->
         val listed = global.projects.map(::displayProject)
         val projects = filterProjects(listed, local.projectQuery)
         val workspaces = workspaceOptions(global.projects, global.selectedProject)
@@ -74,12 +88,12 @@ class ManageViewModel(
         .flowOn(lane)
         .stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = ManageUiState(
-            url = service.state.value.url,
-            discovered = service.state.value.discovered,
+        started = SharingStarted.Eagerly,
+            initialValue = ManageUiState(
+            url = read.state.value.url,
+            discovered = read.state.value.discovered,
             status = ServerState.Idle,
-            projectPath = service.state.value.selectedProject.orEmpty(),
+            projectPath = read.state.value.selectedProject.orEmpty(),
             projectQuery = "",
             loadingProjects = false,
             projectsExpanded = false,
@@ -97,15 +111,26 @@ class ManageViewModel(
         ),
     )
 
-    init {
-        service.start(viewModelScope)
-    }
-
     fun onEvent(event: ManageEvent) {
         when (event) {
-            is ManageEvent.UrlChanged -> service.updateUrl(event.value)
-            is ManageEvent.UseDiscoveredTapped -> service.useDiscovered()
-            is ManageEvent.ConnectTapped -> service.refresh()
+            is ManageEvent.UrlChanged -> {
+                viewModelScope.launch(lane) {
+                    setServerUrl(event.value)
+                }
+            }
+
+            is ManageEvent.UseDiscoveredTapped -> {
+                viewModelScope.launch(lane) {
+                    val value = read.state.value.discovered ?: return@launch
+                    setServerUrl(value)
+                }
+            }
+
+            is ManageEvent.ConnectTapped -> {
+                viewModelScope.launch(lane) {
+                    refreshServer(read.state.value.url)
+                }
+            }
             is ManageEvent.ProjectPathChanged -> {
                 local.value = local.value.copy(projectPath = event.value)
             }
@@ -121,7 +146,9 @@ class ManageViewModel(
             is ManageEvent.OpenProjectTapped -> {
                 val worktree = local.value.projectPath.trim()
                 if (worktree.isBlank()) return
-                service.selectProject(worktree)
+                viewModelScope.launch(lane) {
+                    selectProject(worktree)
+                }
                 local.value = local.value.copy(
                     projectPath = worktree,
                     selectedWorkspace = worktree,
@@ -135,15 +162,21 @@ class ManageViewModel(
                     selectedWorkspace = event.worktree,
                     sessionScroll = local.value.sessionScroll + 1,
                 )
-                service.selectProject(event.worktree)
+                viewModelScope.launch(lane) {
+                    selectProject(event.worktree)
+                }
             }
 
             is ManageEvent.ProjectFavoriteToggled -> {
-                service.toggleProjectFavorite(event.worktree)
+                viewModelScope.launch(lane) {
+                    toggleProjectFavorite(event.worktree)
+                }
             }
 
             is ManageEvent.ProjectRemoved -> {
-                service.removeProject(event.worktree)
+                viewModelScope.launch(lane) {
+                    removeProject(event.worktree)
+                }
             }
 
             is ManageEvent.WorkspaceSelected -> {
@@ -152,18 +185,20 @@ class ManageViewModel(
 
             is ManageEvent.CreateSessionTapped -> {
                 viewModelScope.launch(lane) {
-                    val workspaces = workspaceOptions(service.state.value.projects, service.state.value.selectedProject)
+                    val workspaces = workspaceOptions(read.state.value.projects, read.state.value.selectedProject)
                     val selected = selectedWorkspace(workspaces, local.value.selectedWorkspace)
                     val directory = selected?.directory ?: return@launch
-                    if (service.createSessionAndFocus(directory)) {
+                    if (createSession(directory)) {
                         navFlow.tryEmit(NavEvent.ToConversation)
                     }
                 }
             }
 
             is ManageEvent.OpenSessionTapped -> {
-                service.openSession(event.session)
-                navFlow.tryEmit(NavEvent.ToConversation)
+                viewModelScope.launch(lane) {
+                    focusSession(event.session.id)
+                    navFlow.tryEmit(NavEvent.ToConversation)
+                }
             }
 
             is ManageEvent.OpenLogsTapped -> {

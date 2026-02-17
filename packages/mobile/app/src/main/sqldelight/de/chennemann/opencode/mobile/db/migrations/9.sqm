@@ -1,0 +1,8 @@
+DROP TABLE IF EXISTS session_cache;
+DROP TABLE IF EXISTS message_cache;
+
+DELETE FROM settings WHERE key LIKE '%cursor%';
+DELETE FROM settings WHERE key LIKE 'project_favorite:%';
+DELETE FROM settings WHERE key LIKE 'project_hidden:%';
+DELETE FROM settings WHERE key LIKE 'session_quick_include:%';
+DELETE FROM settings WHERE key LIKE 'session_quick_exclude:%';

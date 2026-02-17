@@ -56,38 +56,38 @@ class FocusSessionUseCase(private val action: SessionActionService) {
 
 ## Checklist
 
-- [ ] S3-01: Add `SelectProjectUseCase.kt` exactly with trim + blank guard + single service call.
-- [ ] S3-02: Add `RequestProjectRefreshUseCase.kt` exactly with trim + blank guard + single service call.
-- [ ] S3-03: Add `FocusSessionUseCase.kt` exactly with trim + blank guard + single service call.
-- [ ] S3-04: Register use cases in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/di/AppModule.kt`.
-- [ ] S3-05: Update `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/manage/ManageViewModel.kt`:
+- [x] S3-01: Add `SelectProjectUseCase.kt` exactly with trim + blank guard + single service call.
+- [x] S3-02: Add `RequestProjectRefreshUseCase.kt` exactly with trim + blank guard + single service call.
+- [x] S3-03: Add `FocusSessionUseCase.kt` exactly with trim + blank guard + single service call.
+- [x] S3-04: Register use cases in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/di/AppModule.kt`.
+- [x] S3-05: Update `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/manage/ManageViewModel.kt`:
     - replace direct `service.selectProject(...)` in `OpenProjectTapped` with `SelectProjectUseCase`
     - replace direct `service.selectProject(...)` in `ProjectSelected` with `SelectProjectUseCase`
-- [ ] S3-06: Update `ManageViewModel` open-session path to call `FocusSessionUseCase(session.id)` before navigation.
-- [ ] S3-07: Update `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationViewModel.kt`:
+- [x] S3-06: Update `ManageViewModel` open-session path to call `FocusSessionUseCase(session.id)` before navigation.
+- [x] S3-07: Update `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/ui/conversation/ConversationViewModel.kt`:
     - `QuickSwitchMenuSessionTapped` uses `FocusSessionUseCase(session.id)`
     - `openToolCallSession(...)` uses `FocusSessionUseCase(id)` when session already exists
-- [ ] S3-08: Keep all read paths untouched (`service.state` remains source for UI state in this stage).
-- [ ] S3-09: Do not migrate send/archive/rename/requestMessagePage in this stage.
+- [x] S3-08: Keep all read paths untouched (`service.state` remains source for UI state in this stage).
+- [x] S3-09: Do not migrate send/archive/rename/requestMessagePage in this stage.
 
 ## Concrete Test Cases
 
 Every test case below is required:
 
-- [ ] T1: `SelectProjectUseCase` calls action with trimmed non-blank project ID.
-- [ ] T2: `SelectProjectUseCase` does not call action for blank input.
-- [ ] T3: `RequestProjectRefreshUseCase` calls action with trimmed non-blank project ID.
-- [ ] T4: `RequestProjectRefreshUseCase` does not call action for blank input.
-- [ ] T5: `FocusSessionUseCase` calls action with trimmed non-blank session ID.
-- [ ] T6: `FocusSessionUseCase` does not call action for blank input.
-- [ ] T7: `ManageViewModel.OpenProjectTapped` invokes `SelectProjectUseCase` exactly once.
-- [ ] T8: `ManageViewModel.ProjectSelected` invokes `SelectProjectUseCase` exactly once.
-- [ ] T9: `ManageViewModel.OpenSessionTapped` invokes `FocusSessionUseCase` before emitting navigation event.
-- [ ] T10: `ConversationViewModel.QuickSwitchMenuSessionTapped` invokes `FocusSessionUseCase` and keeps menu close behavior.
-- [ ] T11: `ConversationViewModel.openToolCallSession` uses `FocusSessionUseCase` for existing session IDs.
-- [ ] T12: `ConversationViewModel` still derives UI state from `service.state` with no repository flow migration yet.
+- [x] T1: `SelectProjectUseCase` calls action with trimmed non-blank project ID.
+- [x] T2: `SelectProjectUseCase` does not call action for blank input.
+- [x] T3: `RequestProjectRefreshUseCase` calls action with trimmed non-blank project ID.
+- [x] T4: `RequestProjectRefreshUseCase` does not call action for blank input.
+- [x] T5: `FocusSessionUseCase` calls action with trimmed non-blank session ID.
+- [x] T6: `FocusSessionUseCase` does not call action for blank input.
+- [x] T7: `ManageViewModel.OpenProjectTapped` invokes `SelectProjectUseCase` exactly once.
+- [x] T8: `ManageViewModel.ProjectSelected` invokes `SelectProjectUseCase` exactly once.
+- [x] T9: `ManageViewModel.OpenSessionTapped` invokes `FocusSessionUseCase` before emitting navigation event.
+- [x] T10: `ConversationViewModel.QuickSwitchMenuSessionTapped` invokes `FocusSessionUseCase` and keeps menu close behavior.
+- [x] T11: `ConversationViewModel.openToolCallSession` uses `FocusSessionUseCase` for existing session IDs.
+- [x] T12: `ConversationViewModel` still derives UI state from `service.state` with no repository flow migration yet.
 
 ## Verification
 
-- [ ] Run `./gradlew ktlintCheck`.
-- [ ] Run `./gradlew :app:test --tests "*SelectProjectUseCase*" --tests "*RequestProjectRefreshUseCase*" --tests "*FocusSessionUseCase*" --tests "*ManageViewModelTest*" --tests "*ConversationViewModelTest*"`.
+- [x] Run `./gradlew ktlintCheck`.
+- [x] Run `./gradlew :app:test --tests "*SelectProjectUseCase*" --tests "*RequestProjectRefreshUseCase*" --tests "*FocusSessionUseCase*" --tests "*ManageViewModelTest*" --tests "*ConversationViewModelTest*"`.

@@ -1,0 +1,26 @@
+ALTER TABLE sync_state ADD COLUMN next_sync_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sync_state ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sync_state ADD COLUMN expects_remote_updates INTEGER NOT NULL DEFAULT 0;
+
+UPDATE sync_state
+SET next_sync_at = COALESCE(updated_at, 0)
+WHERE next_sync_at = 0;
+
+CREATE TABLE stream_policy (
+  id INTEGER NOT NULL PRIMARY KEY,
+  stream_connected INTEGER NOT NULL DEFAULT 0,
+  disconnect_deadline_at INTEGER,
+  focused_session_id TEXT,
+  updated_at INTEGER NOT NULL
+);
+
+INSERT OR IGNORE INTO stream_policy(
+  id,
+  stream_connected,
+  disconnect_deadline_at,
+  focused_session_id,
+  updated_at
+)
+VALUES (1, 0, NULL, NULL, 0);
+
+CREATE INDEX sync_state_due_idx ON sync_state(next_sync_at ASC, status, updated_at ASC, session_id ASC);

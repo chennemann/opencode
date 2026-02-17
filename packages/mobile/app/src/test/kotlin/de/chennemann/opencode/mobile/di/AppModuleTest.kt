@@ -7,22 +7,37 @@ import de.chennemann.opencode.mobile.data.Health
 import de.chennemann.opencode.mobile.data.MdnsEntry
 import de.chennemann.opencode.mobile.data.MdnsGateway
 import de.chennemann.opencode.mobile.data.ProjectInfo
+import de.chennemann.opencode.mobile.data.PromptResponseIds
 import de.chennemann.opencode.mobile.data.ServerGateway
 import de.chennemann.opencode.mobile.data.ServerRepository
-import de.chennemann.opencode.mobile.data.SessionCacheRepository
 import de.chennemann.opencode.mobile.data.SessionInfo
 import de.chennemann.opencode.mobile.data.SessionMessageInfo
 import de.chennemann.opencode.mobile.db.AppDatabase
+import de.chennemann.opencode.mobile.domain.service.connection.ConnectionActionService
+import de.chennemann.opencode.mobile.domain.service.logs.LogsService
+import de.chennemann.opencode.mobile.domain.service.message.MessageActionService
+import de.chennemann.opencode.mobile.domain.service.project.ProjectActionService
+import de.chennemann.opencode.mobile.domain.service.session.SessionActionService
+import de.chennemann.opencode.mobile.domain.service.session.SessionReadService
 import de.chennemann.opencode.mobile.domain.session.CommandGateway
 import de.chennemann.opencode.mobile.domain.session.ConnectionGateway
 import de.chennemann.opencode.mobile.domain.session.ConnectivityGateway
 import de.chennemann.opencode.mobile.domain.session.LogGateway
 import de.chennemann.opencode.mobile.domain.session.MessageGateway
 import de.chennemann.opencode.mobile.domain.session.ProjectGateway
-import de.chennemann.opencode.mobile.domain.session.SessionCacheGateway
-import de.chennemann.opencode.mobile.domain.session.SessionService
-import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
+import de.chennemann.opencode.mobile.domain.usecase.connection.RefreshServerUseCase
+import de.chennemann.opencode.mobile.domain.usecase.connection.SetServerUrlUseCase
+import de.chennemann.opencode.mobile.domain.usecase.message.ExecuteCommandUseCase
+import de.chennemann.opencode.mobile.domain.usecase.message.SendMessageUseCase
+import de.chennemann.opencode.mobile.domain.usecase.project.RemoveProjectUseCase
+import de.chennemann.opencode.mobile.domain.usecase.project.SelectProjectUseCase
+import de.chennemann.opencode.mobile.domain.usecase.project.ToggleProjectFavoriteUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.ArchiveSessionUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.CreateSessionUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.FocusSessionUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.RenameSessionUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.RequestMessagePageUseCase
 import de.chennemann.opencode.mobile.ui.conversation.ConversationViewModel
 import de.chennemann.opencode.mobile.ui.logs.LogsViewModel
 import de.chennemann.opencode.mobile.ui.manage.ManageViewModel
@@ -33,9 +48,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.serialization.json.JsonObject
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertSame
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.koin.core.Koin
 import org.koin.core.context.startKoin
@@ -49,21 +64,36 @@ class AppModuleTest {
     }
 
     @Test
-    fun resolvesSessionServiceApiAndViewModels() {
+    fun resolvesReadServiceUseCasesAndViewModels() {
         val koin = startTestKoin()
 
-        val api = koin.get<SessionServiceApi>()
-        assertTrue(api is SessionService)
-        assertSame(api, koin.get<SessionService>())
-
+        val read = koin.get<SessionReadService>()
         val conversation = koin.get<ConversationViewModel>()
         val manage = koin.get<ManageViewModel>()
         val logs = koin.get<LogsViewModel>()
         assertNotNull(conversation)
         assertNotNull(manage)
         assertNotNull(logs)
-        assertSame(api, viewModelService(conversation))
-        assertSame(api, viewModelService(manage))
+        assertSame(read, viewModelRead(conversation))
+        assertSame(read, viewModelRead(manage))
+
+        assertNotNull(koin.get<ProjectActionService>())
+        assertNotNull(koin.get<SessionActionService>())
+        assertNotNull(koin.get<MessageActionService>())
+        assertNotNull(koin.get<ConnectionActionService>())
+        assertNotNull(koin.get<LogsService>())
+        assertNotNull(koin.get<SelectProjectUseCase>())
+        assertNotNull(koin.get<ToggleProjectFavoriteUseCase>())
+        assertNotNull(koin.get<RemoveProjectUseCase>())
+        assertNotNull(koin.get<FocusSessionUseCase>())
+        assertNotNull(koin.get<CreateSessionUseCase>())
+        assertNotNull(koin.get<SetServerUrlUseCase>())
+        assertNotNull(koin.get<RefreshServerUseCase>())
+        assertNotNull(koin.get<SendMessageUseCase>())
+        assertNotNull(koin.get<ExecuteCommandUseCase>())
+        assertNotNull(koin.get<RequestMessagePageUseCase>())
+        assertNotNull(koin.get<ArchiveSessionUseCase>())
+        assertNotNull(koin.get<RenameSessionUseCase>())
     }
 
     @Test
@@ -76,9 +106,43 @@ class AppModuleTest {
         assertSame(repo, koin.get<CommandGateway>())
         assertSame(repo, koin.get<MessageGateway>())
         assertSame(repo, koin.get<StreamGateway>())
+    }
 
-        val cache = koin.get<SessionCacheRepository>()
-        assertSame(cache, koin.get<SessionCacheGateway>())
+    @Test
+    fun usesUpdatedViewModelConstructorSignatures() {
+        assertEquals(
+            listOf(
+                SessionReadService::class.java,
+                DispatcherProvider::class.java,
+                FocusSessionUseCase::class.java,
+                SendMessageUseCase::class.java,
+                ExecuteCommandUseCase::class.java,
+                RequestMessagePageUseCase::class.java,
+                ArchiveSessionUseCase::class.java,
+                RenameSessionUseCase::class.java,
+                CreateSessionUseCase::class.java,
+                RefreshServerUseCase::class.java,
+            ),
+            ConversationViewModel::class.java.declaredConstructors.single().parameterTypes.toList(),
+        )
+        assertEquals(
+            listOf(
+                SessionReadService::class.java,
+                DispatcherProvider::class.java,
+                SelectProjectUseCase::class.java,
+                FocusSessionUseCase::class.java,
+                ToggleProjectFavoriteUseCase::class.java,
+                RemoveProjectUseCase::class.java,
+                SetServerUrlUseCase::class.java,
+                RefreshServerUseCase::class.java,
+                CreateSessionUseCase::class.java,
+            ),
+            ManageViewModel::class.java.declaredConstructors.single().parameterTypes.toList(),
+        )
+        assertEquals(
+            listOf(LogsService::class.java, DispatcherProvider::class.java),
+            LogsViewModel::class.java.declaredConstructors.single().parameterTypes.toList(),
+        )
     }
 
     private fun startTestKoin(): Koin {
@@ -93,20 +157,15 @@ class AppModuleTest {
                     single<ConnectivityGateway> { FakeConnectivityGateway() }
                     single<ServerGateway> { FakeServerGateway() }
                     single<LogGateway> { FakeLogGateway() }
-                    single<CoroutineRolloutFlag> {
-                        object : CoroutineRolloutFlag {
-                            override val useMigratedExecution = true
-                        }
-                    }
                 }
             )
         }.koin
     }
 
-    private fun viewModelService(viewModel: Any): SessionServiceApi {
-        val field = viewModel.javaClass.getDeclaredField("service")
+    private fun viewModelRead(viewModel: Any): SessionReadService {
+        val field = viewModel.javaClass.getDeclaredField("read")
         field.isAccessible = true
-        return field.get(viewModel) as SessionServiceApi
+        return field.get(viewModel) as SessionReadService
     }
 
     private fun db(): AppDatabase {
@@ -163,9 +222,11 @@ private class FakeServerGateway : ServerGateway {
         return emptyList()
     }
 
-    override suspend fun archiveSession(baseUrl: String, sessionId: String, directory: String) = Unit
+    override suspend fun archiveSession(baseUrl: String, sessionId: String, directory: String) {
+    }
 
-    override suspend fun renameSession(baseUrl: String, sessionId: String, directory: String, title: String) = Unit
+    override suspend fun renameSession(baseUrl: String, sessionId: String, directory: String, title: String) {
+    }
 
     override suspend fun createSession(baseUrl: String, worktree: String, title: String): SessionInfo {
         return SessionInfo(
@@ -208,10 +269,14 @@ private class FakeServerGateway : ServerGateway {
                 retry = null,
             )
         )
-        return lastEventId
+        return null
     }
 
-    override suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String, agent: String) = Unit
+    override suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String, agent: String): PromptResponseIds {
+        return PromptResponseIds(parentId = "user", messageId = "assistant")
+    }
 
-    override suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String, agent: String) = Unit
+    override suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String, agent: String): PromptResponseIds {
+        return PromptResponseIds(parentId = "user", messageId = "assistant")
+    }
 }

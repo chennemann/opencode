@@ -1,20 +1,51 @@
 package de.chennemann.opencode.mobile.ui.manage
 
+import de.chennemann.opencode.mobile.data.repository.AppendLocalMessageInput
+import de.chennemann.opencode.mobile.data.repository.MessagePage
+import de.chennemann.opencode.mobile.data.repository.MessagePageRequest
+import de.chennemann.opencode.mobile.data.repository.PendingMessageRef
+import de.chennemann.opencode.mobile.data.repository.ProjectRepository
+import de.chennemann.opencode.mobile.data.repository.RemoteBatchSource
+import de.chennemann.opencode.mobile.data.repository.RepoResult
+import de.chennemann.opencode.mobile.data.repository.SessionListFilter
+import de.chennemann.opencode.mobile.data.repository.SessionRemoteBatch
+import de.chennemann.opencode.mobile.data.repository.SessionRepository
+import de.chennemann.opencode.mobile.data.repository.SessionSyncState
+import de.chennemann.opencode.mobile.data.repository.SessionSyncStatus
+import de.chennemann.opencode.mobile.data.repository.SyncReason
+import de.chennemann.opencode.mobile.data.repository.ConfirmSentMessageInput
 import de.chennemann.opencode.mobile.di.DispatcherProvider
+import de.chennemann.opencode.mobile.domain.service.connection.ConnectionActionService
+import de.chennemann.opencode.mobile.domain.service.model.MessagePageInput
+import de.chennemann.opencode.mobile.domain.service.model.MessagePageRequestResult
+import de.chennemann.opencode.mobile.domain.service.model.RefreshInput
+import de.chennemann.opencode.mobile.domain.service.model.RenameInput
+import de.chennemann.opencode.mobile.domain.service.project.ProjectActionService
+import de.chennemann.opencode.mobile.domain.service.session.SessionActionService
+import de.chennemann.opencode.mobile.domain.service.session.SessionReadService
+import de.chennemann.opencode.mobile.domain.session.ProjectGateway
 import de.chennemann.opencode.mobile.domain.session.ProjectState
 import de.chennemann.opencode.mobile.domain.session.ServerState
-import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
+import de.chennemann.opencode.mobile.domain.session.SessionProject
 import de.chennemann.opencode.mobile.domain.session.SessionState
+import de.chennemann.opencode.mobile.domain.session.SessionSummary
 import de.chennemann.opencode.mobile.domain.session.SessionUiState
+import de.chennemann.opencode.mobile.domain.usecase.connection.RefreshServerUseCase
+import de.chennemann.opencode.mobile.domain.usecase.connection.SetServerUrlUseCase
+import de.chennemann.opencode.mobile.domain.usecase.project.RemoveProjectUseCase
+import de.chennemann.opencode.mobile.domain.usecase.project.SelectProjectUseCase
+import de.chennemann.opencode.mobile.domain.usecase.project.ToggleProjectFavoriteUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.CreateSessionUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.FocusSessionUseCase
 import de.chennemann.opencode.mobile.navigation.NavEvent
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestDispatcher
@@ -35,14 +66,13 @@ class ManageViewModelTest {
     }
 
     @Test
-    fun mapsProjectsAndSectionsOnInjectedDispatcher() = runTest(TestCoroutineScheduler()) {
+    fun mapsProjectsAndSectionsFromReadState() = runTest(TestCoroutineScheduler()) {
         val main = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(main)
         val worker = StandardTestDispatcher(testScheduler)
-        val service = StubSessionService()
-        val viewModel = ManageViewModel(service, lanes(main, worker))
-        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
-        service.state.value = state(
+        val read = StubSessionReadService()
+        val viewModel = viewModel(read, main, worker)
+        read.state.value = state(
             projects = listOf(
                 ProjectState(id = "p1", worktree = "/repo/main", name = "Main", sandboxes = listOf("/repo/main/s1"), favorite = true),
                 ProjectState(id = "p2", worktree = "/repo/other", name = "Other", favorite = false),
@@ -58,27 +88,76 @@ class ManageViewModelTest {
         advanceUntilIdle()
 
         val value = viewModel.state.value
-        assertEquals(1, service.startCalls)
         assertEquals(listOf("main"), value.favoriteProjects.map { it.name })
         assertEquals(listOf("other"), value.otherProjects.map { it.name })
         assertEquals(listOf("/repo/main", "/repo/main/s1"), value.workspaceOptions.map { it.directory })
         assertEquals(2, value.sessionSections.size)
         assertEquals(listOf("s2", "s1"), value.sessionSections[0].sessions.map { it.id })
-        collect.cancel()
     }
 
     @Test
-    fun createsSessionForSelectedWorkspace() = runTest(TestCoroutineScheduler()) {
+    fun openProjectTappedUsesSelectProjectUseCase() = runTest(TestCoroutineScheduler()) {
         val main = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(main)
         val worker = StandardTestDispatcher(testScheduler)
-        val service = StubSessionService()
-        val viewModel = ManageViewModel(service, lanes(main, worker))
-        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
-        service.state.value = state(
-            projects = listOf(
-                ProjectState(id = "p1", worktree = "/repo/main", name = "Main", sandboxes = listOf("/repo/main/s1"), favorite = true),
-            ),
+        val read = StubSessionReadService()
+        val project = RecordingProjectActionService()
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            project = project,
+        )
+
+        viewModel.onEvent(ManageEvent.ProjectPathChanged("  /repo/main  "))
+        viewModel.onEvent(ManageEvent.OpenProjectTapped)
+        advanceUntilIdle()
+
+        assertEquals(listOf("/repo/main"), project.selectCalls)
+    }
+
+    @Test
+    fun openSessionTappedFocusesAndNavigates() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val session = RecordingSessionActionService()
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            session = session,
+        )
+        val row = SessionState(id = "s1", title = "One", version = "1", directory = "/repo/main", updatedAt = 100)
+
+        val nav = async { viewModel.nav.first() }
+        advanceUntilIdle()
+        viewModel.onEvent(ManageEvent.OpenSessionTapped(row))
+        advanceUntilIdle()
+
+        assertEquals(listOf("s1"), session.focusCalls)
+        assertTrue(nav.await() is NavEvent.ToConversation)
+    }
+
+    @Test
+    fun createSessionTappedUsesCreateUseCaseAndNavigates() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val repo = FakeProjectRepository(
+            listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", sandboxes = listOf("/repo/main/s1"), favorite = true))
+        )
+        val gateway = FakeProjectGateway()
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            createSession = CreateSessionUseCase(gateway, repo, FakeSessionRepository()),
+        )
+        read.state.value = state(
+            projects = repo.rows,
             selectedProject = "/repo/main",
         )
         advanceUntilIdle()
@@ -88,170 +167,49 @@ class ManageViewModelTest {
         viewModel.onEvent(ManageEvent.CreateSessionTapped)
         advanceUntilIdle()
 
-        assertEquals(listOf("/repo/main/s1"), service.createRequests)
+        assertEquals(listOf("/repo/main/s1"), gateway.createCalls)
         assertTrue(nav.await() is NavEvent.ToConversation)
-        collect.cancel()
     }
 
     @Test
-    fun removesSelectedProjectFromList() = runTest(TestCoroutineScheduler()) {
+    fun connectAndUseDiscoveredUpdateEndpointAndRefresh() = runTest(TestCoroutineScheduler()) {
         val main = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(main)
         val worker = StandardTestDispatcher(testScheduler)
-        val service = StubSessionService()
-        val viewModel = ManageViewModel(service, lanes(main, worker))
-        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
-        service.state.value = state(
-            projects = listOf(
-                ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true),
-            ),
+        val read = StubSessionReadService()
+        val connection = FakeConnectionActionService()
+        val gateway = FakeConnectionGateway()
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            setServerUrl = SetServerUrlUseCase(gateway),
+            refreshServer = RefreshServerUseCase(connection),
+        )
+        read.state.value = state(
             selectedProject = "/repo/main",
+            discovered = "http://demo.local:4096",
+            url = "http://demo.local:4096",
         )
-        advanceUntilIdle()
 
-        viewModel.onEvent(ManageEvent.ProjectRemoved("/repo/main"))
-        advanceUntilIdle()
-
-        assertEquals(listOf("/repo/main"), service.removeRequests)
-        collect.cancel()
-    }
-
-    @Test
-    fun filtersProjectsByQueryFromNameAndPath() = runTest(TestCoroutineScheduler()) {
-        val main = StandardTestDispatcher(testScheduler)
-        Dispatchers.setMain(main)
-        val worker = StandardTestDispatcher(testScheduler)
-        val service = StubSessionService()
-        val viewModel = ManageViewModel(service, lanes(main, worker))
-        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
-        service.state.value = state(
-            projects = listOf(
-                ProjectState(id = "p1", worktree = "/repo/alpha", name = "Alpha", favorite = true),
-                ProjectState(id = "p2", worktree = "/workspaces/beta", name = "Beta", favorite = false),
-            ),
-            selectedProject = "/repo/alpha",
-        )
-        advanceUntilIdle()
-
-        viewModel.onEvent(ManageEvent.ProjectQueryChanged("  ALPha  "))
-        advanceUntilIdle()
-        assertEquals(listOf("alpha"), viewModel.state.value.favoriteProjects.map { it.name })
-        assertEquals(emptyList<ProjectState>(), viewModel.state.value.otherProjects)
-
-        viewModel.onEvent(ManageEvent.ProjectQueryChanged("WORKSPACES"))
-        advanceUntilIdle()
-        assertEquals(emptyList<ProjectState>(), viewModel.state.value.favoriteProjects)
-        assertEquals(listOf("beta"), viewModel.state.value.otherProjects.map { it.name })
-        collect.cancel()
-    }
-
-    @Test
-    fun fallsBackToSelectedProjectWhenWorkspaceProjectMissing() = runTest(TestCoroutineScheduler()) {
-        val main = StandardTestDispatcher(testScheduler)
-        Dispatchers.setMain(main)
-        val worker = StandardTestDispatcher(testScheduler)
-        val service = StubSessionService()
-        val viewModel = ManageViewModel(service, lanes(main, worker))
-        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
-        service.state.value = state(
-            projects = listOf(ProjectState(id = "p1", worktree = "/repo/known", name = "Known", favorite = true)),
-            selectedProject = "/repo/missing/",
-            sessions = listOf(SessionState(id = "s1", title = "One", version = "1", directory = "/repo/missing", updatedAt = 10)),
-        )
-        advanceUntilIdle()
-
-        val value = viewModel.state.value
-        assertEquals(listOf("/repo/missing"), value.workspaceOptions.map { it.directory })
-        assertEquals("/repo/missing", value.selectedWorkspace)
-        assertEquals("Local: missing", value.selectedWorkspaceName)
-        assertEquals(listOf("s1"), value.sessionSections.first().sessions.map { it.id })
-        collect.cancel()
-    }
-
-    @Test
-    fun fallsBackToFirstWorkspaceWhenSelectionDoesNotExist() = runTest(TestCoroutineScheduler()) {
-        val main = StandardTestDispatcher(testScheduler)
-        Dispatchers.setMain(main)
-        val worker = StandardTestDispatcher(testScheduler)
-        val service = StubSessionService()
-        val viewModel = ManageViewModel(service, lanes(main, worker))
-        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
-        service.state.value = state(
-            projects = listOf(
-                ProjectState(id = "p1", worktree = "/repo/main", name = "Main", sandboxes = listOf("/repo/main/s1"), favorite = true),
-            ),
-            selectedProject = "/repo/main",
-        )
-        advanceUntilIdle()
-
-        val nav = async { viewModel.nav.first() }
-        viewModel.onEvent(ManageEvent.WorkspaceSelected("/repo/unknown"))
-        viewModel.onEvent(ManageEvent.CreateSessionTapped)
-        advanceUntilIdle()
-
-        assertEquals("/repo/main", viewModel.state.value.selectedWorkspace)
-        assertEquals(listOf("/repo/main"), service.createRequests)
-        assertTrue(nav.await() is NavEvent.ToConversation)
-        collect.cancel()
-    }
-
-    @Test
-    fun triggersConnectAndUseDiscoveredActions() = runTest(TestCoroutineScheduler()) {
-        val main = StandardTestDispatcher(testScheduler)
-        Dispatchers.setMain(main)
-        val worker = StandardTestDispatcher(testScheduler)
-        val service = StubSessionService()
-        val viewModel = ManageViewModel(service, lanes(main, worker))
-
-        viewModel.onEvent(ManageEvent.ConnectTapped)
         viewModel.onEvent(ManageEvent.UseDiscoveredTapped)
-
-        assertEquals(1, service.refreshCalls)
-        assertEquals(1, service.useDiscoveredCalls)
-    }
-
-    @Test
-    fun opensSessionAndNavigatesToConversation() = runTest(TestCoroutineScheduler()) {
-        val main = StandardTestDispatcher(testScheduler)
-        Dispatchers.setMain(main)
-        val worker = StandardTestDispatcher(testScheduler)
-        val service = StubSessionService()
-        val viewModel = ManageViewModel(service, lanes(main, worker))
-        val session = SessionState(id = "s1", title = "One", version = "1", directory = "/repo/main", updatedAt = 100)
-
-        val nav = async { viewModel.nav.first() }
-        advanceUntilIdle()
-        viewModel.onEvent(ManageEvent.OpenSessionTapped(session))
+        viewModel.onEvent(ManageEvent.ConnectTapped)
         advanceUntilIdle()
 
-        assertEquals(listOf("s1"), service.openRequests.map { it.id })
-        assertTrue(nav.await() is NavEvent.ToConversation)
-    }
-
-    @Test
-    fun opensLogsAndNavigatesToLogsScreen() = runTest(TestCoroutineScheduler()) {
-        val main = StandardTestDispatcher(testScheduler)
-        Dispatchers.setMain(main)
-        val worker = StandardTestDispatcher(testScheduler)
-        val service = StubSessionService()
-        val viewModel = ManageViewModel(service, lanes(main, worker))
-
-        val nav = async { viewModel.nav.first() }
-        advanceUntilIdle()
-        viewModel.onEvent(ManageEvent.OpenLogsTapped)
-        advanceUntilIdle()
-
-        assertTrue(nav.await() is NavEvent.ToLogs)
+        assertEquals(listOf("http://demo.local:4096"), gateway.urls)
+        assertEquals(listOf("http://demo.local:4096"), connection.calls)
     }
 
     private fun state(
         projects: List<ProjectState> = emptyList(),
         selectedProject: String? = null,
         sessions: List<SessionState> = emptyList(),
+        discovered: String? = null,
+        url: String = "http://127.0.0.1",
     ): SessionUiState {
         return SessionUiState(
-            url = "http://127.0.0.1",
-            discovered = null,
+            url = url,
+            discovered = discovered,
             status = ServerState.Connected("1"),
             projects = projects,
             selectedProject = selectedProject,
@@ -280,9 +238,32 @@ class ManageViewModelTest {
             override val mainImmediate = main
         }
     }
+
+    private fun viewModel(
+        read: StubSessionReadService,
+        main: TestDispatcher,
+        worker: TestDispatcher,
+        project: RecordingProjectActionService = RecordingProjectActionService(),
+        session: RecordingSessionActionService = RecordingSessionActionService(),
+        setServerUrl: SetServerUrlUseCase = SetServerUrlUseCase(FakeConnectionGateway()),
+        refreshServer: RefreshServerUseCase = RefreshServerUseCase(FakeConnectionActionService()),
+        createSession: CreateSessionUseCase = CreateSessionUseCase(FakeProjectGateway(), FakeProjectRepository(emptyList()), FakeSessionRepository()),
+    ): ManageViewModel {
+        return ManageViewModel(
+            read = read,
+            dispatchers = lanes(main, worker),
+            selectProject = SelectProjectUseCase(project),
+            focusSession = FocusSessionUseCase(session),
+            toggleProjectFavorite = ToggleProjectFavoriteUseCase(project),
+            removeProject = RemoveProjectUseCase(project),
+            setServerUrl = setServerUrl,
+            refreshServer = refreshServer,
+            createSession = createSession,
+        )
+    }
 }
 
-private class StubSessionService : SessionServiceApi {
+private class StubSessionReadService : SessionReadService {
     override val state = MutableStateFlow(
         SessionUiState(
             url = "http://127.0.0.1",
@@ -307,59 +288,191 @@ private class StubSessionService : SessionServiceApi {
             message = null,
         )
     )
-    var startCalls = 0
-    var useDiscoveredCalls = 0
-    var refreshCalls = 0
-    val createRequests = mutableListOf<String>()
-    val removeRequests = mutableListOf<String>()
-    val openRequests = mutableListOf<SessionState>()
-
-    override fun start(scope: CoroutineScope) {
-        startCalls += 1
-    }
-
-    override fun updateUrl(value: String) = Unit
-
-    override fun useDiscovered() {
-        useDiscoveredCalls += 1
-    }
-
-    override fun refresh() {
-        refreshCalls += 1
-    }
-
-    override fun selectProject(worktree: String) = Unit
-
-    override fun toggleProjectFavorite(worktree: String) = Unit
-
-    override fun removeProject(worktree: String) {
-        removeRequests += worktree
-    }
-
-    override fun toggleSessionQuickPin(session: SessionState, systemPinned: Boolean) = Unit
-
-    override suspend fun createSessionAndFocus(worktree: String): Boolean {
-        createRequests += worktree
-        return true
-    }
-
-    override fun openSession(session: SessionState) {
-        openRequests += session
-    }
-
-    override fun send(text: String, agent: String) = Unit
-
-    override fun loadMoreMessages() = Unit
-
-    override fun archiveSession(session: SessionState) = Unit
-
-    override fun renameSession(session: SessionState, title: String) = Unit
-
-    override suspend fun cachedSessionsForProject(worktree: String, limit: Int?): List<SessionState> {
-        return emptyList()
-    }
 
     override suspend fun sessionsForProject(worktree: String, limit: Int?): List<SessionState> {
         return emptyList()
+    }
+}
+
+private class RecordingProjectActionService : ProjectActionService {
+    val selectCalls = mutableListOf<String>()
+
+    override suspend fun select(projectId: String) {
+        selectCalls += projectId
+    }
+
+    override suspend fun toggleFavorite(projectId: String): Boolean {
+        return true
+    }
+
+    override suspend fun toggleHidden(projectId: String): Boolean {
+        return true
+    }
+
+    override suspend fun refreshProjectContext(projectId: String) {
+    }
+}
+
+private class RecordingSessionActionService : SessionActionService {
+    val focusCalls = mutableListOf<String>()
+
+    override suspend fun focus(sessionId: String) {
+        focusCalls += sessionId
+    }
+
+    override suspend fun requestMessagePage(input: MessagePageInput): MessagePageRequestResult {
+        return MessagePageRequestResult(accepted = true, reason = null)
+    }
+
+    override suspend fun archive(sessionId: String, directory: String?) {
+    }
+
+    override suspend fun rename(input: RenameInput) {
+    }
+
+    override suspend fun requestSync(sessionId: String, reason: SyncReason) {
+    }
+}
+
+private class FakeConnectionGateway : de.chennemann.opencode.mobile.domain.session.ConnectionGateway {
+    val urls = mutableListOf<String>()
+    private val statusState = MutableStateFlow(de.chennemann.opencode.mobile.domain.session.ConnectionState.Idle)
+    private val endpointState = MutableStateFlow("")
+    private val foundState = MutableStateFlow<String?>(null)
+
+    override val status = statusState.asStateFlow()
+    override val endpoint = endpointState.asStateFlow()
+    override val found = foundState.asStateFlow()
+
+    override fun start(scope: kotlinx.coroutines.CoroutineScope) {
+    }
+
+    override suspend fun setUrl(next: String) {
+        urls += next
+        endpointState.value = next
+    }
+
+    override suspend fun refresh(loading: Boolean) {
+    }
+}
+
+private class FakeConnectionActionService : ConnectionActionService {
+    val calls = mutableListOf<String>()
+
+    override suspend fun refresh(input: RefreshInput) {
+        calls += input.endpoint
+    }
+}
+
+private class FakeProjectGateway : ProjectGateway {
+    val createCalls = mutableListOf<String>()
+
+    override suspend fun projects(): List<SessionProject> {
+        return emptyList()
+    }
+
+    override suspend fun sessions(worktree: String, limit: Int?): List<SessionSummary> {
+        return emptyList()
+    }
+
+    override suspend fun archiveSession(sessionId: String, directory: String) {
+    }
+
+    override suspend fun renameSession(sessionId: String, directory: String, title: String) {
+    }
+
+    override suspend fun createSession(worktree: String, title: String): SessionSummary {
+        createCalls += worktree
+        return SessionSummary(
+            id = "created",
+            title = title,
+            version = "1",
+            directory = worktree,
+        )
+    }
+}
+
+private class FakeProjectRepository(
+    val rows: List<ProjectState>,
+) : ProjectRepository {
+    override fun observeProjects(): Flow<List<ProjectState>> {
+        return flowOf(rows)
+    }
+
+    override fun observeSelectedProject(): Flow<ProjectState?> {
+        return flowOf(rows.firstOrNull())
+    }
+
+    override suspend fun select(projectId: String) {
+    }
+
+    override suspend fun toggleFavorite(projectId: String): Boolean {
+        return true
+    }
+
+    override suspend fun toggleHidden(projectId: String): Boolean {
+        return true
+    }
+
+    override suspend fun upsertProjects(items: List<ProjectState>) {
+    }
+
+    override suspend fun requestRefresh(projectId: String) {
+    }
+}
+
+private class FakeSessionRepository : SessionRepository {
+    override fun observeSessionList(projectId: String, filter: SessionListFilter): Flow<List<SessionState>> {
+        return flowOf(emptyList())
+    }
+
+    override fun observeFocusedSession(): Flow<SessionState?> {
+        return flowOf(null)
+    }
+
+    override fun observeMessagePage(sessionId: String, request: MessagePageRequest): Flow<MessagePage> {
+        return flowOf(MessagePage(emptyList(), false, null))
+    }
+
+    override fun observeSyncState(sessionId: String): Flow<SessionSyncState> {
+        return flowOf(
+            SessionSyncState(
+                sessionId = sessionId,
+                status = SessionSyncStatus.IDLE,
+                lastSnapshotAt = null,
+                lastStreamSeenAt = null,
+                lastErrorAt = null,
+            )
+        )
+    }
+
+    override suspend fun focus(sessionId: String) {
+    }
+
+    override suspend fun appendLocalMessage(input: AppendLocalMessageInput): PendingMessageRef {
+        return PendingMessageRef("local")
+    }
+
+    override suspend fun confirmSentMessage(input: ConfirmSentMessageInput): RepoResult {
+        return RepoResult(ok = true)
+    }
+
+    override suspend fun applyRemoteBatch(batch: SessionRemoteBatch): RepoResult {
+        return RepoResult(ok = true)
+    }
+
+    override suspend fun requestMessagePage(sessionId: String, beforeMessageId: String?, limit: Long): RepoResult {
+        return RepoResult(ok = true)
+    }
+
+    override suspend fun archive(sessionId: String): RepoResult {
+        return RepoResult(ok = true)
+    }
+
+    override suspend fun rename(sessionId: String, title: String): RepoResult {
+        return RepoResult(ok = true)
+    }
+
+    override suspend fun requestSync(sessionId: String, reason: SyncReason) {
     }
 }

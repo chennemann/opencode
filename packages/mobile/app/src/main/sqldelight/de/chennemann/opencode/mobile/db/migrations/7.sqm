@@ -1,0 +1,21 @@
+ALTER TABLE message ADD COLUMN send_state TEXT NOT NULL DEFAULT 'none';
+
+CREATE TABLE outbox (
+  outbox_id TEXT NOT NULL PRIMARY KEY,
+  type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  directory TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  local_message_id TEXT,
+  server_message_id TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  available_at INTEGER NOT NULL,
+  last_error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX outbox_status_available_idx ON outbox(status, available_at ASC, created_at ASC, outbox_id ASC);
+CREATE INDEX outbox_session_created_idx ON outbox(session_id, created_at DESC, outbox_id DESC);
+CREATE INDEX outbox_local_message_idx ON outbox(local_message_id);

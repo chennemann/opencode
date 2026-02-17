@@ -63,31 +63,6 @@ class ServerRepositoryTest {
     }
 
     @Test
-    fun setStreamCursorCompletesWhileMainPaused() = runTest {
-        val main = StandardTestDispatcher(testScheduler)
-        Dispatchers.setMain(main)
-        val worker = StandardTestDispatcher(testScheduler)
-        val repo = ServerRepository(
-            db = db(),
-            mdns = StubMdns(),
-            service = StubServer(),
-            network = StubNetwork(),
-            dispatchers = lanes(main, worker),
-            log = StubLog(),
-        )
-
-        val write = async { repo.setStreamCursor("cursor-1") }
-        advanceUntilIdle()
-        assertTrue(write.isCompleted)
-        write.await()
-
-        val read = async { repo.streamCursor() }
-        advanceUntilIdle()
-        assertTrue(read.isCompleted)
-        assertEquals("cursor-1", read.await())
-    }
-
-    @Test
     fun refreshTransitionsThroughSuccessUnhealthyAndRecovery() = runTest {
         val main = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(main)
@@ -166,33 +141,6 @@ class ServerRepositoryTest {
         } finally {
             scope.coroutineContext[Job]?.cancel()
         }
-    }
-
-    @Test
-    fun streamCursorIsScopedToNormalizedUrl() = runTest {
-        val main = StandardTestDispatcher(testScheduler)
-        Dispatchers.setMain(main)
-        val worker = StandardTestDispatcher(testScheduler)
-        val repo = ServerRepository(
-            db = db(),
-            mdns = StubMdns(),
-            service = StubServer(),
-            network = StubNetwork(),
-            dispatchers = lanes(main, worker),
-            log = StubLog(),
-        )
-
-        repo.setUrl("a.local:4096")
-        repo.setStreamCursor("cursor-a")
-        assertEquals("cursor-a", repo.streamCursor())
-
-        repo.setUrl(" b.local:4096/ ")
-        assertNull(repo.streamCursor())
-        repo.setStreamCursor("cursor-b")
-        assertEquals("cursor-b", repo.streamCursor())
-
-        repo.setUrl("http://a.local:4096/")
-        assertEquals("cursor-a", repo.streamCursor())
     }
 
     @Test
@@ -340,7 +288,11 @@ private class StubServer : ServerGateway {
         return lastEventId
     }
 
-    override suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String, agent: String) = Unit
+    override suspend fun sendMessage(baseUrl: String, sessionId: String, directory: String, text: String, agent: String): PromptResponseIds {
+        return PromptResponseIds(parentId = "user", messageId = "assistant")
+    }
 
-    override suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String, agent: String) = Unit
+    override suspend fun sendCommand(baseUrl: String, sessionId: String, directory: String, name: String, arguments: String, agent: String): PromptResponseIds {
+        return PromptResponseIds(parentId = "user", messageId = "assistant")
+    }
 }

@@ -1,14 +1,14 @@
 package de.chennemann.opencode.mobile.ui.logs
 
 import de.chennemann.opencode.mobile.di.DispatcherProvider
+import de.chennemann.opencode.mobile.data.repository.LogPage
+import de.chennemann.opencode.mobile.domain.service.logs.LogsService
 import de.chennemann.opencode.mobile.domain.session.LogEntry
 import de.chennemann.opencode.mobile.domain.session.LogFilter
 import de.chennemann.opencode.mobile.domain.session.LogFacet
 import de.chennemann.opencode.mobile.domain.session.LogLevel
 import de.chennemann.opencode.mobile.domain.session.LogProjectOption
-import de.chennemann.opencode.mobile.domain.session.LogRecord
 import de.chennemann.opencode.mobile.domain.session.LogSessionOption
-import de.chennemann.opencode.mobile.domain.session.LogStoreGateway
 import de.chennemann.opencode.mobile.domain.session.LogUnit
 import de.chennemann.opencode.mobile.navigation.NavEvent
 import kotlinx.coroutines.Dispatchers
@@ -110,7 +110,7 @@ class LogsViewModelTest {
     }
 }
 
-private class StubStore(seed: List<LogEntry>) : LogStoreGateway {
+private class StubStore(seed: List<LogEntry>) : LogsService {
     private val rows = MutableStateFlow(seed)
     private val facet = MutableStateFlow(
         LogFacet(
@@ -120,10 +120,7 @@ private class StubStore(seed: List<LogEntry>) : LogStoreGateway {
         )
     )
 
-    override suspend fun append(record: LogRecord) {
-    }
-
-    override fun observe(filter: LogFilter): Flow<List<LogEntry>> {
+    override fun observeLogs(filter: LogFilter, page: LogPage): Flow<List<LogEntry>> {
         return rows.map { list ->
             list
                 .filter { filter.unit == null || it.unit == filter.unit }
@@ -141,19 +138,16 @@ private class StubStore(seed: List<LogEntry>) : LogStoreGateway {
                         (it.projectName?.contains(q, ignoreCase = true) == true) ||
                         (it.sessionTitle?.contains(q, ignoreCase = true) == true)
                 }
-                .take(filter.limit.toInt())
+                .drop(page.offset.toInt())
+                .take(page.size.toInt())
         }
     }
 
-    override fun observeFacet(): Flow<LogFacet> {
+    override fun observeFacets(filter: LogFilter): Flow<LogFacet> {
         return facet
     }
 
-    override suspend fun prune(now: Long) {
-    }
-
-    override suspend fun clear() {
-        rows.value = emptyList()
+    override suspend fun runRetention(now: Long) {
     }
 }
 

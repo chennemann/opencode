@@ -37,7 +37,7 @@ class ServerServiceTest {
 
     @Test
     fun healthParsesSuccessResponse() = runTest {
-        val service = ServerService(json, MockEngine { req ->
+        val service = ApiServerSource(json, MockEngine { req ->
             assertEquals("/global/health", req.url.encodedPath)
             respond(
                 content =
@@ -60,7 +60,7 @@ class ServerServiceTest {
 
     @Test
     fun healthUsesDefaultsWhenFieldsMissing() = runTest {
-        val service = ServerService(json, MockEngine { req ->
+        val service = ApiServerSource(json, MockEngine { req ->
             assertEquals("/global/health", req.url.encodedPath)
             respond(
                 content = "{}",
@@ -77,7 +77,7 @@ class ServerServiceTest {
 
     @Test
     fun healthThrowsWhenServerReturnsError() = runTest {
-        val service = ServerService(json, MockEngine {
+        val service = ApiServerSource(json, MockEngine {
             respond(status = HttpStatusCode.InternalServerError, content = "boom")
         })
 
@@ -86,7 +86,7 @@ class ServerServiceTest {
 
     @Test
     fun projectsParsesSandboxesAndWorkspacesAndFiltersInvalidRows() = runTest {
-        val service = ServerService(json, MockEngine { req ->
+        val service = ApiServerSource(json, MockEngine { req ->
             assertEquals("/project", req.url.encodedPath)
             respond(
                 content =
@@ -137,7 +137,7 @@ class ServerServiceTest {
 
     @Test
     fun sessionsParsesDefaultsAndTimeFields() = runTest {
-        val service = ServerService(json, MockEngine { req ->
+        val service = ApiServerSource(json, MockEngine { req ->
             assertEquals("/session", req.url.encodedPath)
             assertEquals("/repo/a", req.url.parameters["directory"])
             assertEquals("true", req.url.parameters["roots"])
@@ -194,7 +194,7 @@ class ServerServiceTest {
 
     @Test
     fun sessionMessagesExtractsTextAndFallbackTagsAndEmpty() = runTest {
-        val service = ServerService(json, MockEngine { req ->
+        val service = ApiServerSource(json, MockEngine { req ->
             assertEquals("/session/s-1/message", req.url.encodedPath)
             assertEquals("/repo/a", req.url.parameters["directory"])
             assertEquals("5", req.url.parameters["limit"])
@@ -269,12 +269,25 @@ class ServerServiceTest {
     @Test
     fun sendMessageUsesExpectedPathQueryAndBody() = runTest {
         var captured: HttpRequestData? = null
-        val service = ServerService(json, MockEngine { req ->
+        val service = ApiServerSource(json, MockEngine { req ->
             captured = req
-            respond(status = HttpStatusCode.Accepted, content = "")
+            respond(
+                status = HttpStatusCode.OK,
+                content = """
+                {
+                  "assistant": {
+                    "info": {
+                      "id": "assistant-1",
+                      "parentID": "user-1"
+                    }
+                  }
+                }
+                """.trimIndent(),
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
         })
 
-        service.sendMessage(
+        val ids = service.sendMessage(
             baseUrl = baseUrl,
             sessionId = "s-1",
             directory = "/repo/message",
@@ -283,20 +296,26 @@ class ServerServiceTest {
         )
 
         val req = requireNotNull(captured)
-        assertEquals("/session/s-1/prompt_async", req.url.encodedPath)
+        assertEquals("/session/s-1/message", req.url.encodedPath)
         assertEquals("/repo/message", req.url.parameters["directory"])
         assertEquals(ContentType.Application.Json, req.body.contentType)
         val body = json.parseToJsonElement(bodyText(req)).jsonObject
         assertEquals("gpt-5", body["agent"]?.jsonPrimitive?.content)
+        assertNull(body["messageID"])
+        assertNull(body["messageId"])
+        assertNull(body["dedupeKey"])
+        assertNull(body["idempotencyKey"])
         val parts = body["parts"]?.jsonArray
         assertEquals(1, parts?.size)
         assertEquals("text", parts?.get(0)?.jsonObject?.get("type")?.jsonPrimitive?.content)
         assertEquals("Ship it", parts?.get(0)?.jsonObject?.get("text")?.jsonPrimitive?.content)
+        assertEquals("user-1", ids.parentId)
+        assertEquals("assistant-1", ids.messageId)
     }
 
     @Test
     fun sendMessageThrowsOnNon2xx() = runTest {
-        val service = ServerService(json, MockEngine {
+        val service = ApiServerSource(json, MockEngine {
             respond(status = HttpStatusCode.BadRequest, content = "bad request")
         })
 
@@ -306,12 +325,23 @@ class ServerServiceTest {
     @Test
     fun sendCommandUsesExpectedPathQueryAndBody() = runTest {
         var captured: HttpRequestData? = null
-        val service = ServerService(json, MockEngine { req ->
+        val service = ApiServerSource(json, MockEngine { req ->
             captured = req
-            respond(status = HttpStatusCode.NoContent, content = "")
+            respond(
+                status = HttpStatusCode.OK,
+                content = """
+                {
+                  "info": {
+                    "id": "assistant-cmd",
+                    "parentID": "user-cmd"
+                  }
+                }
+                """.trimIndent(),
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
         })
 
-        service.sendCommand(
+        val ids = service.sendCommand(
             baseUrl = baseUrl,
             sessionId = "s-1",
             directory = "/repo/command",
@@ -328,11 +358,17 @@ class ServerServiceTest {
         assertEquals("format", body["command"]?.jsonPrimitive?.content)
         assertEquals("--check", body["arguments"]?.jsonPrimitive?.content)
         assertEquals("gpt-5", body["agent"]?.jsonPrimitive?.content)
+        assertNull(body["messageID"])
+        assertNull(body["messageId"])
+        assertNull(body["dedupeKey"])
+        assertNull(body["idempotencyKey"])
+        assertEquals("user-cmd", ids.parentId)
+        assertEquals("assistant-cmd", ids.messageId)
     }
 
     @Test
     fun sendCommandThrowsOnNon2xx() = runTest {
-        val service = ServerService(json, MockEngine {
+        val service = ApiServerSource(json, MockEngine {
             respond(status = HttpStatusCode.InternalServerError, content = "failed")
         })
 
@@ -340,9 +376,8 @@ class ServerServiceTest {
     }
 
     @Test
-    fun streamEventsParsesValidPayloadsSkipsInvalidAndCarriesCursor() = runTest {
+    fun streamEventsParsesValidPayloadsAndSkipsInvalidRows() = runTest {
         var calls = 0
-        val lastEventIds = mutableListOf<String?>()
         val raw = mutableListOf<String>()
         val events = mutableListOf<GlobalStreamEvent>()
         val delegate = MockEngine {
@@ -364,7 +399,6 @@ class ServerServiceTest {
             override suspend fun execute(data: HttpRequestData): HttpResponseData {
                 assertEquals("/global/event", data.url.encodedPath)
                 assertEquals("no-cache", data.headers[HttpHeaders.CacheControl])
-                lastEventIds += data.headers["Last-Event-ID"]
                 calls += 1
                 val stream = if (calls == 1) {
                     flowOf(
@@ -398,24 +432,16 @@ class ServerServiceTest {
                 )
             }
         }
-        val service = ServerService(json, engine)
+        val service = ApiServerSource(json, engine)
 
-        val firstCursor = service.streamEvents(
+        val cursor = service.streamEvents(
             baseUrl = baseUrl,
             lastEventId = null,
             onRawEvent = raw::add,
             onEvent = events::add,
         )
-        val secondCursor = service.streamEvents(
-            baseUrl = baseUrl,
-            lastEventId = firstCursor,
-            onRawEvent = raw::add,
-            onEvent = events::add,
-        )
 
-        assertEquals("4", firstCursor)
-        assertEquals("4", secondCursor)
-        assertEquals(listOf(null, "4"), lastEventIds)
+        assertNull(cursor)
         assertEquals(4, raw.size)
         assertEquals(2, events.size)
         assertEquals("/repo/a", events[0].directory)

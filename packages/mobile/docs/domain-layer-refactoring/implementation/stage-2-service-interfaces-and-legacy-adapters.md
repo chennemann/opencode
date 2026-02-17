@@ -134,64 +134,64 @@ Compatibility note for this stage:
 
 ## Checklist
 
-- [ ] S2-01: Add `ActionModels.kt` exactly with the models above.
-- [ ] S2-02: Add one interface file per service as listed above.
-- [ ] S2-03: Add legacy adapter implementations in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/domain/service/legacy/`:
+- [x] S2-01: Add `ActionModels.kt` exactly with the models above.
+- [x] S2-02: Add one interface file per service as listed above.
+- [x] S2-03: Add legacy adapter implementations in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/domain/service/legacy/`:
     - `LegacyProjectActionService.kt`
     - `LegacySessionActionService.kt`
     - `LegacyMessageActionService.kt`
     - `LegacyConnectionActionService.kt`
     - `LegacyQuickSwitchReadService.kt`
     - `LegacyLogsService.kt`
-- [ ] S2-04: `LegacyProjectActionService.select(projectId)` calls `SessionServiceApi.selectProject(projectId)`.
-- [ ] S2-05: `LegacyProjectActionService.toggleFavorite(projectId)` calls `SessionServiceApi.toggleProjectFavorite(projectId)` and returns state after update.
-- [ ] S2-06: `LegacyProjectActionService.toggleHidden(projectId)` calls `SessionServiceApi.removeProject(projectId)` for now and returns `true` when project no longer appears in visible list.
-- [ ] S2-07: `LegacySessionActionService.focus(sessionId)` resolves `SessionState` from `SessionServiceApi.state.value` and calls `openSession(...)`.
-- [ ] S2-08: `LegacySessionActionService.requestMessagePage(input)` maps to current behavior:
+- [x] S2-04: `LegacyProjectActionService.select(projectId)` calls `SessionServiceApi.selectProject(projectId)`.
+- [x] S2-05: `LegacyProjectActionService.toggleFavorite(projectId)` calls `SessionServiceApi.toggleProjectFavorite(projectId)` and returns state after update.
+- [x] S2-06: `LegacyProjectActionService.toggleHidden(projectId)` calls `SessionServiceApi.removeProject(projectId)` for now and returns `true` when project no longer appears in visible list.
+- [x] S2-07: `LegacySessionActionService.focus(sessionId)` resolves `SessionState` from `SessionServiceApi.state.value` and calls `openSession(...)`.
+- [x] S2-08: `LegacySessionActionService.requestMessagePage(input)` maps to current behavior:
     - focuses session when needed
     - calls `loadMoreMessages()`
     - returns `MessagePageRequestResult(accepted=true)` when call succeeds
-- [ ] S2-09: `LegacySessionActionService.archive(sessionId)` and `rename(input)` resolve `SessionState` and forward to `archiveSession(...)` / `renameSession(...)`.
-- [ ] S2-10: `LegacySessionActionService.requestSync(sessionId, reason)` maps to `SessionServiceApi.refresh()` for reasons that require immediate network check in legacy mode.
-- [ ] S2-11: `LegacyMessageActionService.send(input)` and `execute(input)` forward to `SessionServiceApi.send(...)` using existing slash-command behavior.
-- [ ] S2-12: `LegacyConnectionActionService.refresh(input)` calls `updateUrl(...)` then `refresh()`.
-- [ ] S2-13: `LegacyQuickSwitchReadService.open(request)` uses `cachedSessionsForProject(...)` + in-memory filtering (`request.searchText`) and keeps `request.openReason` for analytics/debug only.
-- [ ] S2-14: `LegacyLogsService.observeLogs(filter, page)` persists `filter` implicitly before delegating to `LogStoreGateway.observe(filter)`.
-- [ ] S2-15: `LegacyLogsService.observeFacets(filter)` delegates to `LogStoreGateway.observeFacet()` and maps counts for active filter context.
-- [ ] S2-16: `LegacyLogsService.runRetention(now)` is explicitly implemented (no-op in legacy stage, with TODO linked to Stage 5 migration).
-- [ ] S2-17: Add DI bindings in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/di/AppModule.kt` for all service interfaces.
-- [ ] S2-18: Keep existing `SessionServiceApi` and UI usage untouched in this stage.
+- [x] S2-09: `LegacySessionActionService.archive(sessionId)` and `rename(input)` resolve `SessionState` and forward to `archiveSession(...)` / `renameSession(...)`.
+- [x] S2-10: `LegacySessionActionService.requestSync(sessionId, reason)` maps to `SessionServiceApi.refresh()` for reasons that require immediate network check in legacy mode.
+- [x] S2-11: `LegacyMessageActionService.send(input)` and `execute(input)` forward to `SessionServiceApi.send(...)` using existing slash-command behavior.
+- [x] S2-12: `LegacyConnectionActionService.refresh(input)` calls `updateUrl(...)` then `refresh()`.
+- [x] S2-13: `LegacyQuickSwitchReadService.open(request)` uses `cachedSessionsForProject(...)` + in-memory filtering (`request.searchText`) and keeps `request.openReason` for analytics/debug only.
+- [x] S2-14: `LegacyLogsService.observeLogs(filter, page)` persists `filter` implicitly before delegating to `LogStoreGateway.observe(filter)`.
+- [x] S2-15: `LegacyLogsService.observeFacets(filter)` delegates to `LogStoreGateway.observeFacet()` and maps counts for active filter context.
+- [x] S2-16: `LegacyLogsService.runRetention(now)` is explicitly implemented (no-op in legacy stage, with TODO linked to Stage 5 migration).
+- [x] S2-17: Add DI bindings in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/di/AppModule.kt` for all service interfaces.
+- [x] S2-18: Keep existing `SessionServiceApi` and UI usage untouched in this stage.
 
 ## Concrete Test Cases
 
 Every test case below is required:
 
-- [ ] T1: `LegacyProjectActionService.select` forwards exact `projectId`.
-- [ ] T2: `LegacyProjectActionService.toggleFavorite` toggles and returns updated value.
-- [ ] T3: `LegacyProjectActionService.toggleHidden` hides project and returns `true` when missing from visible list.
-- [ ] T4: `LegacySessionActionService.focus` opens target session when present in `state`.
-- [ ] T5: `LegacySessionActionService.focus` returns without crash when session ID is missing.
-- [ ] T6: `LegacySessionActionService.requestMessagePage` focuses if needed before `loadMoreMessages()`.
-- [ ] T7: `LegacySessionActionService.requestMessagePage` succeeds when `beforeMessageId=null`.
-- [ ] T8: `LegacySessionActionService.requestMessagePage` returns accepted result even though legacy path ignores `beforeMessageId`.
-- [ ] T9: `LegacySessionActionService.archive` calls `archiveSession(...)` for resolved session.
-- [ ] T10: `LegacySessionActionService.rename` trims title and calls `renameSession(...)`.
-- [ ] T11: `LegacySessionActionService.requestSync(..., USER_SEND)` triggers one refresh call.
-- [ ] T12: `LegacySessionActionService.requestSync(..., OUTBOX_DRAIN)` triggers one refresh call.
-- [ ] T13: `LegacyMessageActionService.send` forwards agent and text unchanged.
-- [ ] T14: `LegacyMessageActionService.execute` forwards command input through slash-command path.
-- [ ] T15: `LegacyConnectionActionService.refresh` updates URL first and refreshes second.
-- [ ] T16: `LegacyQuickSwitchReadService.open` filters cached sessions by `searchText`.
-- [ ] T17: `LegacyQuickSwitchReadService.open` accepts each `QuickSwitchOpenReason` without changing result semantics.
-- [ ] T18: `LegacyLogsService.observeLogs` persists last-used filter implicitly before first emission.
-- [ ] T19: `LegacyLogsService.observeLogs` delegates to `LogStoreGateway.observe(filter)`.
-- [ ] T20: `LegacyLogsService.observeFacets(filter)` emits facet counts for the same active filter context.
-- [ ] T21: `LegacyLogsService.runRetention(now)` is callable and does not throw in legacy mode.
-- [ ] T22: `AppModule` resolves all new service interfaces from Koin.
-- [ ] T23: No UI ViewModel constructor signatures change in this stage.
+- [x] T1: `LegacyProjectActionService.select` forwards exact `projectId`.
+- [x] T2: `LegacyProjectActionService.toggleFavorite` toggles and returns updated value.
+- [x] T3: `LegacyProjectActionService.toggleHidden` hides project and returns `true` when missing from visible list.
+- [x] T4: `LegacySessionActionService.focus` opens target session when present in `state`.
+- [x] T5: `LegacySessionActionService.focus` returns without crash when session ID is missing.
+- [x] T6: `LegacySessionActionService.requestMessagePage` focuses if needed before `loadMoreMessages()`.
+- [x] T7: `LegacySessionActionService.requestMessagePage` succeeds when `beforeMessageId=null`.
+- [x] T8: `LegacySessionActionService.requestMessagePage` returns accepted result even though legacy path ignores `beforeMessageId`.
+- [x] T9: `LegacySessionActionService.archive` calls `archiveSession(...)` for resolved session.
+- [x] T10: `LegacySessionActionService.rename` trims title and calls `renameSession(...)`.
+- [x] T11: `LegacySessionActionService.requestSync(..., USER_SEND)` triggers one refresh call.
+- [x] T12: `LegacySessionActionService.requestSync(..., OUTBOX_DRAIN)` triggers one refresh call.
+- [x] T13: `LegacyMessageActionService.send` forwards agent and text unchanged.
+- [x] T14: `LegacyMessageActionService.execute` forwards command input through slash-command path.
+- [x] T15: `LegacyConnectionActionService.refresh` updates URL first and refreshes second.
+- [x] T16: `LegacyQuickSwitchReadService.open` filters cached sessions by `searchText`.
+- [x] T17: `LegacyQuickSwitchReadService.open` accepts each `QuickSwitchOpenReason` without changing result semantics.
+- [x] T18: `LegacyLogsService.observeLogs` persists last-used filter implicitly before first emission.
+- [x] T19: `LegacyLogsService.observeLogs` delegates to `LogStoreGateway.observe(filter)`.
+- [x] T20: `LegacyLogsService.observeFacets(filter)` emits facet counts for the same active filter context.
+- [x] T21: `LegacyLogsService.runRetention(now)` is callable and does not throw in legacy mode.
+- [x] T22: `AppModule` resolves all new service interfaces from Koin.
+- [x] T23: No UI ViewModel constructor signatures change in this stage.
 
 ## Verification
 
-- [ ] Run `./gradlew ktlintCheck`.
-- [ ] Run `./gradlew :app:test --tests "*Legacy*Service*"`.
-- [ ] Run `./gradlew :app:test --tests "*AppModuleTest*"`.
+- [x] Run `./gradlew ktlintCheck`.
+- [x] Run `./gradlew :app:test --tests "*Legacy*Service*"`.
+- [x] Run `./gradlew :app:test --tests "*AppModuleTest*"`.

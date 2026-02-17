@@ -8,16 +8,20 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import de.chennemann.opencode.mobile.data.repository.SyncReason
+import de.chennemann.opencode.mobile.domain.service.model.MessagePageInput
+import de.chennemann.opencode.mobile.domain.service.model.MessagePageRequestResult
+import de.chennemann.opencode.mobile.domain.service.model.RenameInput
+import de.chennemann.opencode.mobile.domain.service.project.ProjectActionService
+import de.chennemann.opencode.mobile.domain.service.session.SessionActionService
+import de.chennemann.opencode.mobile.domain.service.session.SessionReadService
 import de.chennemann.opencode.mobile.domain.session.CommandState
 import de.chennemann.opencode.mobile.domain.session.MessageState
 import de.chennemann.opencode.mobile.domain.session.ProjectState
 import de.chennemann.opencode.mobile.domain.session.ServerState
-import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.domain.session.SessionUiState
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -32,7 +36,7 @@ class AppNavHostTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private lateinit var service: FakeSessionServiceApi
+    private lateinit var service: FakeSessionReadService
 
     private val sessionHome = SessionState(
         id = "session-home",
@@ -51,12 +55,14 @@ class AppNavHostTest {
     )
 
     private val testModule = module {
-        single<SessionServiceApi> { service }
+        single<SessionReadService> { service }
+        single<ProjectActionService> { FakeProjectActionService(service) }
+        single<SessionActionService> { FakeSessionActionService(service) }
     }
 
     @Before
     fun setUp() {
-        service = FakeSessionServiceApi(sessionHome, sessionTarget)
+        service = FakeSessionReadService(sessionHome, sessionTarget)
         loadKoinModules(testModule)
     }
 
@@ -93,10 +99,10 @@ class AppNavHostTest {
     }
 }
 
-private class FakeSessionServiceApi(
+private class FakeSessionReadService(
     home: SessionState,
     target: SessionState,
-) : SessionServiceApi {
+) : SessionReadService {
     private val project = ProjectState(
         id = "project-demo",
         worktree = home.directory,
@@ -127,59 +133,67 @@ private class FakeSessionServiceApi(
         )
     )
 
-    override val state: StateFlow<SessionUiState> = flow
+    override val state = flow
 
-    override fun start(scope: CoroutineScope) {}
-
-    override fun updateUrl(value: String) {
+    fun updateUrl(value: String) {
         flow.value = flow.value.copy(url = value)
     }
 
-    override fun useDiscovered() {}
-
-    override fun refresh() {}
-
-    override fun selectProject(worktree: String) {
+    fun selectProject(worktree: String) {
         flow.value = flow.value.copy(selectedProject = worktree)
     }
 
-    override fun toggleProjectFavorite(worktree: String) {}
-
-    override fun removeProject(worktree: String) {}
-
-    override fun toggleSessionQuickPin(session: SessionState, systemPinned: Boolean) {}
-
-    override suspend fun createSessionAndFocus(worktree: String): Boolean {
-        val next = sessions.firstOrNull { it.directory == worktree } ?: return false
+    fun focusSession(sessionId: String) {
+        val next = sessions.firstOrNull { it.id == sessionId } ?: return
         flow.value = flow.value.copy(
-            selectedProject = worktree,
+            selectedProject = next.directory,
             focusedSession = next,
         )
-        return true
     }
 
-    override fun openSession(session: SessionState) {
-        flow.value = flow.value.copy(
-            selectedProject = session.directory,
-            focusedSession = session,
-        )
-    }
-
-    override fun send(text: String, agent: String) {}
-
-    override fun loadMoreMessages() {}
-
-    override fun archiveSession(session: SessionState) {}
-
-    override fun renameSession(session: SessionState, title: String) {}
-
-    override suspend fun cachedSessionsForProject(worktree: String, limit: Int?): List<SessionState> {
+    override suspend fun sessionsForProject(worktree: String, limit: Int?): List<SessionState> {
         return sessions.filter { it.directory == worktree }.let {
             if (limit == null) it else it.take(limit)
         }
     }
+}
 
-    override suspend fun sessionsForProject(worktree: String, limit: Int?): List<SessionState> {
-        return cachedSessionsForProject(worktree, limit)
+private class FakeProjectActionService(
+    private val read: FakeSessionReadService,
+) : ProjectActionService {
+    override suspend fun select(projectId: String) {
+        read.selectProject(projectId)
+    }
+
+    override suspend fun toggleFavorite(projectId: String): Boolean {
+        return false
+    }
+
+    override suspend fun toggleHidden(projectId: String): Boolean {
+        return true
+    }
+
+    override suspend fun refreshProjectContext(projectId: String) {
+    }
+}
+
+private class FakeSessionActionService(
+    private val read: FakeSessionReadService,
+) : SessionActionService {
+    override suspend fun focus(sessionId: String) {
+        read.focusSession(sessionId)
+    }
+
+    override suspend fun requestMessagePage(input: MessagePageInput): MessagePageRequestResult {
+        return MessagePageRequestResult(accepted = true, reason = null)
+    }
+
+    override suspend fun archive(sessionId: String, directory: String?) {
+    }
+
+    override suspend fun rename(input: RenameInput) {
+    }
+
+    override suspend fun requestSync(sessionId: String, reason: SyncReason) {
     }
 }

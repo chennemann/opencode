@@ -3,10 +3,23 @@ package de.chennemann.opencode.mobile.ui.conversation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import de.chennemann.opencode.mobile.di.DispatcherProvider
+import de.chennemann.opencode.mobile.domain.service.model.CommandInput
+import de.chennemann.opencode.mobile.domain.service.model.MessagePageInput
+import de.chennemann.opencode.mobile.domain.service.model.RenameInput
+import de.chennemann.opencode.mobile.domain.service.model.SendMessageInput
+import de.chennemann.opencode.mobile.domain.service.session.SessionReadService
+import de.chennemann.opencode.mobile.domain.usecase.connection.RefreshServerUseCase
+import de.chennemann.opencode.mobile.domain.usecase.message.ExecuteCommandUseCase
+import de.chennemann.opencode.mobile.domain.usecase.message.SendMessageUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.ArchiveSessionUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.CreateSessionUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.FocusSessionUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.RenameSessionUseCase
+import de.chennemann.opencode.mobile.domain.usecase.session.RequestMessagePageUseCase
 import de.chennemann.opencode.mobile.domain.session.CommandState
+import de.chennemann.opencode.mobile.domain.session.MessageState
 import de.chennemann.opencode.mobile.domain.session.ProjectState
 import de.chennemann.opencode.mobile.domain.session.ServerState
-import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.navigation.NavEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -22,8 +35,16 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class ConversationViewModel(
-    private val service: SessionServiceApi,
+    private val read: SessionReadService,
     private val dispatchers: DispatcherProvider,
+    private val focusSession: FocusSessionUseCase,
+    private val sendMessage: SendMessageUseCase,
+    private val executeCommand: ExecuteCommandUseCase,
+    private val requestMessagePage: RequestMessagePageUseCase,
+    private val archiveSession: ArchiveSessionUseCase,
+    private val renameSession: RenameSessionUseCase,
+    private val createSession: CreateSessionUseCase,
+    private val refreshServer: RefreshServerUseCase,
 ) : ViewModel() {
     private val mapper = ConversationRenderMapper()
     private val lane = dispatchers.default.limitedParallelism(1)
@@ -74,7 +95,7 @@ class ConversationViewModel(
 
     val nav = navFlow.asSharedFlow()
 
-    private val global = service.state
+    private val global = read.state
         .map {
             GlobalRenderState(
                 title = it.focusedSession?.title ?: "No session selected",
@@ -130,11 +151,11 @@ class ConversationViewModel(
         .flowOn(lane)
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Eagerly,
             initialValue = ConversationUiState(
                 title = "No session selected",
-                status = service.state.value.status,
-                message = service.state.value.message,
+                status = read.state.value.status,
+                message = read.state.value.message,
                 turns = emptyList(),
                 canLoadMoreMessages = false,
                 loadingMoreMessages = false,
@@ -148,10 +169,6 @@ class ConversationViewModel(
                 callOpen = emptyMap(),
             ),
         )
-
-    init {
-        service.start(viewModelScope)
-    }
 
     fun onEvent(event: ConversationEvent) {
         when (event) {
@@ -218,11 +235,13 @@ class ConversationViewModel(
 
             is ConversationEvent.QuickSwitchMenuSessionTapped -> {
                 local.update { it.copy(quickSwitchMenu = null) }
-                service.openSession(event.session)
+                viewModelScope.launch(lane) {
+                    focusSession(event.session.id)
+                }
             }
 
             is ConversationEvent.QuickSwitchMenuPinTapped -> {
-                service.toggleSessionQuickPin(event.session, event.systemPinned)
+                Unit
             }
 
             is ConversationEvent.QuickSwitchMenuArchiveTapped -> {
@@ -241,26 +260,77 @@ class ConversationViewModel(
                 val worktree = local.value.quickSwitchMenu?.worktree ?: return
                 local.update { it.copy(quickSwitchMenu = null) }
                 viewModelScope.launch(lane) {
-                    service.createSessionAndFocus(worktree)
+                    createSession(worktree)
                 }
             }
 
             is ConversationEvent.SendTapped -> {
                 val value = local.value.draft
-                service.send(value, modeAgent(local.value.mode))
+                val agent = modeAgent(local.value.mode)
                 if (value.isNotBlank()) {
                     local.update { it.copy(draft = "", scroll = it.scroll + 1) }
+                }
+                viewModelScope.launch(lane) {
+                    val command = commandInput(value, agent)
+                    if (command != null) {
+                        executeCommand(command)
+                        return@launch
+                    }
+                    val focused = read.state.value.focusedSession
+                    sendMessage(
+                        SendMessageInput(
+                            text = value,
+                            agent = agent,
+                            sessionId = focused?.id,
+                            directory = focused?.directory,
+                        )
+                    )
                 }
             }
 
             is ConversationEvent.ReloadTapped -> {
-                service.refresh()
+                viewModelScope.launch(lane) {
+                    refreshServer(read.state.value.url)
+                }
             }
 
             is ConversationEvent.LoadMoreMessagesTapped -> {
-                service.loadMoreMessages()
+                viewModelScope.launch(lane) {
+                    val focused = read.state.value.focusedSession ?: return@launch
+                    val before = earliestLoadedMessageId(read.state.value.focusedMessages)
+                    requestMessagePage(
+                        MessagePageInput(
+                            sessionId = focused.id,
+                            beforeMessageId = before,
+                        )
+                    )
+                }
             }
         }
+    }
+
+    private fun commandInput(value: String, agent: String): CommandInput? {
+        val raw = value.trim()
+        if (!raw.startsWith("/")) return null
+        val focused = read.state.value.focusedSession ?: return null
+        val parts = raw.split(Regex("\\s+"), limit = 2)
+        val name = parts.firstOrNull()?.removePrefix("/")?.trim().orEmpty()
+        if (name.isBlank()) return null
+        val known = read.state.value.commands.any { it.name == name }
+        if (!known) return null
+        return CommandInput(
+            raw = raw,
+            sessionId = focused.id,
+            directory = focused.directory,
+            projectId = read.state.value.selectedProject.orEmpty(),
+            agent = agent,
+        )
+    }
+
+    private fun earliestLoadedMessageId(messages: List<MessageState>): String? {
+        return messages
+            .minWithOrNull(compareBy<MessageState> { it.sort }.thenBy { it.id })
+            ?.id
     }
 
     private fun modeAgent(mode: ConversationMode): String {
@@ -291,7 +361,7 @@ class ConversationViewModel(
 
     private fun quickSwitchTap(key: String) {
         local.update { it.copy(quickSwitchMenu = null) }
-        val value = service.state.value
+        val value = read.state.value
         val model = quickSwitchModel(
             value.projects,
             value.activeSessions,
@@ -306,16 +376,18 @@ class ConversationViewModel(
             val primary = project.primary
             if (primary == null) {
                 viewModelScope.launch(lane) {
-                    service.createSessionAndFocus(project.worktree)
+                    createSession(project.worktree)
                 }
                 return
             }
-            service.openSession(primary)
+            viewModelScope.launch(lane) {
+                focusSession(primary.id)
+            }
             return
         }
         if (project.cycle.isEmpty()) {
             viewModelScope.launch(lane) {
-                service.createSessionAndFocus(project.worktree)
+                createSession(project.worktree)
             }
             return
         }
@@ -326,11 +398,13 @@ class ConversationViewModel(
         } else {
             project.cycle.getOrNull(index + 1)
         } ?: return
-        service.openSession(next)
+        viewModelScope.launch(lane) {
+            focusSession(next.id)
+        }
     }
 
     private suspend fun quickSwitchLongPress(key: String) {
-        val value = service.state.value
+        val value = read.state.value
         val model = quickSwitchModel(
             value.projects,
             value.activeSessions,
@@ -343,7 +417,7 @@ class ConversationViewModel(
         val project = model.projects[key] ?: return
         val limit = QuickSwitchMenuPageSize
         val cached = runCatching {
-            service.cachedSessionsForProject(project.worktree, limit)
+            read.sessionsForProject(project.worktree, limit)
         }.getOrDefault(emptyList())
         local.update {
             it.copy(
@@ -371,7 +445,9 @@ class ConversationViewModel(
                 quickSwitchMenu = current.copy(sessions = sessions),
             )
         }
-        service.archiveSession(session)
+        viewModelScope.launch(lane) {
+            archiveSession(session.id)
+        }
     }
 
     private fun quickSwitchRename(session: SessionState, title: String) {
@@ -393,7 +469,9 @@ class ConversationViewModel(
                 ),
             )
         }
-        service.renameSession(session, next)
+        viewModelScope.launch(lane) {
+            renameSession(RenameInput(sessionId = session.id, title = next, directory = session.directory))
+        }
     }
 
     private fun quickSwitchLoadMore() {
@@ -415,7 +493,7 @@ class ConversationViewModel(
 
     private fun fetchQuickSwitchMenu(key: String, worktree: String, limit: Int) {
         viewModelScope.launch(lane) {
-            val result = runCatching { service.sessionsForProject(worktree, limit) }
+            val result = runCatching { read.sessionsForProject(worktree, limit) }
             result.onSuccess { list ->
                 local.update {
                     val menu = it.quickSwitchMenu ?: return@update it
@@ -676,23 +754,18 @@ class ConversationViewModel(
     private fun openToolCallSession(sessionId: String) {
         val id = sessionId.trim()
         if (id.isBlank()) return
-        val value = service.state.value
+        val value = read.state.value
         val known = (value.activeSessions + value.sessions)
             .firstOrNull { it.id == id }
         if (known != null) {
-            service.openSession(known)
+            viewModelScope.launch(lane) {
+                focusSession(id)
+            }
             return
         }
-        val focused = value.focusedSession ?: return
-        service.openSession(
-            SessionState(
-                id = id,
-                title = "Subagent ${id.take(8)}",
-                version = focused.version,
-                directory = focused.directory,
-                parentId = focused.id,
-            )
-        )
+        viewModelScope.launch(lane) {
+            focusSession(id)
+        }
     }
 }
 

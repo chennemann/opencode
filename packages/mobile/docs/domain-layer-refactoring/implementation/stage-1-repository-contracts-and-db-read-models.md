@@ -151,8 +151,8 @@ Retention policy semantics:
 
 ## Checklist
 
-- [ ] S1-01: Add `RepositoryContracts.kt` exactly with the interfaces and models above.
-- [ ] S1-02: Extend `packages/mobile/app/src/main/sqldelight/de/chennemann/opencode/mobile/db/AppDatabase.sq` with canonical tables:
+- [x] S1-01: Add `RepositoryContracts.kt` exactly with the interfaces and models above.
+- [x] S1-02: Extend `packages/mobile/app/src/main/sqldelight/de/chennemann/opencode/mobile/db/AppDatabase.sq` with canonical tables:
     - `project`
     - `session`
     - `message`
@@ -160,8 +160,8 @@ Retention policy semantics:
     - `connection`
     - `sync_state`
     - `preference`
-- [ ] S1-03: Add migration file `packages/mobile/app/src/main/sqldelight/de/chennemann/opencode/mobile/db/migrations/6.sqm` for new tables and indexes.
-- [ ] S1-04: Add SQL read-model queries in `AppDatabase.sq`:
+- [x] S1-03: Add migration file `packages/mobile/app/src/main/sqldelight/de/chennemann/opencode/mobile/db/migrations/6.sqm` for new tables and indexes.
+- [x] S1-04: Add SQL read-model queries in `AppDatabase.sq`:
     - `observeSessionList`
     - `observeFocusedSession`
     - `observeMessagePage`
@@ -171,54 +171,54 @@ Retention policy semantics:
     - `observeCommands`
     - `observeConnection`
     - `observePrefs`
-- [ ] S1-05: Implement SQLDelight repository adapters:
+- [x] S1-05: Implement SQLDelight repository adapters:
     - `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/repository/sql/SqlDelightSessionRepository.kt`
     - `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/repository/sql/SqlDelightProjectRepository.kt`
     - `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/repository/sql/SqlDelightCommandRepository.kt`
     - `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/repository/sql/SqlDelightConnectionRepository.kt`
     - `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/repository/sql/SqlDelightLogRepository.kt`
     - `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/data/repository/sql/SqlDelightPreferencesRepository.kt`
-- [ ] S1-06: Add migration logic to purge all existing local app data and start canonical tables from empty state (no backfill/bootstrap from legacy tables).
-- [ ] S1-07: Register new repositories in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/di/AppModule.kt` without replacing current `SessionServiceApi` consumers.
-- [ ] S1-08: Add repository contract tests under `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/data/repository/`.
-- [ ] S1-09: Confirm no UI/ViewModel files are modified in this stage.
-- [ ] S1-10: Do not add SSE resume token persistence (`cursor`, `last_event_id`, `event_cursor`); server-side replay is not guaranteed.
+- [x] S1-06: Add migration logic to purge all existing local app data and start canonical tables from empty state (no backfill/bootstrap from legacy tables).
+- [x] S1-07: Register new repositories in `packages/mobile/app/src/main/kotlin/de/chennemann/opencode/mobile/di/AppModule.kt` without replacing current `SessionServiceApi` consumers.
+- [x] S1-08: Add repository contract tests under `packages/mobile/app/src/test/kotlin/de/chennemann/opencode/mobile/data/repository/`.
+- [x] S1-09: Confirm no UI/ViewModel files are modified in this stage.
+- [x] S1-10: Do not add SSE resume token persistence (`cursor`, `last_event_id`, `event_cursor`); server-side replay is not guaranteed.
 
 ## Concrete Test Cases
 
 Every test case below is required (no placeholders):
 
-- [ ] T1: `observeSessionList` returns only sessions from requested project when `includeArchived=false`.
-- [ ] T2: `observeSessionList` includes archived sessions when `includeArchived=true`.
-- [ ] T3: `observeSessionList` applies query filter and deterministic sort order.
-- [ ] T4: `focus(sessionId)` updates focused pointer and `observeFocusedSession` emits the new session after commit.
-- [ ] T5: `appendLocalMessage` inserts one pending local row and returns non-blank `localMessageId`.
-- [ ] T6: `confirmSentMessage` patches pending row from `localMessageId` to server IDs in one transaction.
-- [ ] T7: `applyRemoteBatch` upserts message/session changes in one transaction.
-- [ ] T8: `applyRemoteBatch` patches existing rows by canonical server IDs and does not duplicate local messages.
-- [ ] T9: `archive(sessionId)` hides archived session from non-archived list and keeps row available for archived queries.
-- [ ] T10: `rename(sessionId, title)` updates title in both session list and focused session query.
-- [ ] T11: `requestSync(sessionId, SyncReason.USER_SEND)` sets sync state to queued.
-- [ ] T12: `requestSync(sessionId, SyncReason.OUTBOX_DRAIN)` updates same sync metadata without creating duplicate queued rows.
-- [ ] T13: `observeMessagePage(sessionId, before=null, limit=N)` returns latest N messages with `hasMore` flag.
-- [ ] T14: `observeMessagePage` with `beforeMessageId` returns older page with no overlaps or gaps.
-- [ ] T15: final page returns `hasMore=false` and `nextBeforeMessageId=null`.
-- [ ] T16: concurrent insert during paging keeps stable ordering and does not reorder already emitted page rows.
-- [ ] T17: `toggleFavorite(projectId)` persists and re-emits from `observeProjects`.
-- [ ] T18: `toggleHidden(projectId)` persists and re-emits from `observeProjects`.
-- [ ] T19: `select(projectId)` updates `observeSelectedProject` and is persisted across DB reopen.
-- [ ] T20: `replaceCommands(projectId, commands)` atomically replaces catalog for that project.
-- [ ] T21: `find(projectId, commandName)` returns exact command by name and null for missing command.
-- [ ] T22: `setEndpoint` + `setStatus` + `recordDiscovery` update `observeConnection` in commit order.
-- [ ] T23: `setQuickSwitchScope`, `setSortMode`, `setLogsFilter`, and `setLogsRetentionPolicy` persist and re-emit from `observePrefs`.
-- [ ] T24: `append(log)` writes one row and `observeLogs` reflects it under matching filter.
-- [ ] T25: `observeFacets` counts update after multiple `append(log)` writes.
-- [ ] T26: `prune(policy)` removes expected rows only and keeps rows outside policy window.
-- [ ] T27: observer flows do not emit uncommitted intermediate states (post-commit visibility only).
-- [ ] T28: stage migration purge removes legacy cache/settings rows and starts with empty canonical state.
+- [x] T1: `observeSessionList` returns only sessions from requested project when `includeArchived=false`.
+- [x] T2: `observeSessionList` includes archived sessions when `includeArchived=true`.
+- [x] T3: `observeSessionList` applies query filter and deterministic sort order.
+- [x] T4: `focus(sessionId)` updates focused pointer and `observeFocusedSession` emits the new session after commit.
+- [x] T5: `appendLocalMessage` inserts one pending local row and returns non-blank `localMessageId`.
+- [x] T6: `confirmSentMessage` patches pending row from `localMessageId` to server IDs in one transaction.
+- [x] T7: `applyRemoteBatch` upserts message/session changes in one transaction.
+- [x] T8: `applyRemoteBatch` patches existing rows by canonical server IDs and does not duplicate local messages.
+- [x] T9: `archive(sessionId)` hides archived session from non-archived list and keeps row available for archived queries.
+- [x] T10: `rename(sessionId, title)` updates title in both session list and focused session query.
+- [x] T11: `requestSync(sessionId, SyncReason.USER_SEND)` sets sync state to queued.
+- [x] T12: `requestSync(sessionId, SyncReason.OUTBOX_DRAIN)` updates same sync metadata without creating duplicate queued rows.
+- [x] T13: `observeMessagePage(sessionId, before=null, limit=N)` returns latest N messages with `hasMore` flag.
+- [x] T14: `observeMessagePage` with `beforeMessageId` returns older page with no overlaps or gaps.
+- [x] T15: final page returns `hasMore=false` and `nextBeforeMessageId=null`.
+- [x] T16: concurrent insert during paging keeps stable ordering and does not reorder already emitted page rows.
+- [x] T17: `toggleFavorite(projectId)` persists and re-emits from `observeProjects`.
+- [x] T18: `toggleHidden(projectId)` persists and re-emits from `observeProjects`.
+- [x] T19: `select(projectId)` updates `observeSelectedProject` and is persisted across DB reopen.
+- [x] T20: `replaceCommands(projectId, commands)` atomically replaces catalog for that project.
+- [x] T21: `find(projectId, commandName)` returns exact command by name and null for missing command.
+- [x] T22: `setEndpoint` + `setStatus` + `recordDiscovery` update `observeConnection` in commit order.
+- [x] T23: `setQuickSwitchScope`, `setSortMode`, `setLogsFilter`, and `setLogsRetentionPolicy` persist and re-emit from `observePrefs`.
+- [x] T24: `append(log)` writes one row and `observeLogs` reflects it under matching filter.
+- [x] T25: `observeFacets` counts update after multiple `append(log)` writes.
+- [x] T26: `prune(policy)` removes expected rows only and keeps rows outside policy window.
+- [x] T27: observer flows do not emit uncommitted intermediate states (post-commit visibility only).
+- [x] T28: stage migration purge removes legacy cache/settings rows and starts with empty canonical state.
 
 ## Verification
 
-- [ ] Run `./gradlew generateSqlDelightInterface`.
-- [ ] Run `./gradlew ktlintCheck`.
-- [ ] Run `./gradlew :app:test --tests "*Repository*"`.
+- [x] Run `./gradlew generateSqlDelightInterface`.
+- [x] Run `./gradlew ktlintCheck`.
+- [x] Run `./gradlew :app:test --tests "*Repository*"`.

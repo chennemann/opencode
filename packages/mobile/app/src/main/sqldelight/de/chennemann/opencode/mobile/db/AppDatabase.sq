@@ -8,31 +8,6 @@ CREATE TABLE settings (
   value TEXT NOT NULL
 );
 
-CREATE TABLE session_cache (
-  server_url TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  project_id TEXT,
-  directory TEXT NOT NULL,
-  title TEXT NOT NULL,
-  version TEXT NOT NULL,
-  last_opened_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (server_url, session_id)
-);
-
-CREATE TABLE message_cache (
-  server_url TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  message_id TEXT NOT NULL,
-  role TEXT NOT NULL,
-  text TEXT NOT NULL,
-  sort_key TEXT NOT NULL,
-  created_at INTEGER,
-  completed_at INTEGER,
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (server_url, session_id, message_id)
-);
-
 CREATE TABLE app_log (
   id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
   created_at INTEGER NOT NULL,
@@ -57,6 +32,117 @@ CREATE INDEX app_log_event_idx ON app_log(event, created_at DESC, id DESC);
 CREATE INDEX app_log_project_idx ON app_log(project_id, created_at DESC, id DESC);
 CREATE INDEX app_log_session_idx ON app_log(session_id, created_at DESC, id DESC);
 
+CREATE TABLE project (
+  id TEXT NOT NULL PRIMARY KEY,
+  worktree TEXT NOT NULL,
+  name TEXT NOT NULL,
+  sandboxes_json TEXT NOT NULL,
+  favorite INTEGER NOT NULL DEFAULT 0,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  selected INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE session (
+  id TEXT NOT NULL PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  version TEXT NOT NULL,
+  directory TEXT NOT NULL,
+  parent_id TEXT,
+  updated_at INTEGER,
+  archived_at INTEGER,
+  focused INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE message (
+  id TEXT NOT NULL PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  text TEXT NOT NULL,
+  sort_key TEXT NOT NULL,
+  created_at INTEGER,
+  completed_at INTEGER,
+  local_message_id TEXT,
+  pending INTEGER NOT NULL DEFAULT 0,
+  send_state TEXT NOT NULL DEFAULT 'none',
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE outbox (
+  outbox_id TEXT NOT NULL PRIMARY KEY,
+  type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  directory TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  local_message_id TEXT,
+  server_message_id TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  available_at INTEGER NOT NULL,
+  last_error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE command (
+  project_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  source TEXT,
+  PRIMARY KEY (project_id, name)
+);
+
+CREATE TABLE connection (
+  id INTEGER NOT NULL PRIMARY KEY,
+  endpoint TEXT NOT NULL,
+  discovered TEXT,
+  status TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE sync_state (
+  session_id TEXT NOT NULL PRIMARY KEY,
+  status TEXT NOT NULL,
+  last_snapshot_at INTEGER,
+  last_stream_seen_at INTEGER,
+  last_error_at INTEGER,
+  next_sync_at INTEGER NOT NULL DEFAULT 0,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  expects_remote_updates INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE stream_policy (
+  id INTEGER NOT NULL PRIMARY KEY,
+  stream_connected INTEGER NOT NULL DEFAULT 0,
+  disconnect_deadline_at INTEGER,
+  focused_session_id TEXT,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE preference (
+  id INTEGER NOT NULL PRIMARY KEY,
+  quick_switch_scope TEXT NOT NULL,
+  sort_mode TEXT NOT NULL,
+  logs_filter_json TEXT NOT NULL,
+  logs_retention_policy TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX project_worktree_idx ON project(worktree);
+CREATE INDEX project_selected_idx ON project(selected, updated_at DESC, id DESC);
+CREATE INDEX session_project_idx ON session(project_id, archived_at, updated_at DESC, id DESC);
+CREATE INDEX session_focused_idx ON session(focused, updated_at DESC, id DESC);
+CREATE INDEX message_session_sort_idx ON message(session_id, sort_key DESC, id DESC);
+CREATE INDEX message_local_idx ON message(local_message_id);
+CREATE INDEX outbox_status_available_idx ON outbox(status, available_at ASC, created_at ASC, outbox_id ASC);
+CREATE INDEX outbox_session_created_idx ON outbox(session_id, created_at DESC, outbox_id DESC);
+CREATE INDEX outbox_local_message_idx ON outbox(local_message_id);
+CREATE INDEX command_project_idx ON command(project_id, name);
+CREATE INDEX sync_state_status_idx ON sync_state(status, updated_at DESC, session_id DESC);
+CREATE INDEX sync_state_due_idx ON sync_state(next_sync_at ASC, status, updated_at ASC, session_id ASC);
+
 selectSetting:
 SELECT value FROM settings WHERE key = ?;
 
@@ -67,108 +153,6 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 
 deleteSetting:
 DELETE FROM settings WHERE key = ?;
-
-upsertSessionCache:
-INSERT INTO session_cache(
-  server_url,
-  session_id,
-  project_id,
-  directory,
-  title,
-  version,
-  last_opened_at,
-  updated_at
-)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(server_url, session_id) DO UPDATE SET
-  project_id = excluded.project_id,
-  directory = excluded.directory,
-  title = excluded.title,
-  version = excluded.version,
-  last_opened_at = excluded.last_opened_at,
-  updated_at = excluded.updated_at;
-
-upsertSessionCacheSnapshot:
-INSERT INTO session_cache(
-  server_url,
-  session_id,
-  project_id,
-  directory,
-  title,
-  version,
-  last_opened_at,
-  updated_at
-)
-VALUES (?, ?, ?, ?, ?, ?, 0, ?)
-ON CONFLICT(server_url, session_id) DO UPDATE SET
-  project_id = excluded.project_id,
-  directory = excluded.directory,
-  title = excluded.title,
-  version = excluded.version,
-  updated_at = excluded.updated_at;
-
-selectRecentSessionCache:
-SELECT server_url, session_id, project_id, directory, title, version, last_opened_at, updated_at
-FROM session_cache
-ORDER BY last_opened_at DESC
-LIMIT 1;
-
-selectSessionCache:
-SELECT server_url, session_id, project_id, directory, title, version, last_opened_at, updated_at
-FROM session_cache
-WHERE server_url = ? AND session_id = ?;
-
-listProjectSessionCache:
-SELECT server_url, session_id, project_id, directory, title, version, last_opened_at, updated_at
-FROM session_cache
-WHERE server_url = ? AND project_id = ?
-ORDER BY updated_at DESC, session_id DESC;
-
-listProjectSessionCacheLimited:
-SELECT server_url, session_id, project_id, directory, title, version, last_opened_at, updated_at
-FROM session_cache
-WHERE server_url = ? AND project_id = ?
-ORDER BY updated_at DESC, session_id DESC
-LIMIT ?;
-
-deleteSessionCache:
-DELETE FROM session_cache
-WHERE server_url = ? AND session_id = ?;
-
-listMessageCache:
-SELECT server_url, session_id, message_id, role, text, sort_key, created_at, completed_at, updated_at
-FROM message_cache
-WHERE server_url = ? AND session_id = ?
-ORDER BY sort_key ASC;
-
-upsertMessageCache:
-INSERT INTO message_cache(
-  server_url,
-  session_id,
-  message_id,
-  role,
-  text,
-  sort_key,
-  created_at,
-  completed_at,
-  updated_at
-)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(server_url, session_id, message_id) DO UPDATE SET
-  role = excluded.role,
-  text = excluded.text,
-  sort_key = excluded.sort_key,
-  created_at = excluded.created_at,
-  completed_at = excluded.completed_at,
-  updated_at = excluded.updated_at;
-
-deleteMessageCache:
-DELETE FROM message_cache
-WHERE server_url = ? AND session_id = ? AND message_id = ?;
-
-deleteMessageCacheSession:
-DELETE FROM message_cache
-WHERE server_url = ? AND session_id = ?;
 
 insertAppLog:
 INSERT INTO app_log(
@@ -248,3 +232,424 @@ WHERE id IN (
 
 deleteAppLogAll:
 DELETE FROM app_log;
+
+observeSessionList:
+SELECT id, title, version, directory, parent_id, updated_at, archived_at
+FROM session
+WHERE project_id = :project_id
+  AND (:include_archived = 1 OR archived_at IS NULL)
+  AND (
+    :query = ''
+    OR title LIKE '%' || :query || '%'
+    OR directory LIKE '%' || :query || '%'
+  )
+ORDER BY COALESCE(updated_at, 0) DESC, id DESC
+LIMIT :limit;
+
+observeFocusedSession:
+SELECT id, title, version, directory, parent_id, updated_at, archived_at
+FROM session
+WHERE focused = 1
+ORDER BY COALESCE(updated_at, 0) DESC, id DESC
+LIMIT 1;
+
+observeMessagePage:
+SELECT id, role, text, sort_key, created_at, completed_at
+FROM message
+WHERE session_id = :session_id
+  AND (
+    :before_message_id IS NULL
+    OR sort_key < COALESCE(
+      (
+        SELECT sort_key
+        FROM message
+        WHERE session_id = :session_id
+          AND id = :before_message_id
+      ),
+      '~~~~~~~~'
+    )
+  )
+ORDER BY sort_key DESC, id DESC
+LIMIT :limit;
+
+observeProjects:
+SELECT id, worktree, name, sandboxes_json, favorite
+FROM project
+WHERE hidden = 0
+ORDER BY favorite DESC, name COLLATE NOCASE ASC, worktree ASC;
+
+observeSelectedProject:
+SELECT id, worktree, name, sandboxes_json, favorite
+FROM project
+WHERE selected = 1
+ORDER BY updated_at DESC, id DESC
+LIMIT 1;
+
+observeCommands:
+SELECT project_id, name, description, source
+FROM command
+WHERE project_id = ?
+ORDER BY name COLLATE NOCASE ASC, name ASC;
+
+observeConnection:
+SELECT endpoint, discovered, status
+FROM connection
+WHERE id = 1;
+
+observeSyncState:
+SELECT session_id, status, last_snapshot_at, last_stream_seen_at, last_error_at
+FROM sync_state
+WHERE session_id = ?;
+
+observePrefs:
+SELECT quick_switch_scope, sort_mode, logs_filter_json, logs_retention_policy
+FROM preference
+WHERE id = 1;
+
+upsertProject:
+INSERT INTO project(id, worktree, name, sandboxes_json, favorite, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  worktree = excluded.worktree,
+  name = excluded.name,
+  sandboxes_json = excluded.sandboxes_json,
+  favorite = excluded.favorite,
+  updated_at = excluded.updated_at;
+
+selectProjectById:
+SELECT id, worktree, name, sandboxes_json, favorite, hidden, selected
+FROM project
+WHERE id = ?;
+
+clearProjectSelection:
+UPDATE project
+SET selected = 0;
+
+selectProjectByWorktree:
+SELECT id, worktree, name, sandboxes_json, favorite, hidden, selected
+FROM project
+WHERE worktree = ?
+LIMIT 1;
+
+setProjectSelected:
+UPDATE project
+SET selected = 1,
+    updated_at = ?
+WHERE id = ?;
+
+setProjectFavorite:
+UPDATE project
+SET favorite = ?,
+    updated_at = ?
+WHERE id = ?;
+
+setProjectHidden:
+UPDATE project
+SET hidden = ?,
+    updated_at = ?
+WHERE id = ?;
+
+upsertSession:
+INSERT INTO session(id, project_id, title, version, directory, parent_id, updated_at, archived_at, focused)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  project_id = excluded.project_id,
+  title = excluded.title,
+  version = excluded.version,
+  directory = excluded.directory,
+  parent_id = excluded.parent_id,
+  updated_at = excluded.updated_at,
+  archived_at = excluded.archived_at,
+  focused = excluded.focused;
+
+clearFocusedSession:
+UPDATE session
+SET focused = 0
+WHERE focused = 1;
+
+setFocusedSession:
+UPDATE session
+SET focused = 1
+WHERE id = ?;
+
+insertMessage:
+INSERT INTO message(id, session_id, role, text, sort_key, created_at, completed_at, local_message_id, pending, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  session_id = excluded.session_id,
+  role = excluded.role,
+  text = excluded.text,
+  sort_key = excluded.sort_key,
+  created_at = excluded.created_at,
+  completed_at = excluded.completed_at,
+  local_message_id = excluded.local_message_id,
+  pending = excluded.pending,
+  updated_at = excluded.updated_at;
+
+selectMessageById:
+SELECT id, session_id, role, text, sort_key, created_at, completed_at, local_message_id, pending, send_state, updated_at
+FROM message
+WHERE id = ?
+LIMIT 1;
+
+selectMessageByLocalId:
+SELECT id, session_id, role, text, sort_key, created_at, completed_at, local_message_id, pending, send_state, updated_at
+FROM message
+WHERE local_message_id = ?
+LIMIT 1;
+
+selectMessagePatchMetaByLocalId:
+SELECT id, session_id, sort_key, pending, send_state, updated_at
+FROM message
+WHERE local_message_id = :local_message_id
+   OR id = :id_
+LIMIT 1;
+
+markMessageSendUnknown:
+UPDATE message
+SET pending = 0,
+    send_state = 'send_unknown',
+    updated_at = :updated_at
+WHERE session_id = :session_id
+  AND (
+    local_message_id = :local_message_id
+    OR id = :local_message_id
+  );
+
+setMessageSendState:
+UPDATE message
+SET send_state = :send_state,
+    updated_at = :updated_at
+WHERE session_id = :session_id
+  AND (
+    local_message_id = :local_message_id
+    OR id = :local_message_id
+  );
+
+confirmLocalMessage:
+UPDATE message
+SET id = ?,
+    local_message_id = NULL,
+    pending = 0,
+    send_state = 'sent',
+    updated_at = ?
+WHERE id = ?
+  AND session_id = ?;
+
+enqueueOutbox:
+INSERT INTO outbox(
+  outbox_id,
+  type,
+  status,
+  session_id,
+  directory,
+  payload_json,
+  local_message_id,
+  server_message_id,
+  attempt_count,
+  available_at,
+  last_error,
+  created_at,
+  updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, ?, ?);
+
+listDueOutbox:
+SELECT outbox_id, type, status, session_id, directory, payload_json, local_message_id, server_message_id, attempt_count, available_at, last_error, created_at, updated_at
+FROM outbox
+WHERE status IN ('PENDING', 'FAILED')
+  AND available_at <= :available_at
+ORDER BY available_at ASC, created_at ASC, outbox_id ASC
+LIMIT :limit;
+
+markOutboxSending:
+UPDATE outbox
+SET status = 'SENDING',
+    attempt_count = attempt_count + 1,
+    last_error = NULL,
+    updated_at = :updated_at
+WHERE outbox_id = :outbox_id;
+
+markOutboxDone:
+UPDATE outbox
+SET status = 'DONE',
+    server_message_id = COALESCE(:server_message_id, server_message_id),
+    last_error = NULL,
+    updated_at = :updated_at
+WHERE outbox_id = :outbox_id;
+
+markOutboxFailed:
+UPDATE outbox
+SET status = 'FAILED',
+    available_at = :available_at,
+    last_error = :last_error,
+    updated_at = :updated_at
+WHERE outbox_id = :outbox_id;
+
+selectOutboxById:
+SELECT outbox_id, type, status, session_id, directory, payload_json, local_message_id, server_message_id, attempt_count, available_at, last_error, created_at, updated_at
+FROM outbox
+WHERE outbox_id = ?
+LIMIT 1;
+
+archiveSession:
+UPDATE session
+SET archived_at = ?
+WHERE id = ?;
+
+renameSession:
+UPDATE session
+SET title = ?
+WHERE id = ?;
+
+upsertSyncState:
+INSERT INTO sync_state(session_id, status, last_snapshot_at, last_stream_seen_at, last_error_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(session_id) DO UPDATE SET
+  status = excluded.status,
+  last_snapshot_at = excluded.last_snapshot_at,
+  last_stream_seen_at = excluded.last_stream_seen_at,
+  last_error_at = excluded.last_error_at,
+  updated_at = excluded.updated_at;
+
+setSyncQueued:
+INSERT INTO sync_state(session_id, status, next_sync_at, updated_at)
+VALUES (:session_id, 'QUEUED', :updated_at, :updated_at)
+ON CONFLICT(session_id) DO UPDATE SET
+  status = excluded.status,
+  next_sync_at = excluded.next_sync_at,
+  updated_at = excluded.updated_at;
+
+listDueSyncState:
+SELECT session_id, status, last_snapshot_at, last_stream_seen_at, last_error_at, next_sync_at, retry_count, expects_remote_updates, updated_at
+FROM sync_state
+WHERE next_sync_at <= :now
+  AND status IN ('QUEUED', 'BACKOFF')
+ORDER BY next_sync_at ASC, updated_at ASC, session_id ASC
+LIMIT :limit;
+
+markSyncRunning:
+UPDATE sync_state
+SET status = 'RUNNING',
+    updated_at = :updated_at
+WHERE session_id = :session_id;
+
+markSyncIdle:
+UPDATE sync_state
+SET status = 'IDLE',
+    last_snapshot_at = :last_snapshot_at,
+    last_error_at = NULL,
+    retry_count = 0,
+    next_sync_at = :next_sync_at,
+    updated_at = :updated_at
+WHERE session_id = :session_id;
+
+markSyncBackoff:
+UPDATE sync_state
+SET status = 'BACKOFF',
+    last_error_at = :last_error_at,
+    retry_count = retry_count + 1,
+    next_sync_at = :next_sync_at,
+    updated_at = :updated_at
+WHERE session_id = :session_id;
+
+markSyncFailed:
+UPDATE sync_state
+SET status = 'FAILED',
+    last_error_at = :last_error_at,
+    next_sync_at = :next_sync_at,
+    updated_at = :updated_at
+WHERE session_id = :session_id;
+
+markSyncStreamSeen:
+INSERT INTO sync_state(session_id, status, last_stream_seen_at, next_sync_at, updated_at)
+VALUES (:session_id, 'QUEUED', :seen_at, :seen_at, :updated_at)
+ON CONFLICT(session_id) DO UPDATE SET
+  last_stream_seen_at = :seen_at,
+  updated_at = :updated_at;
+
+setSyncExpectation:
+INSERT INTO sync_state(session_id, status, expects_remote_updates, next_sync_at, updated_at)
+VALUES (:session_id, 'IDLE', :expects_remote_updates, 0, :updated_at)
+ON CONFLICT(session_id) DO UPDATE SET
+  expects_remote_updates = :expects_remote_updates,
+  updated_at = :updated_at;
+
+selectSyncExpectation:
+SELECT expects_remote_updates
+FROM sync_state
+WHERE session_id = :session_id
+LIMIT 1;
+
+selectStreamPolicy:
+SELECT stream_connected, disconnect_deadline_at, focused_session_id, updated_at
+FROM stream_policy
+WHERE id = 1
+LIMIT 1;
+
+upsertStreamPolicy:
+INSERT INTO stream_policy(id, stream_connected, disconnect_deadline_at, focused_session_id, updated_at)
+VALUES (1, :stream_connected, :disconnect_deadline_at, :focused_session_id, :updated_at)
+ON CONFLICT(id) DO UPDATE SET
+  stream_connected = excluded.stream_connected,
+  disconnect_deadline_at = excluded.disconnect_deadline_at,
+  focused_session_id = excluded.focused_session_id,
+  updated_at = excluded.updated_at;
+
+deleteCommandsByProject:
+DELETE FROM command
+WHERE project_id = ?;
+
+upsertCommand:
+INSERT INTO command(project_id, name, description, source)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(project_id, name) DO UPDATE SET
+  description = excluded.description,
+  source = excluded.source;
+
+findCommand:
+SELECT project_id, name, description, source
+FROM command
+WHERE project_id = ?
+  AND name = ?
+LIMIT 1;
+
+upsertConnection:
+INSERT INTO connection(id, endpoint, discovered, status, updated_at)
+VALUES (1, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  endpoint = excluded.endpoint,
+  discovered = excluded.discovered,
+  status = excluded.status,
+  updated_at = excluded.updated_at;
+
+setConnectionEndpoint:
+INSERT INTO connection(id, endpoint, discovered, status, updated_at)
+VALUES (1, ?, NULL, 'IDLE', ?)
+ON CONFLICT(id) DO UPDATE SET
+  endpoint = excluded.endpoint,
+  updated_at = excluded.updated_at;
+
+setConnectionStatus:
+INSERT INTO connection(id, endpoint, discovered, status, updated_at)
+VALUES (1, '', NULL, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  status = excluded.status,
+  updated_at = excluded.updated_at;
+
+setConnectionDiscovery:
+INSERT INTO connection(id, endpoint, discovered, status, updated_at)
+VALUES (1, '', ?, 'IDLE', ?)
+ON CONFLICT(id) DO UPDATE SET
+  discovered = excluded.discovered,
+  updated_at = excluded.updated_at;
+
+upsertPreference:
+INSERT INTO preference(id, quick_switch_scope, sort_mode, logs_filter_json, logs_retention_policy, updated_at)
+VALUES (1, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  quick_switch_scope = excluded.quick_switch_scope,
+  sort_mode = excluded.sort_mode,
+  logs_filter_json = excluded.logs_filter_json,
+  logs_retention_policy = excluded.logs_retention_policy,
+  updated_at = excluded.updated_at;

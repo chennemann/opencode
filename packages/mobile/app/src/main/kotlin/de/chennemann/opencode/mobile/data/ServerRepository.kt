@@ -15,6 +15,7 @@ import de.chennemann.opencode.mobile.domain.session.SessionSummary
 import de.chennemann.opencode.mobile.domain.session.ConnectionState
 import de.chennemann.opencode.mobile.domain.session.LogGateway
 import de.chennemann.opencode.mobile.domain.session.LogUnit
+import de.chennemann.opencode.mobile.domain.session.MessageSendIds
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -217,33 +218,24 @@ class ServerRepository(
         }
     }
 
-    override suspend fun sendMessage(sessionId: String, directory: String, text: String, agent: String) {
-        withContext(dispatchers.io) {
+    override suspend fun sendMessage(sessionId: String, directory: String, text: String, agent: String): MessageSendIds {
+        val res = withContext(dispatchers.io) {
             service.sendMessage(url.value, sessionId, directory, text, agent)
         }
+        return MessageSendIds(
+            parentId = res.parentId,
+            messageId = res.messageId,
+        )
     }
 
-    override suspend fun sendCommand(sessionId: String, directory: String, name: String, arguments: String, agent: String) {
-        withContext(dispatchers.io) {
+    override suspend fun sendCommand(sessionId: String, directory: String, name: String, arguments: String, agent: String): MessageSendIds {
+        val res = withContext(dispatchers.io) {
             service.sendCommand(url.value, sessionId, directory, name, arguments, agent)
         }
-    }
-
-    override suspend fun streamCursor(): String? {
-        return withContext(dispatchers.io) {
-            db.appDatabaseQueries.selectSetting(eventCursorKey(url.value)).executeAsOneOrNull()
-        }
-    }
-
-    override suspend fun setStreamCursor(value: String?) {
-        val key = eventCursorKey(url.value)
-        withContext(dispatchers.io) {
-            if (value.isNullOrBlank()) {
-                db.appDatabaseQueries.deleteSetting(key)
-                return@withContext
-            }
-            db.appDatabaseQueries.upsertSetting(key, value)
-        }
+        return MessageSendIds(
+            parentId = res.parentId,
+            messageId = res.messageId,
+        )
     }
 
     private suspend fun load() {
@@ -275,6 +267,3 @@ private fun normalizeUrl(input: String): String? {
 
 private const val DefaultUrl = "http://opencode.local:4096"
 private const val UrlKey = "server_url"
-private fun eventCursorKey(url: String): String {
-    return "event_cursor:$url"
-}
