@@ -58,7 +58,6 @@ import de.chennemann.opencode.mobile.domain.session.MessageGateway
 import de.chennemann.opencode.mobile.domain.session.ProjectGateway
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
 import de.chennemann.opencode.mobile.domain.usecase.connection.RefreshServerUseCase
-import de.chennemann.opencode.mobile.domain.usecase.connection.SetServerUrlUseCase
 import de.chennemann.opencode.mobile.domain.usecase.message.ExecuteCommandUseCase
 import de.chennemann.opencode.mobile.domain.usecase.message.SendMessageUseCase
 import de.chennemann.opencode.mobile.domain.usecase.project.RemoveProjectUseCase
@@ -156,7 +155,6 @@ val appModule = module {
     single { RemoveProjectUseCase(get()) }
     single { FocusSessionUseCase(get()) }
     single { CreateSessionUseCase(get(), get(), get()) }
-    single { SetServerUrlUseCase(get()) }
     single { RefreshServerUseCase(get()) }
     single { SendMessageUseCase(get()) }
     single { ExecuteCommandUseCase(get()) }
@@ -164,6 +162,6 @@ val appModule = module {
     single { RenameSessionUseCase(get()) }
     single { RequestMessagePageUseCase(get()) }
     viewModel { ConversationViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
-    viewModel { ManageViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    viewModel { ManageViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { LogsViewModel(get(), get()) }
 }

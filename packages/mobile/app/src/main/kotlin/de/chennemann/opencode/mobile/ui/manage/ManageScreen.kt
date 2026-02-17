@@ -10,11 +10,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -134,13 +136,27 @@ fun ManageScreen(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
 private fun ServerCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
     val connected = state.status is ServerState.Connected
     var expanded by remember { mutableStateOf(false) }
+    var url by remember { mutableStateOf(state.url) }
+    var sent by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(connected) {
         if (!connected) return@LaunchedEffect
         expanded = false
     }
 
+    LaunchedEffect(state.url) {
+        if (state.url == url) return@LaunchedEffect
+        url = state.url
+    }
+
     val shown = !connected || expanded
+    val error = if (state.urlError == null) {
+        null
+    } else if (sent == null || sent == url) {
+        state.urlError
+    } else {
+        null
+    }
 
     Card(
         colors = CardDefaults.cardColors(
@@ -181,29 +197,64 @@ private fun ServerCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
             }
             if (!shown) return@Column
             TextField(
-                value = state.url,
-                onValueChange = { onEvent(ManageEvent.UrlChanged(it)) },
+                value = url,
+                onValueChange = { url = it },
                 label = { Text("Server URL") },
                 singleLine = true,
+                enabled = !state.connecting,
+                isError = error != null,
+                supportingText = {
+                    if (error != null) {
+                        Text(error)
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (state.discovered != null) {
+            val discovered = state.discovered
+            if (discovered != null) {
                 OutlinedButton(
-                    onClick = { onEvent(ManageEvent.UseDiscoveredTapped) },
+                    onClick = {
+                        url = discovered
+                    },
+                    enabled = !state.connecting,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "Use discovered: ${state.discovered}",
+                        text = "Use discovered: $discovered",
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
             Button(
-                onClick = { onEvent(ManageEvent.ConnectTapped) },
+                onClick = {
+                    sent = url
+                    onEvent(ManageEvent.ConnectTapped(url))
+                },
+                enabled = !state.connecting,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Connect")
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (state.connecting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
+                    Text(if (state.connecting) "Connecting..." else "Connect")
+                }
+            }
+            val failed = state.status as? ServerState.Failed
+            if (failed != null) {
+                Text(
+                    text = failed.reason,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }

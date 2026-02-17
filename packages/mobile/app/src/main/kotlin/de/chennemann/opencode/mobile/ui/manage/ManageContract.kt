@@ -19,6 +19,8 @@ data class ManageUiState(
     val url: String,
     val discovered: String?,
     val status: ServerState,
+    val connecting: Boolean,
+    val urlError: String?,
     val projectPath: String,
     val projectQuery: String,
     val loadingProjects: Boolean,
@@ -37,11 +39,7 @@ data class ManageUiState(
 )
 
 sealed interface ManageEvent {
-    data class UrlChanged(val value: String) : ManageEvent
-
-    data object UseDiscoveredTapped : ManageEvent
-
-    data object ConnectTapped : ManageEvent
+    data class ConnectTapped(val value: String) : ManageEvent
 
     data class ProjectPathChanged(val value: String) : ManageEvent
 

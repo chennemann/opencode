@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.service.session.SessionReadService
 import de.chennemann.opencode.mobile.domain.usecase.connection.RefreshServerUseCase
-import de.chennemann.opencode.mobile.domain.usecase.connection.SetServerUrlUseCase
 import de.chennemann.opencode.mobile.domain.usecase.project.RemoveProjectUseCase
 import de.chennemann.opencode.mobile.domain.usecase.project.SelectProjectUseCase
 import de.chennemann.opencode.mobile.domain.usecase.project.ToggleProjectFavoriteUseCase
@@ -32,13 +31,14 @@ class ManageViewModel(
     private val focusSession: FocusSessionUseCase,
     private val toggleProjectFavorite: ToggleProjectFavoriteUseCase,
     private val removeProject: RemoveProjectUseCase,
-    private val setServerUrl: SetServerUrlUseCase,
     private val refreshServer: RefreshServerUseCase,
     private val createSession: CreateSessionUseCase,
 ) : ViewModel() {
     private val lane = dispatchers.default.limitedParallelism(1)
 
     private data class LocalState(
+        val connecting: Boolean,
+        val urlError: String?,
         val projectPath: String,
         val projectQuery: String,
         val projectsExpanded: Boolean,
@@ -48,6 +48,8 @@ class ManageViewModel(
 
     private val local = MutableStateFlow(
         LocalState(
+            connecting = false,
+            urlError = null,
             projectPath = read.state.value.selectedProject.orEmpty(),
             projectQuery = "",
             projectsExpanded = false,
@@ -68,6 +70,8 @@ class ManageViewModel(
             url = global.url,
             discovered = global.discovered,
             status = global.status,
+            connecting = local.connecting,
+            urlError = local.urlError,
             projectPath = local.projectPath,
             projectQuery = local.projectQuery,
             loadingProjects = global.loadingProjects,
@@ -93,6 +97,8 @@ class ManageViewModel(
             url = read.state.value.url,
             discovered = read.state.value.discovered,
             status = ServerState.Idle,
+            connecting = false,
+            urlError = null,
             projectPath = read.state.value.selectedProject.orEmpty(),
             projectQuery = "",
             loadingProjects = false,
@@ -113,24 +119,24 @@ class ManageViewModel(
 
     fun onEvent(event: ManageEvent) {
         when (event) {
-            is ManageEvent.UrlChanged -> {
-                viewModelScope.launch(lane) {
-                    setServerUrl(event.value)
-                }
-            }
-
-            is ManageEvent.UseDiscoveredTapped -> {
-                viewModelScope.launch(lane) {
-                    val value = read.state.value.discovered ?: return@launch
-                    setServerUrl(value)
-                }
-            }
-
             is ManageEvent.ConnectTapped -> {
                 viewModelScope.launch(lane) {
-                    refreshServer(read.state.value.url)
+                    local.value = local.value.copy(
+                        connecting = true,
+                        urlError = null,
+                    )
+                    val result = refreshServer(event.value)
+                    local.value = local.value.copy(
+                        connecting = false,
+                        urlError = if (result.accepted) {
+                            null
+                        } else {
+                            urlError(result.reason ?: "Could not connect")
+                        },
+                    )
                 }
             }
+
             is ManageEvent.ProjectPathChanged -> {
                 local.value = local.value.copy(projectPath = event.value)
             }
@@ -209,6 +215,16 @@ class ManageViewModel(
                 navFlow.tryEmit(NavEvent.Back)
             }
         }
+    }
+
+    private fun urlError(value: String?): String? {
+        if (value == null) return null
+        if (value == "url_blank") return "Enter a server URL"
+        if (value == "url_invalid") return "Enter a valid server URL"
+        if (value == "connection_loading" || value == "connection_idle") {
+            return "Could not connect"
+        }
+        return value
     }
 
     private fun filterProjects(projects: List<ProjectState>, query: String): List<ProjectState> {

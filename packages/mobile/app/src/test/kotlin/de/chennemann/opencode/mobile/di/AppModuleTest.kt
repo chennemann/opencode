@@ -27,7 +27,6 @@ import de.chennemann.opencode.mobile.domain.session.MessageGateway
 import de.chennemann.opencode.mobile.domain.session.ProjectGateway
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
 import de.chennemann.opencode.mobile.domain.usecase.connection.RefreshServerUseCase
-import de.chennemann.opencode.mobile.domain.usecase.connection.SetServerUrlUseCase
 import de.chennemann.opencode.mobile.domain.usecase.message.ExecuteCommandUseCase
 import de.chennemann.opencode.mobile.domain.usecase.message.SendMessageUseCase
 import de.chennemann.opencode.mobile.domain.usecase.project.RemoveProjectUseCase
@@ -87,7 +86,6 @@ class AppModuleTest {
         assertNotNull(koin.get<RemoveProjectUseCase>())
         assertNotNull(koin.get<FocusSessionUseCase>())
         assertNotNull(koin.get<CreateSessionUseCase>())
-        assertNotNull(koin.get<SetServerUrlUseCase>())
         assertNotNull(koin.get<RefreshServerUseCase>())
         assertNotNull(koin.get<SendMessageUseCase>())
         assertNotNull(koin.get<ExecuteCommandUseCase>())
@@ -133,7 +131,6 @@ class AppModuleTest {
                 FocusSessionUseCase::class.java,
                 ToggleProjectFavoriteUseCase::class.java,
                 RemoveProjectUseCase::class.java,
-                SetServerUrlUseCase::class.java,
                 RefreshServerUseCase::class.java,
                 CreateSessionUseCase::class.java,
             ),

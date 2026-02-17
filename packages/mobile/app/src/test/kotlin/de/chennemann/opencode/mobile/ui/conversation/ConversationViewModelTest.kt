@@ -23,6 +23,7 @@ import de.chennemann.opencode.mobile.domain.service.model.CommandResult
 import de.chennemann.opencode.mobile.domain.service.model.MessagePageInput
 import de.chennemann.opencode.mobile.domain.service.model.MessagePageRequestResult
 import de.chennemann.opencode.mobile.domain.service.model.RefreshInput
+import de.chennemann.opencode.mobile.domain.service.model.RefreshResult
 import de.chennemann.opencode.mobile.domain.service.model.RenameInput
 import de.chennemann.opencode.mobile.domain.service.model.SendMessageInput
 import de.chennemann.opencode.mobile.domain.service.model.SendMessageResult
@@ -351,7 +352,8 @@ private class RecordingMessageActionService : MessageActionService {
 }
 
 private class FakeConnectionActionService : ConnectionActionService {
-    override suspend fun refresh(input: RefreshInput) {
+    override suspend fun refresh(input: RefreshInput): RefreshResult {
+        return RefreshResult(accepted = true, reason = null)
     }
 }
 

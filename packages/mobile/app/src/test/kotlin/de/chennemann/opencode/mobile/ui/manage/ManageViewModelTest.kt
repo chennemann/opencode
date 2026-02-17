@@ -19,6 +19,7 @@ import de.chennemann.opencode.mobile.domain.service.connection.ConnectionActionS
 import de.chennemann.opencode.mobile.domain.service.model.MessagePageInput
 import de.chennemann.opencode.mobile.domain.service.model.MessagePageRequestResult
 import de.chennemann.opencode.mobile.domain.service.model.RefreshInput
+import de.chennemann.opencode.mobile.domain.service.model.RefreshResult
 import de.chennemann.opencode.mobile.domain.service.model.RenameInput
 import de.chennemann.opencode.mobile.domain.service.project.ProjectActionService
 import de.chennemann.opencode.mobile.domain.service.session.SessionActionService
@@ -31,13 +32,13 @@ import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.domain.session.SessionSummary
 import de.chennemann.opencode.mobile.domain.session.SessionUiState
 import de.chennemann.opencode.mobile.domain.usecase.connection.RefreshServerUseCase
-import de.chennemann.opencode.mobile.domain.usecase.connection.SetServerUrlUseCase
 import de.chennemann.opencode.mobile.domain.usecase.project.RemoveProjectUseCase
 import de.chennemann.opencode.mobile.domain.usecase.project.SelectProjectUseCase
 import de.chennemann.opencode.mobile.domain.usecase.project.ToggleProjectFavoriteUseCase
 import de.chennemann.opencode.mobile.domain.usecase.session.CreateSessionUseCase
 import de.chennemann.opencode.mobile.domain.usecase.session.FocusSessionUseCase
 import de.chennemann.opencode.mobile.navigation.NavEvent
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -172,32 +173,99 @@ class ManageViewModelTest {
     }
 
     @Test
-    fun connectAndUseDiscoveredUpdateEndpointAndRefresh() = runTest(TestCoroutineScheduler()) {
+    fun connectTappedUsesProvidedUrl() = runTest(TestCoroutineScheduler()) {
         val main = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(main)
         val worker = StandardTestDispatcher(testScheduler)
         val read = StubSessionReadService()
         val connection = FakeConnectionActionService()
-        val gateway = FakeConnectionGateway()
         val viewModel = viewModel(
             read = read,
             main = main,
             worker = worker,
-            setServerUrl = SetServerUrlUseCase(gateway),
             refreshServer = RefreshServerUseCase(connection),
         )
         read.state.value = state(
             selectedProject = "/repo/main",
             discovered = "http://demo.local:4096",
-            url = "http://demo.local:4096",
+            url = "http://127.0.0.1",
         )
 
-        viewModel.onEvent(ManageEvent.UseDiscoveredTapped)
-        viewModel.onEvent(ManageEvent.ConnectTapped)
+        viewModel.onEvent(ManageEvent.ConnectTapped("http://demo.local:4096"))
         advanceUntilIdle()
 
-        assertEquals(listOf("http://demo.local:4096"), gateway.urls)
+        assertEquals(null, viewModel.state.value.urlError)
         assertEquals(listOf("http://demo.local:4096"), connection.calls)
+    }
+
+    @Test
+    fun connectWithMalformedUrlShowsError() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val connection = FakeConnectionActionService()
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            refreshServer = RefreshServerUseCase(connection),
+        )
+
+        viewModel.onEvent(ManageEvent.ConnectTapped("bad url"))
+        advanceUntilIdle()
+
+        assertTrue(connection.calls.isEmpty())
+        assertEquals("Enter a valid server URL", viewModel.state.value.urlError)
+    }
+
+    @Test
+    fun connectShowsActionFailureReason() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val connection = FakeConnectionActionService().also {
+            it.result = RefreshResult(accepted = false, reason = "Connection failed")
+        }
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            refreshServer = RefreshServerUseCase(connection),
+        )
+
+        viewModel.onEvent(ManageEvent.ConnectTapped("http://demo.local:4096"))
+        advanceUntilIdle()
+
+        assertEquals("Connection failed", viewModel.state.value.urlError)
+    }
+
+    @Test
+    fun connectShowsLoadingWhileRefreshRuns() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val connection = FakeConnectionActionService().also {
+            it.block = CompletableDeferred()
+        }
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            refreshServer = RefreshServerUseCase(connection),
+        )
+
+        viewModel.onEvent(ManageEvent.ConnectTapped("http://demo.local:4096"))
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.connecting)
+
+        connection.block?.complete(Unit)
+        advanceUntilIdle()
+
+        assertTrue(!viewModel.state.value.connecting)
     }
 
     private fun state(
@@ -245,7 +313,6 @@ class ManageViewModelTest {
         worker: TestDispatcher,
         project: RecordingProjectActionService = RecordingProjectActionService(),
         session: RecordingSessionActionService = RecordingSessionActionService(),
-        setServerUrl: SetServerUrlUseCase = SetServerUrlUseCase(FakeConnectionGateway()),
         refreshServer: RefreshServerUseCase = RefreshServerUseCase(FakeConnectionActionService()),
         createSession: CreateSessionUseCase = CreateSessionUseCase(FakeProjectGateway(), FakeProjectRepository(emptyList()), FakeSessionRepository()),
     ): ManageViewModel {
@@ -256,7 +323,6 @@ class ManageViewModelTest {
             focusSession = FocusSessionUseCase(session),
             toggleProjectFavorite = ToggleProjectFavoriteUseCase(project),
             removeProject = RemoveProjectUseCase(project),
-            setServerUrl = setServerUrl,
             refreshServer = refreshServer,
             createSession = createSession,
         )
@@ -334,33 +400,15 @@ private class RecordingSessionActionService : SessionActionService {
     }
 }
 
-private class FakeConnectionGateway : de.chennemann.opencode.mobile.domain.session.ConnectionGateway {
-    val urls = mutableListOf<String>()
-    private val statusState = MutableStateFlow(de.chennemann.opencode.mobile.domain.session.ConnectionState.Idle)
-    private val endpointState = MutableStateFlow("")
-    private val foundState = MutableStateFlow<String?>(null)
-
-    override val status = statusState.asStateFlow()
-    override val endpoint = endpointState.asStateFlow()
-    override val found = foundState.asStateFlow()
-
-    override fun start(scope: kotlinx.coroutines.CoroutineScope) {
-    }
-
-    override suspend fun setUrl(next: String) {
-        urls += next
-        endpointState.value = next
-    }
-
-    override suspend fun refresh(loading: Boolean) {
-    }
-}
-
 private class FakeConnectionActionService : ConnectionActionService {
     val calls = mutableListOf<String>()
+    var block: CompletableDeferred<Unit>? = null
+    var result = RefreshResult(accepted = true, reason = null)
 
-    override suspend fun refresh(input: RefreshInput) {
+    override suspend fun refresh(input: RefreshInput): RefreshResult {
         calls += input.endpoint
+        block?.await()
+        return result
     }
 }
 

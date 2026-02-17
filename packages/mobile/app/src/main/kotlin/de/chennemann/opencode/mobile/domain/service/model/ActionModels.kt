@@ -12,5 +12,6 @@ data class CommandInput(
 data class CommandResult(val accepted: Boolean, val reason: String?)
 data class RenameInput(val sessionId: String, val title: String, val directory: String? = null)
 data class RefreshInput(val endpoint: String, val userInitiated: Boolean)
+data class RefreshResult(val accepted: Boolean, val reason: String?)
 data class MessagePageInput(val sessionId: String, val beforeMessageId: String? = null, val limit: Long = 100)
 data class MessagePageRequestResult(val accepted: Boolean, val reason: String?)
