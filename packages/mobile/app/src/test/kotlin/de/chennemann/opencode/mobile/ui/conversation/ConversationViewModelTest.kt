@@ -139,6 +139,44 @@ class ConversationViewModelTest {
     }
 
     @Test
+    fun quickSwitchMenuShowsForkSessionsReturnedByReadService() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val viewModel = viewModel(read, main, worker)
+        val root = SessionState(
+            id = "s-root",
+            title = "Root",
+            version = "1",
+            directory = "/repo/main",
+            updatedAt = 100,
+        )
+        val child = SessionState(
+            id = "s-child",
+            title = "Child",
+            version = "1",
+            directory = "/repo/main",
+            parentId = "s-root",
+            updatedAt = 300,
+        )
+        read.sessionsByWorktree["/repo/main"] = listOf(root, child)
+        read.state.value = state(
+            focusedSession = root,
+            projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
+            globalSessions = listOf(root),
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.QuickSwitchLongPressed("/repo/main"))
+        advanceUntilIdle()
+
+        val menu = viewModel.state.value.quickSwitchMenu
+        assertTrue(menu != null)
+        assertEquals(listOf("s-child", "s-root"), menu!!.sessions.map { it.id })
+    }
+
+    @Test
     fun quickSwitchUsesGlobalSessionsAcrossProjects() = runTest(TestCoroutineScheduler()) {
         val main = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(main)

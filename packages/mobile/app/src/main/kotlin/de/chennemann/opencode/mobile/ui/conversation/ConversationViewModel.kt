@@ -687,7 +687,7 @@ class ConversationViewModel(
         val worktree = workspaceId(menu.worktree)
         val favorite = projects.firstOrNull { workspaceId(it.worktree) == worktree }?.favorite == true
         val sessions = menu.sessions
-            .filter { it.archivedAt == null && it.parentId == null }
+            .filter { it.archivedAt == null }
             .groupBy { it.id }
             .mapNotNull {
                 it.value.maxWithOrNull(compareBy<SessionState>({ value -> value.updatedAt ?: 0L }, { value -> value.id }))

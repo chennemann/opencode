@@ -136,7 +136,7 @@ class DefaultServerService(
         if (direct != null) {
             return SessionSelection(
                 projectId = direct.id,
-                sessions = project.sessions(direct.worktree, SnapshotLimit),
+                sessions = loadSessions(direct),
             )
         }
         projects.forEach {
@@ -153,6 +153,20 @@ class DefaultServerService(
             projectId = selector,
             sessions = project.sessions(selector, SnapshotLimit),
         )
+    }
+
+    private suspend fun loadSessions(projectRow: SessionProject): List<SessionSummary> {
+        return (listOf(projectRow.worktree) + projectRow.sandboxes)
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+            .flatMap { project.sessions(it, SnapshotLimit) }
+            .sortedWith(
+                compareByDescending<SessionSummary> { it.updatedAt ?: 0L }
+                    .thenByDescending { it.id }
+            )
+            .distinctBy { it.id }
+            .take(SnapshotLimit)
     }
 
     private data class SessionSelection(

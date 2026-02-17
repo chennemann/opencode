@@ -102,6 +102,36 @@ class DefaultServerServiceTest {
     }
 
     @Test
+    fun fetchSessionsIncludesSandboxRowsForProjectSelector() = runTest {
+        val stream = RecordingStreamGateway()
+        val projects = RecordingProjectGateway().also {
+            it.rows = listOf(
+                SessionProject(
+                    id = "p-1",
+                    worktree = "/repo/main",
+                    name = "Main",
+                    sandboxes = listOf("/repo/main-sb"),
+                )
+            )
+            it.sessions["/repo/main"] = listOf(
+                SessionSummary(id = "s-root", title = "Root", version = "1", directory = "/repo/main", updatedAt = 10)
+            )
+            it.sessions["/repo/main-sb"] = listOf(
+                SessionSummary(id = "s-sandbox", title = "Sandbox", version = "1", directory = "/repo/main-sb", updatedAt = 20)
+            )
+        }
+        val commands = RecordingCommandGateway()
+        val messages = RecordingMessageGateway()
+        val service = DefaultServerService(stream, projects, commands, messages)
+
+        val payload = json.parseToJsonElement(service.fetchSessions("/repo/main")).jsonObject
+
+        val rows = payload["sessions"]?.jsonArray.orEmpty()
+        val ids = rows.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.content }
+        assertEquals(listOf("s-sandbox", "s-root"), ids)
+    }
+
+    @Test
     fun fetchSessionsSupportsSessionIdSelector() = runTest {
         val stream = RecordingStreamGateway()
         val projects = RecordingProjectGateway().also {

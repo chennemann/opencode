@@ -136,21 +136,22 @@ class DefaultSessionReadService(
         val current = projects.firstOrNull {
             workspaceId(it.worktree) == key || it.sandboxes.any { sandbox -> workspaceId(sandbox) == key }
         } ?: return emptyList()
+        val target = limit ?: SessionLimit.toInt()
         val directories = (listOf(current.worktree) + current.sandboxes)
             .map(::workspaceId)
             .toSet()
         val rows = session
-            .observeSessionList(current.id, SessionListFilter(limit = (limit ?: SessionLimit.toInt()).toLong()))
+            .observeSessionList(current.id, SessionListFilter(limit = maxOf(target, SessionLimit.toInt()).toLong()))
             .first()
-            .filter {
-                it.parentId == null && it.archivedAt == null && directories.contains(workspaceId(it.directory))
-            }
+            .filter { it.archivedAt == null }
+        val scoped = rows.filter { directories.contains(workspaceId(it.directory)) }
+        val list = (if (scoped.isNotEmpty()) scoped else rows)
             .sortedWith(
                 compareByDescending<SessionState> { it.updatedAt ?: 0L }
                     .thenByDescending { it.id }
             )
-        if (limit == null) return rows
-        return rows.take(limit)
+        if (limit == null) return list
+        return list.take(limit)
     }
 }
 
