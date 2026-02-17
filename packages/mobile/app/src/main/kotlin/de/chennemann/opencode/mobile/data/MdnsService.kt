@@ -58,7 +58,7 @@ class MdnsService(
             override fun onDiscoveryStopped(serviceType: String) = Unit
 
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                if (!serviceInfo.serviceName.startsWith("opencode-")) return
+                if (!serviceInfo.serviceName.contains("opencode", ignoreCase = true)) return
                 manager.resolveService(
                     serviceInfo,
                     object : NsdManager.ResolveListener {

@@ -80,10 +80,7 @@ class ServerRepository(
             tag = LogTag,
             event = "health_check_started",
             message = "Health check started",
-            context = mapOf(
-                "endpoint" to endpoint,
-                "trigger" to trigger,
-            ),
+            context = endpointContext(endpoint) + mapOf("trigger" to trigger),
         )
         if (loading) state.value = ConnectionState.Loading
         val result = runCatching {
@@ -97,8 +94,7 @@ class ServerRepository(
                 tag = LogTag,
                 event = "health_check_failed",
                 message = "Health check failed",
-                context = mapOf(
-                    "endpoint" to endpoint,
+                context = endpointContext(endpoint) + mapOf(
                     "trigger" to trigger,
                     "duration_ms" to (System.currentTimeMillis() - startedAt).toString(),
                 ),
@@ -114,8 +110,7 @@ class ServerRepository(
                             tag = LogTag,
                             event = "health_check_succeeded",
                             message = "Health check succeeded",
-                            context = mapOf(
-                                "endpoint" to endpoint,
+                            context = endpointContext(endpoint) + mapOf(
                                 "trigger" to trigger,
                                 "version" to it.version,
                                 "duration_ms" to (System.currentTimeMillis() - startedAt).toString(),
@@ -128,8 +123,7 @@ class ServerRepository(
                             tag = LogTag,
                             event = "health_check_unhealthy",
                             message = "Server reported unhealthy",
-                            context = mapOf(
-                                "endpoint" to endpoint,
+                            context = endpointContext(endpoint) + mapOf(
                                 "trigger" to trigger,
                                 "version" to it.version,
                                 "duration_ms" to (System.currentTimeMillis() - startedAt).toString(),
@@ -311,6 +305,34 @@ private fun normalizeUrl(input: String): String? {
         "http://$trimmed"
     }
     return withProtocol.replace(Regex("/+$"), "")
+}
+
+private fun endpointContext(value: String): Map<String, String> {
+    val uri = runCatching { java.net.URI(value) }.getOrNull()
+    val host = uri?.host?.takeIf { it.isNotBlank() }
+        ?: value
+            .removePrefix("http://")
+            .removePrefix("https://")
+            .substringBefore('/')
+            .substringBefore(':')
+            .ifBlank { value }
+    val port = if (uri != null && uri.port > 0) {
+        uri.port.toString()
+    } else {
+        value
+            .removePrefix("http://")
+            .removePrefix("https://")
+            .substringBefore('/')
+            .substringAfter(':', "")
+    }
+    val scheme = uri?.scheme?.lowercase()
+        ?: if (value.startsWith("https://", true)) "https" else "http"
+    val context = mutableMapOf(
+        "endpoint_host" to host,
+        "endpoint_scheme" to scheme,
+    )
+    if (port.isNotBlank()) context["endpoint_port"] = port
+    return context
 }
 
 private const val DefaultUrl = "http://opencode.local:4096"

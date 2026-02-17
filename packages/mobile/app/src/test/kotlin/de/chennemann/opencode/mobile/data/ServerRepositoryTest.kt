@@ -153,7 +153,8 @@ class ServerRepositoryTest {
         )
         assertEquals("manual_connect", log.calls[0].context["trigger"])
         assertEquals("manual_connect", log.calls[1].context["trigger"])
-        assertEquals("http://opencode.local:4096", log.calls[1].context["endpoint"])
+        assertEquals("opencode.local", log.calls[1].context["endpoint_host"])
+        assertEquals("4096", log.calls[1].context["endpoint_port"])
         assertTrue(log.calls[1].context.containsKey("duration_ms"))
     }
 
