@@ -35,15 +35,15 @@ class DefaultConnectionActionService(
 
             is ConnectionState.Loading -> {
                 RefreshResult(
-                    accepted = false,
-                    reason = "connection_loading",
+                    accepted = true,
+                    reason = null,
                 )
             }
 
             is ConnectionState.Idle -> {
                 RefreshResult(
-                    accepted = false,
-                    reason = "connection_idle",
+                    accepted = true,
+                    reason = null,
                 )
             }
         }

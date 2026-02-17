@@ -31,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -136,27 +137,22 @@ fun ManageScreen(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
 private fun ServerCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
     val connected = state.status is ServerState.Connected
     var expanded by remember { mutableStateOf(false) }
-    var url by remember { mutableStateOf(state.url) }
-    var sent by remember { mutableStateOf<String?>(null) }
+    var url by rememberSaveable { mutableStateOf(state.url) }
+    var edited by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(connected) {
         if (!connected) return@LaunchedEffect
         expanded = false
     }
 
-    LaunchedEffect(state.url) {
+    LaunchedEffect(state.url, edited) {
+        if (edited) return@LaunchedEffect
         if (state.url == url) return@LaunchedEffect
         url = state.url
     }
 
     val shown = !connected || expanded
-    val error = if (state.urlError == null) {
-        null
-    } else if (sent == null || sent == url) {
-        state.urlError
-    } else {
-        null
-    }
+    val error = if (edited) null else state.urlError
 
     Card(
         colors = CardDefaults.cardColors(
@@ -198,7 +194,10 @@ private fun ServerCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
             if (!shown) return@Column
             TextField(
                 value = url,
-                onValueChange = { url = it },
+                onValueChange = {
+                    url = it
+                    edited = true
+                },
                 label = { Text("Server URL") },
                 singleLine = true,
                 enabled = !state.connecting,
@@ -215,6 +214,7 @@ private fun ServerCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
                 OutlinedButton(
                     onClick = {
                         url = discovered
+                        edited = true
                     },
                     enabled = !state.connecting,
                     modifier = Modifier.fillMaxWidth(),
@@ -228,7 +228,7 @@ private fun ServerCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
             }
             Button(
                 onClick = {
-                    sent = url
+                    edited = false
                     onEvent(ManageEvent.ConnectTapped(url))
                 },
                 enabled = !state.connecting,

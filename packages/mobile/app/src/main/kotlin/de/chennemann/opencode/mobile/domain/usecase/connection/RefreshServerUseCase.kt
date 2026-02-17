@@ -54,7 +54,7 @@ private fun endpoint(value: String): String? {
     val uri = runCatching { URI(normalized) }.getOrNull() ?: return null
     val scheme = uri.scheme?.lowercase()
     if (scheme != "http" && scheme != "https") return null
-    if (uri.host.isNullOrBlank()) return null
+    if (uri.host.isNullOrBlank() && uri.authority.isNullOrBlank()) return null
     return normalized
 }
 
