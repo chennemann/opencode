@@ -80,7 +80,7 @@ fun ManageScreen(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
             )
         }
         item("server") {
-            ServerCard(state, onEvent)
+            ServerCard(state.url, state.discovered, state.status, state.message, onEvent)
         }
         item("projects") {
             ProjectListCard(state, onEvent)
@@ -125,85 +125,6 @@ fun ManageScreen(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
                 ) {
                     Text("Back")
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ServerCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
-    val connected = state.status is ServerState.Connected
-    var expanded by remember { mutableStateOf(false) }
-
-    LaunchedEffect(connected) {
-        if (!connected) return@LaunchedEffect
-        expanded = false
-    }
-
-    val shown = !connected || expanded
-
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = connected) {
-                        expanded = !expanded
-                    }
-                    .heightIn(min = 48.dp)
-                    .padding(horizontal = 4.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Server", style = MaterialTheme.typography.titleMedium)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = statusLabel(state.status),
-                        color = statusColor(state.status),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    Icon(
-                        imageVector = if (shown) Icons.ChevronUp else Icons.ChevronDown,
-                        contentDescription = if (shown) "Collapse server" else "Expand server",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (!shown) return@Column
-            TextField(
-                value = state.url,
-                onValueChange = { onEvent(ManageEvent.UrlChanged(it)) },
-                label = { Text("Server URL") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (state.discovered != null) {
-                OutlinedButton(
-                    onClick = { onEvent(ManageEvent.UseDiscoveredTapped) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        text = "Use discovered: ${state.discovered}",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            Button(
-                onClick = { onEvent(ManageEvent.ConnectTapped) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Connect")
             }
         }
     }
@@ -625,25 +546,6 @@ private fun SessionCard(
                 }
             }
         }
-    }
-}
-
-private fun statusLabel(state: ServerState): String {
-    return when (state) {
-        is ServerState.Idle -> "Idle"
-        is ServerState.Loading -> "Connecting"
-        is ServerState.Connected -> "Connected ${state.version}"
-        is ServerState.Failed -> "Failed"
-    }
-}
-
-@Composable
-private fun statusColor(state: ServerState): Color {
-    return when (state) {
-        is ServerState.Idle -> MaterialTheme.colorScheme.onSurfaceVariant
-        is ServerState.Loading -> MaterialTheme.colorScheme.tertiary
-        is ServerState.Connected -> MaterialTheme.colorScheme.primary
-        is ServerState.Failed -> MaterialTheme.colorScheme.error
     }
 }
 
