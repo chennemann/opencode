@@ -12,7 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -196,18 +195,17 @@ class ManageViewModelTest {
     }
 
     @Test
-    fun triggersConnectAndUseDiscoveredActions() = runTest(TestCoroutineScheduler()) {
+    fun triggersConnectAction() = runTest(TestCoroutineScheduler()) {
         val main = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(main)
         val worker = StandardTestDispatcher(testScheduler)
         val service = StubSessionService()
         val viewModel = ManageViewModel(service, lanes(main, worker))
 
-        viewModel.onEvent(ManageEvent.ConnectTapped)
-        viewModel.onEvent(ManageEvent.UseDiscoveredTapped)
+        viewModel.onEvent(ManageEvent.Connect("http://127.0.0.1"))
 
+        assertEquals(listOf("http://127.0.0.1"), service.urls)
         assertEquals(1, service.refreshCalls)
-        assertEquals(1, service.useDiscoveredCalls)
     }
 
     @Test
@@ -308,21 +306,21 @@ private class StubSessionService : SessionServiceApi {
         )
     )
     var startCalls = 0
-    var useDiscoveredCalls = 0
     var refreshCalls = 0
     val createRequests = mutableListOf<String>()
     val removeRequests = mutableListOf<String>()
     val openRequests = mutableListOf<SessionState>()
+    val urls = mutableListOf<String>()
 
     override fun start(scope: CoroutineScope) {
         startCalls += 1
     }
 
-    override fun updateUrl(value: String) = Unit
-
-    override fun useDiscovered() {
-        useDiscoveredCalls += 1
+    override fun updateUrl(value: String) {
+        urls += value
     }
+
+    override fun useDiscovered() = Unit
 
     override fun refresh() {
         refreshCalls += 1

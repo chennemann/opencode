@@ -37,9 +37,8 @@ data class ManageUiState(
 )
 
 sealed interface ManageEvent {
-    data object UseDiscoveredTapped : ManageEvent
 
-    data class ConnectTapped(val value: String) : ManageEvent
+    data class Connect(val url: String) : ManageEvent
 
     data class ProjectPathChanged(val value: String) : ManageEvent
 
