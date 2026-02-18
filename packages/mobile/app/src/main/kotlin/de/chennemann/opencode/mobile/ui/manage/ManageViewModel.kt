@@ -103,9 +103,11 @@ class ManageViewModel(
 
     fun onEvent(event: ManageEvent) {
         when (event) {
-            is ManageEvent.UrlChanged -> service.updateUrl(event.value)
             is ManageEvent.UseDiscoveredTapped -> service.useDiscovered()
-            is ManageEvent.ConnectTapped -> service.refresh()
+            is ManageEvent.ConnectTapped -> {
+                service.updateUrl(event.value)
+                service.refresh()
+            }
             is ManageEvent.ProjectPathChanged -> {
                 local.value = local.value.copy(projectPath = event.value)
             }

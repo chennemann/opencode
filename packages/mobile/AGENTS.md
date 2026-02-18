@@ -48,7 +48,7 @@ bun run mobile:add-icon --source lucide --name pin --target PinLucide  # Generat
 
 ### Compose
 
-1. **State hoisting** – UI state lives in ViewModel, not composables
+1. **State ownership by lifetime** – Hoist business/app/shared state to ViewModel; keep ephemeral presentation-only state (expand/collapse, local menus, focus, selection) in composables with `remember`; use `rememberSaveable` only when UI restoration is explicitly desired
 2. **Unidirectional data flow** – State down, events up
 3. **Material 3** – Use M3 components, theming, and adaptive layouts
 4. **No previews** – Do not add @Preview composables or preview-only helpers
