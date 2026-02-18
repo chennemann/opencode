@@ -51,7 +51,6 @@ bun run mobile:add-icon --source lucide --name pin --target PinLucide  # Generat
 1. **State ownership by lifetime** – Hoist business/app/shared state to ViewModel; keep ephemeral presentation-only state (expand/collapse, local menus, focus, selection) in composables with `remember`; use `rememberSaveable` only when UI restoration is explicitly desired
 2. **Unidirectional data flow** – State down, events up
 3. **Material 3** – Use M3 components, theming, and adaptive layouts
-4. **No previews** – Do not add @Preview composables or preview-only helpers
 
 ### SQLDelight
 
@@ -78,7 +77,7 @@ After completing the task, perform the following steps **in order**:
 2. **Run a clean build with all tests**
 
     ```bash
-    ./gradlew clean build
+    ./gradlew build
     ```
 
 3. **Failure handling**
@@ -87,7 +86,7 @@ After completing the task, perform the following steps **in order**:
         - Re-run:
             ```bash
             ./gradlew ktlintFormat
-            ./gradlew clean build
+            ./gradlew build
             ```
     - Repeat until both linting and tests pass cleanly.
 
@@ -97,7 +96,7 @@ Stop when **all** of the following are true:
 
 - The assigned task is fully implemented.
 - `./gradlew ktlintCheck` passes with zero errors.
-- `./gradlew clean build` passes with all tests green.
+- `./gradlew build` passes with all tests green.
 - **No additional tasks are started or modified.**
 
 ### 3. Create the Commit (Exactly One)
@@ -114,17 +113,7 @@ Changes:
 - Bullet list of what changed
 ```
 
-### 4. Install the app
-
-When a device is connected to the computer:
-
-- build
-- install
-- launch
-
-the application.
-
-### 5. Device Launch Requirement (Mandatory)
+### 4. Device Launch Requirement (Mandatory)
 
 If an Android device is connected, always install and launch the app as part of task completion.
 
