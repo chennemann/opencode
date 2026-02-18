@@ -379,21 +379,24 @@ class ConversationViewModel(
             .distinctBy { it.name.lowercase() }
     }
 
-    private fun quickSwitchTap(key: String) {
+    private suspend fun quickSwitchTap(key: String) {
         local.update { it.copy(quickSwitchMenu = null) }
         val value = read.state.value
+        val include = effectiveInclude(value.quickPinInclude, local.value.quickPinInclude, local.value.quickPinExclude)
+        val exclude = effectiveExclude(value.quickPinExclude, local.value.quickPinExclude, local.value.quickPinInclude)
         val model = quickSwitchModel(
             value.projects,
             value.globalSessions,
             value.focusedSession,
-            effectiveInclude(value.quickPinInclude, local.value.quickPinInclude, local.value.quickPinExclude),
-            effectiveExclude(value.quickPinExclude, local.value.quickPinExclude, local.value.quickPinInclude),
+            include,
+            exclude,
             value.quickProcessing,
             value.quickUnread,
         )
         val project = model.projects[key] ?: return
         if (model.focusedKey != key) {
-            val primary = project.primary
+            val primary = project.primary ?: quickSwitchTapSessions(project.key, project.worktree, include, exclude)
+                .firstOrNull()
             if (primary == null) {
                 viewModelScope.launch(lane) {
                     createSession(project.worktree)
@@ -405,22 +408,55 @@ class ConversationViewModel(
             }
             return
         }
-        if (project.cycle.isEmpty()) {
+        val cycle = if (project.cycle.isNotEmpty()) {
+            project.cycle
+        } else {
+            quickSwitchTapSessions(project.key, project.worktree, include, exclude)
+        }
+        if (cycle.isEmpty()) {
             viewModelScope.launch(lane) {
                 createSession(project.worktree)
             }
             return
         }
         val current = value.focusedSession?.id
-        val index = project.cycle.indexOfFirst { it.id == current }
-        val next = if (index < 0 || index == project.cycle.lastIndex) {
-            project.cycle.firstOrNull()
+        val index = cycle.indexOfFirst { it.id == current }
+        val next = if (index < 0 || index == cycle.lastIndex) {
+            cycle.firstOrNull()
         } else {
-            project.cycle.getOrNull(index + 1)
+            cycle.getOrNull(index + 1)
         } ?: return
         viewModelScope.launch(lane) {
             focusSession(next.id)
         }
+    }
+
+    private suspend fun quickSwitchTapSessions(
+        key: String,
+        worktree: String,
+        include: Set<String>,
+        exclude: Set<String>,
+    ): List<SessionState> {
+        val rows = runCatching { read.sessionsForProject(worktree, QuickSwitchTapLimit) }
+            .getOrDefault(emptyList())
+            .filter { it.archivedAt == null }
+            .groupBy { it.id }
+            .mapNotNull {
+                it.value.maxWithOrNull(compareBy<SessionState>({ value -> value.updatedAt ?: 0L }, { value -> value.id }))
+            }
+            .sortedWith(
+                compareByDescending<SessionState> { it.updatedAt ?: 0L }
+                    .thenByDescending { it.id }
+            )
+        if (rows.isEmpty()) return emptyList()
+        val favorite = read.state.value.projects
+            .firstOrNull { workspaceId(it.worktree) == workspaceId(worktree) }
+            ?.favorite == true
+        val cutoff = System.currentTimeMillis() - QuickSwitchWindowMs
+        val system = systemCycle(rows, favorite, cutoff)
+        val cycle = effectiveCycle(rows, system, include, exclude)
+        if (cycle.isEmpty()) return emptyList()
+        return stableCycle(key, cycle)
     }
 
     private suspend fun quickSwitchLongPress(key: String) {
@@ -588,7 +624,7 @@ class ConversationViewModel(
             lookup[workspaceId(it.directory)] ?: workspaceId(it.directory)
         }
         val rows = sessions
-            .filter { it.archivedAt == null && it.parentId == null }
+            .filter { it.archivedAt == null }
             .groupBy {
                 val directory = workspaceId(it.directory)
                 lookup[directory] ?: directory
@@ -823,6 +859,7 @@ private fun effectiveExclude(base: Set<String>, exclude: Set<String>, include: S
 
 private val SlashRegex = Regex("^/(\\S*)$")
 private const val QuickSwitchMenuPageSize = 11
+private const val QuickSwitchTapLimit = 200
 private const val QuickSwitchWindowMs = 2 * 60 * 60 * 1000L
 private const val QuickSwitchFavoriteWindowMs = 30 * 60 * 1000L
 private val BuiltinCommands = listOf(

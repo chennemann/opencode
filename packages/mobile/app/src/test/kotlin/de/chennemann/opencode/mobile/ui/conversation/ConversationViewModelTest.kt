@@ -139,6 +139,71 @@ class ConversationViewModelTest {
     }
 
     @Test
+    fun quickSwitchTapFallsBackToProjectSessionsInsteadOfCreatingNew() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val session = RecordingSessionActionService()
+        val gateway = FakeProjectGateway()
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            focusSession = FocusSessionUseCase(session),
+            createSession = CreateSessionUseCase(gateway, FakeProjectRepository(), FakeSessionRepository()),
+        )
+        val older = SessionState(id = "s-1", title = "Older", version = "1", directory = "/repo/main", updatedAt = 100)
+        val latest = SessionState(id = "s-2", title = "Latest", version = "1", directory = "/repo/main", updatedAt = 200)
+        read.sessionsByWorktree["/repo/main"] = listOf(older, latest)
+        read.state.value = state(
+            projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
+            selectedProject = "/repo/main",
+            globalSessions = emptyList(),
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.QuickSwitchTapped("/repo/main"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("s-2"), session.focusCalls)
+        assertTrue(gateway.createCalls.isEmpty())
+    }
+
+    @Test
+    fun quickSwitchTapCyclesFallbackSessionsWhenFocusedProjectIsPlaceholder() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val read = StubSessionReadService()
+        val session = RecordingSessionActionService()
+        val gateway = FakeProjectGateway()
+        val viewModel = viewModel(
+            read = read,
+            main = main,
+            worker = worker,
+            focusSession = FocusSessionUseCase(session),
+            createSession = CreateSessionUseCase(gateway, FakeProjectRepository(), FakeSessionRepository()),
+        )
+        val latest = SessionState(id = "s-2", title = "Latest", version = "1", directory = "/repo/main", updatedAt = 200)
+        val older = SessionState(id = "s-1", title = "Older", version = "1", directory = "/repo/main", updatedAt = 100)
+        read.sessionsByWorktree["/repo/main"] = listOf(latest, older)
+        read.state.value = state(
+            focusedSession = latest,
+            projects = listOf(ProjectState(id = "p1", worktree = "/repo/main", name = "Main", favorite = true)),
+            selectedProject = "/repo/main",
+            globalSessions = emptyList(),
+        )
+
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.QuickSwitchTapped("/repo/main"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("s-1"), session.focusCalls)
+        assertTrue(gateway.createCalls.isEmpty())
+    }
+
+    @Test
     fun quickSwitchMenuShowsForkSessionsReturnedByReadService() = runTest(TestCoroutineScheduler()) {
         val main = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(main)
@@ -505,10 +570,13 @@ private class StubSessionReadService : SessionReadService {
 }
 
 private class RecordingSessionActionService : SessionActionService {
+    val focusCalls = mutableListOf<String>()
     val pageCalls = mutableListOf<MessagePageInput>()
     val archiveCalls = mutableListOf<String>()
 
-    override suspend fun focus(sessionId: String) = Unit
+    override suspend fun focus(sessionId: String) {
+        focusCalls += sessionId
+    }
 
     override suspend fun requestMessagePage(input: MessagePageInput): MessagePageRequestResult {
         pageCalls += input
