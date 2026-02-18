@@ -1,3 +1,17 @@
 <resources>
   <string name="app_name">opencode</string>
+  <string name="manage_server_title">Server</string>
+  <string name="manage_server_url">Server URL</string>
+  <string name="manage_server_discovered">Use discovered: %1$s</string>
+  <string name="manage_server_connect">Connect</string>
+  <string name="manage_server_connecting">Connecting...</string>
+  <string name="manage_server_expand">Expand server</string>
+  <string name="manage_server_collapse">Collapse server</string>
+  <string name="manage_server_status_idle">Idle</string>
+  <string name="manage_server_status_connecting">Connecting</string>
+  <string name="manage_server_status_connected">Connected %1$s</string>
+  <string name="manage_server_status_failed">Failed</string>
+  <string name="manage_server_error_blank">Enter a server URL</string>
+  <string name="manage_server_error_invalid">Enter a valid server URL</string>
+  <string name="manage_server_error_connect">Could not connect</string>
 </resources>

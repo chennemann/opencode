@@ -1,22 +1,17 @@
 package de.chennemann.opencode.mobile.ui.manage
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -24,33 +19,20 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import de.chennemann.opencode.mobile.domain.session.ProjectState
-import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.icons.Heart
 import de.chennemann.opencode.mobile.icons.HeartOutline
 import de.chennemann.opencode.mobile.icons.Icons
-import de.chennemann.opencode.mobile.icons.Add
-import de.chennemann.opencode.mobile.icons.ChevronDown
-import de.chennemann.opencode.mobile.icons.ChevronUp
-import de.chennemann.opencode.mobile.icons.FilterList
-import de.chennemann.opencode.mobile.icons.Star
-import de.chennemann.opencode.mobile.icons.StarOutline
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -83,10 +65,32 @@ fun ManageScreen(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
             )
         }
         item("server") {
-            ServerCard(state, onEvent)
+            ServerCard(
+                status = state.status,
+                url = state.url,
+                urlError = state.urlError,
+                connecting = state.connecting,
+                discovered = state.discovered,
+                onConnect = { onEvent(ManageEvent.ConnectTapped(it)) },
+            )
         }
         item("projects") {
-            ProjectListCard(state, onEvent)
+            ProjectListCard(
+                projectQuery = state.projectQuery,
+                projectPath = state.projectPath,
+                loadingProjects = state.loadingProjects,
+                projectsExpanded = state.projectsExpanded,
+                favoriteProjects = state.favoriteProjects,
+                otherProjects = state.otherProjects,
+                selectedProject = state.selectedProject,
+                onProjectQueryChange = { onEvent(ManageEvent.ProjectQueryChanged(it)) },
+                onProjectPathChange = { onEvent(ManageEvent.ProjectPathChanged(it)) },
+                onOpenProject = { onEvent(ManageEvent.OpenProjectTapped) },
+                onProjectListToggle = { onEvent(ManageEvent.ProjectListToggleTapped) },
+                onProjectFavoriteToggle = { onEvent(ManageEvent.ProjectFavoriteToggled(it)) },
+                onProjectSelect = { onEvent(ManageEvent.ProjectSelected(it)) },
+                onProjectRemove = { onEvent(ManageEvent.ProjectRemoved(it)) },
+            )
         }
         item("sessions") {
             SessionCard(
@@ -128,421 +132,6 @@ fun ManageScreen(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
                 ) {
                     Text("Back")
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ServerCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
-    val connected = state.status is ServerState.Connected
-    var expanded by remember { mutableStateOf(false) }
-    var url by rememberSaveable { mutableStateOf(state.url) }
-    var edited by rememberSaveable { mutableStateOf(false) }
-
-    LaunchedEffect(connected) {
-        if (!connected) return@LaunchedEffect
-        expanded = false
-    }
-
-    LaunchedEffect(state.url, edited) {
-        if (edited) return@LaunchedEffect
-        if (state.url == url) return@LaunchedEffect
-        url = state.url
-    }
-
-    val shown = !connected || expanded
-    val error = if (edited) null else state.urlError
-
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = connected) {
-                        expanded = !expanded
-                    }
-                    .heightIn(min = 48.dp)
-                    .padding(horizontal = 4.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Server", style = MaterialTheme.typography.titleMedium)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (state.status is ServerState.Loading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
-                            strokeWidth = 2.dp,
-                        )
-                    }
-                    Text(
-                        text = statusLabel(state.status),
-                        color = statusColor(state.status),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    Icon(
-                        imageVector = if (shown) Icons.ChevronUp else Icons.ChevronDown,
-                        contentDescription = if (shown) "Collapse server" else "Expand server",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (!shown) return@Column
-            TextField(
-                value = url,
-                onValueChange = {
-                    url = it
-                    edited = true
-                },
-                label = { Text("Server URL") },
-                singleLine = true,
-                enabled = !state.connecting,
-                isError = error != null,
-                supportingText = {
-                    if (error != null) {
-                        Text(error)
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            val discovered = state.discovered
-            if (discovered != null) {
-                OutlinedButton(
-                    onClick = {
-                        url = discovered
-                        edited = true
-                    },
-                    enabled = !state.connecting,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        text = "Use discovered: $discovered",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            Button(
-                onClick = {
-                    edited = false
-                    onEvent(ManageEvent.ConnectTapped(url))
-                },
-                enabled = !state.connecting,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (state.connecting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-                    }
-                    Text(if (state.connecting) "Connecting..." else "Connect")
-                }
-            }
-            val failed = state.status as? ServerState.Failed
-            if (failed != null) {
-                Text(
-                    text = failed.reason,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
-    var filterOpen by remember { mutableStateOf(state.projectQuery.isNotBlank()) }
-    var pathOpen by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf(TextFieldValue(state.projectQuery)) }
-    var path by remember { mutableStateOf(TextFieldValue(state.projectPath)) }
-
-    LaunchedEffect(state.projectQuery) {
-        if (state.projectQuery.isBlank()) return@LaunchedEffect
-        filterOpen = true
-    }
-
-    LaunchedEffect(state.projectQuery) {
-        if (state.projectQuery == query.text) return@LaunchedEffect
-        query = TextFieldValue(
-            text = state.projectQuery,
-            selection = TextRange(state.projectQuery.length),
-        )
-    }
-
-    LaunchedEffect(state.projectPath) {
-        if (state.projectPath == path.text) return@LaunchedEffect
-        path = TextFieldValue(
-            text = state.projectPath,
-            selection = TextRange(state.projectPath.length),
-        )
-    }
-
-    Card {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Projects", style = MaterialTheme.typography.titleMedium)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = { filterOpen = !filterOpen }) {
-                        Icon(
-                            imageVector = Icons.FilterList,
-                            contentDescription = "Filter projects",
-                            tint = if (filterOpen) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
-                    IconButton(onClick = { pathOpen = !pathOpen }) {
-                        Icon(
-                            imageVector = Icons.Add,
-                            contentDescription = "Add project path",
-                            tint = if (pathOpen) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
-                }
-            }
-
-            if (filterOpen) {
-                TextField(
-                    value = query,
-                    onValueChange = {
-                        query = it
-                        onEvent(ManageEvent.ProjectQueryChanged(it.text))
-                    },
-                    label = { Text("Search projects") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            if (pathOpen) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextField(
-                        value = path,
-                        onValueChange = {
-                            path = it
-                            onEvent(ManageEvent.ProjectPathChanged(it.text))
-                        },
-                        label = { Text("Open project path") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Button(
-                        onClick = {
-                            if (state.projectPath != path.text) {
-                                onEvent(ManageEvent.ProjectPathChanged(path.text))
-                            }
-                            onEvent(ManageEvent.OpenProjectTapped)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Open path")
-                    }
-                }
-            }
-
-            if (state.favoriteProjects.isEmpty() && state.otherProjects.isEmpty()) {
-                Text(
-                    text = if (state.loadingProjects) "Loading projects..." else "No projects found",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                return@Column
-            }
-
-            if (state.favoriteProjects.isNotEmpty()) {
-                state.favoriteProjects.chunked(2).forEach { row ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        row.forEach { project ->
-                            ProjectCard(
-                                project = project,
-                                selected = workspaceId(state.selectedProject.orEmpty()) == workspaceId(project.worktree),
-                                compact = true,
-                                modifier = Modifier.weight(1f),
-                                onFavoriteToggle = { onEvent(ManageEvent.ProjectFavoriteToggled(project.worktree)) },
-                                onSelect = { onEvent(ManageEvent.ProjectSelected(project.worktree)) },
-                            )
-                        }
-                        if (row.size == 1) {
-                            Spacer(modifier = Modifier.weight(1f))
-                        }
-                    }
-                }
-            }
-
-            val removable = state.selectedProject?.takeIf { selected ->
-                (state.favoriteProjects + state.otherProjects)
-                    .any { workspaceId(it.worktree) == workspaceId(selected) }
-            }
-
-            if (state.otherProjects.isEmpty()) {
-                if (removable != null) {
-                    OutlinedButton(
-                        onClick = { onEvent(ManageEvent.ProjectRemoved(removable)) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Remove selected project")
-                    }
-                }
-                return@Column
-            }
-
-            val count = state.otherProjects.size
-            val suffix = if (count == 1) "project" else "projects"
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onEvent(ManageEvent.ProjectListToggleTapped) }
-                    .heightIn(min = 48.dp)
-                    .padding(horizontal = 4.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = if (state.projectsExpanded) {
-                        "Hide $count $suffix"
-                    } else {
-                        "$count $suffix hidden"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Icon(
-                    imageVector = if (state.projectsExpanded) Icons.ChevronUp else Icons.ChevronDown,
-                    contentDescription = if (state.projectsExpanded) {
-                        "Collapse other projects"
-                    } else {
-                        "Expand other projects"
-                    },
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (!state.projectsExpanded) {
-                if (removable != null) {
-                    OutlinedButton(
-                        onClick = { onEvent(ManageEvent.ProjectRemoved(removable)) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Remove selected project")
-                    }
-                }
-                return@Column
-            }
-
-            state.otherProjects.forEach {
-                ProjectCard(
-                    project = it,
-                    selected = workspaceId(state.selectedProject.orEmpty()) == workspaceId(it.worktree),
-                    compact = false,
-                    modifier = Modifier.fillMaxWidth(),
-                    onFavoriteToggle = { onEvent(ManageEvent.ProjectFavoriteToggled(it.worktree)) },
-                    onSelect = { onEvent(ManageEvent.ProjectSelected(it.worktree)) },
-                )
-            }
-            if (removable != null) {
-                OutlinedButton(
-                    onClick = { onEvent(ManageEvent.ProjectRemoved(removable)) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Remove selected project")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProjectCard(
-    project: ProjectState,
-    selected: Boolean,
-    compact: Boolean,
-    modifier: Modifier = Modifier,
-    onFavoriteToggle: () -> Unit,
-    onSelect: () -> Unit,
-) {
-    Card(
-        modifier = modifier.clickable(onClick = onSelect),
-        colors = CardDefaults.cardColors(
-            containerColor = if (selected) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant
-            },
-        ),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(if (compact) 8.dp else 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = if (compact) Alignment.CenterVertically else Alignment.Top,
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = if (compact) Arrangement.Center else Arrangement.spacedBy(2.dp),
-            ) {
-                Text(
-                    text = project.name,
-                    style = if (compact) {
-                        MaterialTheme.typography.labelLarge
-                    } else {
-                        MaterialTheme.typography.bodyLarge
-                    },
-                    maxLines = if (compact) 2 else 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (!compact) {
-                    Text(
-                        text = project.worktree,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            IconButton(onClick = onFavoriteToggle) {
-                Icon(
-                    imageVector = if (project.favorite) Icons.Star else Icons.StarOutline,
-                    contentDescription = if (project.favorite) "Unfavorite project" else "Favorite project",
-                    tint = if (project.favorite) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
             }
         }
     }
@@ -685,25 +274,6 @@ private fun SessionCard(
     }
 }
 
-private fun statusLabel(state: ServerState): String {
-    return when (state) {
-        is ServerState.Idle -> "Idle"
-        is ServerState.Loading -> "Connecting"
-        is ServerState.Connected -> "Connected ${state.version}"
-        is ServerState.Failed -> "Failed"
-    }
-}
-
-@Composable
-private fun statusColor(state: ServerState): Color {
-    return when (state) {
-        is ServerState.Idle -> MaterialTheme.colorScheme.onSurfaceVariant
-        is ServerState.Loading -> MaterialTheme.colorScheme.tertiary
-        is ServerState.Connected -> MaterialTheme.colorScheme.primary
-        is ServerState.Failed -> MaterialTheme.colorScheme.error
-    }
-}
-
 private fun sessionSubtitle(session: SessionState, selectedWorktree: String?): String {
     val updated = session.updatedAt?.let {
         val value = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
@@ -718,7 +288,7 @@ private fun sessionSubtitle(session: SessionState, selectedWorktree: String?): S
     return "$prefix$updated | ${session.version}"
 }
 
-private fun workspaceId(path: String): String {
+internal fun workspaceId(path: String): String {
     val value = path.trimEnd('/', '\\')
     if (value.isBlank()) return path
     return value
