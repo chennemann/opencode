@@ -181,11 +181,7 @@ private fun Header(
                     strokeWidth = 2.dp,
                 )
             }
-            Text(
-                text = statusLabel(status),
-                color = statusColor(status),
-                style = MaterialTheme.typography.labelLarge,
-            )
+            StatusLabel(status)
             if (connected) {
                 Icon(
                     imageVector = if (shown) Icons.ChevronUp else Icons.ChevronDown,
@@ -284,11 +280,39 @@ private fun ConnectButton(
 }
 
 @Composable
+private fun StatusLabel(state: ServerState) {
+    if (state is ServerState.Connected) {
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = state.url,
+                color = statusColor(state),
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = stringResource(R.string.manage_server_status_version, state.version),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        return
+    }
+    Text(
+        text = statusLabel(state),
+        color = statusColor(state),
+        style = MaterialTheme.typography.labelLarge,
+    )
+}
+
+@Composable
 private fun statusLabel(state: ServerState): String {
     return when (state) {
         is ServerState.Idle -> stringResource(R.string.manage_server_status_idle)
         is ServerState.Loading -> stringResource(R.string.manage_server_status_connecting)
-        is ServerState.Connected -> stringResource(R.string.manage_server_status_connected, state.version)
+        is ServerState.Connected -> state.url
         is ServerState.Failed -> stringResource(R.string.manage_server_status_failed)
     }
 }

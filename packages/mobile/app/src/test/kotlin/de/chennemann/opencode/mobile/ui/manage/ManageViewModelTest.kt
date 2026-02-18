@@ -330,7 +330,7 @@ class ManageViewModelTest {
         return SessionUiState(
             url = url,
             discovered = discovered,
-            status = ServerState.Connected("1"),
+            status = ServerState.Connected("http://127.0.0.1", "1"),
             projects = projects,
             selectedProject = selectedProject,
             selectedProjectId = projects.firstOrNull { it.worktree == selectedProject }?.id,

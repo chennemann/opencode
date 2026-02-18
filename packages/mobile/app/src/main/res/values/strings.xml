@@ -9,7 +9,7 @@
   <string name="manage_server_collapse">Collapse server</string>
   <string name="manage_server_status_idle">Idle</string>
   <string name="manage_server_status_connecting">Connecting</string>
-  <string name="manage_server_status_connected">Connected %1$s</string>
+  <string name="manage_server_status_version">Version %1$s</string>
   <string name="manage_server_status_failed">Failed</string>
   <string name="manage_server_error_blank">Enter a server URL</string>
   <string name="manage_server_error_invalid">Enter a valid server URL</string>

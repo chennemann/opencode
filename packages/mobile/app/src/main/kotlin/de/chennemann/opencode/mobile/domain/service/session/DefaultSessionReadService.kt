@@ -43,7 +43,7 @@ class DefaultSessionReadService(
         ConnectionBaseState(
             endpoint = endpoint,
             discovered = discovered,
-            status = serverState(status),
+            status = serverState(status, endpoint),
         )
     }
     private val base = combine(
@@ -177,9 +177,9 @@ private data class SessionStateData(
     val focused: SessionState?,
 )
 
-private fun serverState(value: ConnectionState): ServerState {
+private fun serverState(value: ConnectionState, endpoint: String): ServerState {
     return when (value) {
-        is ConnectionState.Connected -> ServerState.Connected(value.version)
+        is ConnectionState.Connected -> ServerState.Connected(endpoint, value.version)
         is ConnectionState.Failed -> ServerState.Failed(value.reason)
         is ConnectionState.Loading -> ServerState.Loading
         is ConnectionState.Idle -> ServerState.Idle

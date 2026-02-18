@@ -116,7 +116,7 @@ private class FakeSessionReadService(
         SessionUiState(
             url = "http://127.0.0.1:4096",
             discovered = null,
-            status = ServerState.Connected("v1"),
+            status = ServerState.Connected("http://demo.local:4096", "v1"),
             projects = listOf(project),
             selectedProject = project.worktree,
             selectedProjectId = project.id,

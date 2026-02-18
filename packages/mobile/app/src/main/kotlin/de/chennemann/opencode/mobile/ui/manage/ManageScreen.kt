@@ -107,9 +107,9 @@ fun ManageScreen(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.errorContainer,
                     ),
-                ) {
+                ) { 
                     Text(
-                        text = state.message.orEmpty(),
+                        text = state.message,
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.padding(12.dp),
                     )

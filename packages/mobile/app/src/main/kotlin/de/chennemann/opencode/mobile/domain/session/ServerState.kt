@@ -5,7 +5,7 @@ sealed interface ServerState {
 
     data object Loading : ServerState
 
-    data class Connected(val version: String) : ServerState
+    data class Connected(val url: String, val version: String) : ServerState
 
     data class Failed(val reason: String) : ServerState
 }

@@ -86,7 +86,7 @@ class ConversationViewModelTest {
             updatedAt = 100,
         )
         read.state.value = state(
-            status = ServerState.Connected("1"),
+            status = ServerState.Connected("http://demo.local:4096", "1"),
             commands = listOf(CommandState(name = "help", description = "Help")),
             focusedSession = focused,
             focusedMessages = listOf(

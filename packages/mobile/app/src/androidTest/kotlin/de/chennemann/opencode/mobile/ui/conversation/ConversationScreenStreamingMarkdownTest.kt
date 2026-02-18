@@ -187,7 +187,7 @@ class ConversationScreenStreamingMarkdownTest {
         callOpen: Map<String, Boolean> = emptyMap(),
     ) = ConversationUiState(
         title = "Session",
-        status = ServerState.Connected("v1"),
+        status = ServerState.Connected("http://demo.local:4096", "v1"),
         message = null,
         turns = turns,
         canLoadMoreMessages = canLoadMoreMessages,
