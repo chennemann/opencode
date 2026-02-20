@@ -9,8 +9,7 @@ import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
 import de.chennemann.opencode.mobile.data.ServerGateway
 import de.chennemann.opencode.mobile.data.SessionCacheRepository
-import de.chennemann.opencode.mobile.data.SqlDelightSessionRepository
-import de.chennemann.opencode.mobile.db.AppDatabase
+import de.chennemann.opencode.mobile.data.v2.SqlDelightSessionRepository
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
 import de.chennemann.opencode.mobile.domain.session.CommandGateway
@@ -41,7 +40,9 @@ import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.Json
+import app.cash.sqldelight.async.coroutines.synchronous
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
+import de.chennemann.opencode.mobile.db.AgenticDb
 import org.koin.androidx.viewmodel.dsl.viewModel
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
@@ -63,9 +64,9 @@ val appModule = module {
         }
     }
     single {
-        AppDatabase(
+        AgenticDb(
             AndroidSqliteDriver(
-                AppDatabase.Schema,
+                AgenticDb.Schema.synchronous(),
                 get(),
                 "app.db",
             )

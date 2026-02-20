@@ -1,4 +1,0 @@
-CREATE TABLE meta (
-  id INTEGER NOT NULL PRIMARY KEY,
-  value TEXT NOT NULL
-);

@@ -1,7 +1,8 @@
 package de.chennemann.opencode.mobile.data
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
-import de.chennemann.opencode.mobile.db.AppDatabase
+import app.cash.sqldelight.async.coroutines.synchronous
+import de.chennemann.opencode.mobile.db.AgenticDb
 import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.session.LogFilter
 import de.chennemann.opencode.mobile.domain.session.LogLevel
@@ -100,10 +101,10 @@ class LocalLogRepositoryTest {
         )
     }
 
-    private fun db(): AppDatabase {
+    private fun db(): AgenticDb {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        AppDatabase.Schema.create(driver)
-        return AppDatabase(driver)
+        AgenticDb.Schema.synchronous().create(driver)
+        return AgenticDb(driver)
     }
 
     private fun lanes(worker: TestDispatcher): DispatcherProvider {

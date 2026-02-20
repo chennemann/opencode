@@ -2,7 +2,7 @@ package de.chennemann.opencode.mobile.data
 
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
-import de.chennemann.opencode.mobile.db.AppDatabase
+import de.chennemann.opencode.mobile.db.AgenticDb
 import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.session.MessageState
 import de.chennemann.opencode.mobile.domain.session.RecentSessionCache
@@ -13,7 +13,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 
 class SessionCacheRepository(
-    private val db: AppDatabase,
+    private val db: AgenticDb,
     private val dispatchers: DispatcherProvider,
 ) : SessionCacheGateway {
     override suspend fun upsertSession(server: String, project: String?, session: SessionState) {
@@ -262,7 +262,7 @@ private fun mapSessionCache(
 
 private const val ProjectFavoriteSeparator = "\n"
 
-private fun settingSet(db: AppDatabase, key: String): Set<String> {
+private fun settingSet(db: AgenticDb, key: String): Set<String> {
     return db.settingsQueries
         .selectSetting(key)
         .executeAsOneOrNull()
@@ -273,7 +273,7 @@ private fun settingSet(db: AppDatabase, key: String): Set<String> {
         ?: emptySet()
 }
 
-private fun setSettingSet(db: AppDatabase, key: String, value: Set<String>) {
+private suspend fun setSettingSet(db: AgenticDb, key: String, value: Set<String>) {
     val next = value
         .map(String::trim)
         .filter(String::isNotEmpty)

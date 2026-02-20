@@ -1,15 +1,15 @@
-package de.chennemann.opencode.mobile.data
+package de.chennemann.opencode.mobile.data.v2
 
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
-import de.chennemann.opencode.mobile.db.AppDatabase
+import de.chennemann.opencode.mobile.db.AgenticDb
 import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.v2.session.LocalSessionInfo
 import de.chennemann.opencode.mobile.domain.v2.session.SessionRepository
 import kotlinx.coroutines.flow.Flow
 
 class SqlDelightSessionRepository(
-    private val db: AppDatabase,
+    private val db: AgenticDb,
     private val dispatchers: DispatcherProvider,
 ) : SessionRepository {
     override fun sessionsOfProject(projectKey: String): Flow<List<LocalSessionInfo>> {

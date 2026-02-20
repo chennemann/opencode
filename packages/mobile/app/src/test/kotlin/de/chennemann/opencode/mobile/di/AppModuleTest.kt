@@ -1,5 +1,6 @@
 package de.chennemann.opencode.mobile.di
 
+import app.cash.sqldelight.async.coroutines.synchronous
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import de.chennemann.opencode.mobile.data.CommandInfo
 import de.chennemann.opencode.mobile.data.GlobalStreamEvent
@@ -12,7 +13,7 @@ import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.SessionCacheRepository
 import de.chennemann.opencode.mobile.data.SessionInfo
 import de.chennemann.opencode.mobile.data.SessionMessageInfo
-import de.chennemann.opencode.mobile.db.AppDatabase
+import de.chennemann.opencode.mobile.db.AgenticDb
 import de.chennemann.opencode.mobile.domain.session.CommandGateway
 import de.chennemann.opencode.mobile.domain.session.ConnectionGateway
 import de.chennemann.opencode.mobile.domain.session.ConnectivityGateway
@@ -109,10 +110,10 @@ class AppModuleTest {
         return field.get(viewModel) as SessionServiceApi
     }
 
-    private fun db(): AppDatabase {
+    private fun db(): AgenticDb {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        AppDatabase.Schema.create(driver)
-        return AppDatabase(driver)
+        AgenticDb.Schema.synchronous().create(driver)
+        return AgenticDb(driver)
     }
 }
 

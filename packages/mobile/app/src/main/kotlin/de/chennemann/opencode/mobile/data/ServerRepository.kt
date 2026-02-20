@@ -1,6 +1,6 @@
 package de.chennemann.opencode.mobile.data
 
-import de.chennemann.opencode.mobile.db.AppDatabase
+import de.chennemann.opencode.mobile.db.AgenticDb
 import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.session.CommandGateway
 import de.chennemann.opencode.mobile.domain.session.CommandState
@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class ServerRepository(
-    private val db: AppDatabase,
+    private val db: AgenticDb,
     private val mdns: MdnsGateway,
     private val service: ServerGateway,
     private val network: ConnectivityGateway,

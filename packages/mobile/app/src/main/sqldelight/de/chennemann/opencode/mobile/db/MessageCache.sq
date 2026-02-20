@@ -1,15 +1,4 @@
-CREATE TABLE message_cache (
-  server_url TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  message_id TEXT NOT NULL,
-  role TEXT NOT NULL,
-  text TEXT NOT NULL,
-  sort_key TEXT NOT NULL,
-  created_at INTEGER,
-  completed_at INTEGER,
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (server_url, session_id, message_id)
-);
+
 
 listMessageCache:
 SELECT server_url, session_id, message_id, role, text, sort_key, created_at, completed_at, updated_at
