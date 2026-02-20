@@ -1,4 +1,4 @@
-package de.chennemann.opencode.mobile.ui.conversation
+package de.chennemann.opencode.mobile.ui.chat
 
 import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.session.CommandState
@@ -7,11 +7,15 @@ import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.domain.session.SessionUiState
+import de.chennemann.opencode.mobile.navigation.NavEvent
+import de.chennemann.opencode.mobile.navigation.SessionSelectionBottomSheetRoute
+import de.chennemann.opencode.mobile.navigation.WorkspaceHubRoute
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -41,6 +45,7 @@ class ConversationViewModelTest {
         val service = StubSessionService()
         val viewModel = ConversationViewModel(service, lanes(main, worker))
         val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        val menuCollect = backgroundScope.launch(worker) { viewModel.quickSwitchMenu.collect {} }
         val focused = SessionState(
             id = "s1",
             title = "Session 1",
@@ -73,7 +78,54 @@ class ConversationViewModelTest {
         advanceUntilIdle()
 
         assertEquals(listOf("help"), viewModel.state.value.slashSuggestions.map { it.name })
+        menuCollect.cancel()
         collect.cancel()
+    }
+
+    @Test
+    fun workspaceHubRequestedEmitsTypedNavigationAction() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ConversationViewModel(service, lanes(main, worker))
+
+        val nav = async { viewModel.nav.first() }
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.WorkspaceHubRequested)
+        advanceUntilIdle()
+
+        assertEquals(NavEvent.NavigateTo(WorkspaceHubRoute), nav.await())
+    }
+
+    @Test
+    fun sessionRequestedOpensKnownSessionById() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ConversationViewModel(service, lanes(main, worker))
+        val session = SessionState(id = "s1", title = "One", version = "1", directory = "/repo/main", updatedAt = 100)
+        service.state.value = state(activeSessions = listOf(session))
+
+        viewModel.onEvent(ConversationEvent.SessionRequested("s1"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("s1"), service.openRequests)
+    }
+
+    @Test
+    fun sessionRequestedWithNullCreatesInProvidedWorktree() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ConversationViewModel(service, lanes(main, worker))
+
+        viewModel.onEvent(ConversationEvent.SessionRequested(null, "/repo/main"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("/repo/main"), service.createRequests)
     }
 
     @Test
@@ -84,6 +136,7 @@ class ConversationViewModelTest {
         val service = StubSessionService()
         val viewModel = ConversationViewModel(service, lanes(main, worker))
         val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        val menuCollect = backgroundScope.launch(worker) { viewModel.quickSwitchMenu.collect {} }
         val focused = SessionState(
             id = "s2",
             title = "Focused",
@@ -102,17 +155,34 @@ class ConversationViewModelTest {
         )
 
         advanceUntilIdle()
-        viewModel.onEvent(ConversationEvent.QuickSwitchLongPressed("/repo/main"))
+        viewModel.onEvent(ConversationEvent.SessionsRequested("/repo/main"))
         advanceUntilIdle()
 
-        val menu = viewModel.state.value.quickSwitchMenu
+        val menu = viewModel.quickSwitchMenu.value
         assertEquals(listOf("/repo/main"), service.sessionRequests)
         assertEquals(listOf(11), service.sessionRequestLimits)
         assertEquals(listOf(11), service.cachedRequestLimits)
         assertTrue(menu != null)
         assertFalse(menu!!.loading)
         assertEquals(listOf("s2", "s1"), menu.sessions.map { it.id })
+        menuCollect.cancel()
         collect.cancel()
+    }
+
+    @Test
+    fun sessionsRequestedEmitsQuickSwitchSheetNavigation() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val service = StubSessionService()
+        val viewModel = ConversationViewModel(service, lanes(main, worker))
+
+        val nav = async { viewModel.nav.first() }
+        advanceUntilIdle()
+        viewModel.onEvent(ConversationEvent.SessionsRequested("/repo/main"))
+        advanceUntilIdle()
+
+        assertEquals(NavEvent.NavigateTo(SessionSelectionBottomSheetRoute("/repo/main")), nav.await())
     }
 
     @Test
@@ -123,6 +193,7 @@ class ConversationViewModelTest {
         val service = StubSessionService()
         val viewModel = ConversationViewModel(service, lanes(main, worker))
         val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        val menuCollect = backgroundScope.launch(worker) { viewModel.quickSwitchMenu.collect {} }
         val focused = SessionState(
             id = "s12",
             title = "Focused",
@@ -148,24 +219,25 @@ class ConversationViewModelTest {
         )
 
         advanceUntilIdle()
-        viewModel.onEvent(ConversationEvent.QuickSwitchLongPressed("/repo/main"))
+        viewModel.onEvent(ConversationEvent.SessionsRequested("/repo/main"))
         advanceUntilIdle()
 
-        val initial = viewModel.state.value.quickSwitchMenu
+        val initial = viewModel.quickSwitchMenu.value
         assertTrue(initial != null)
         assertEquals(11, initial!!.sessions.size)
         assertTrue(initial.canLoadMore)
         assertEquals(listOf(11), service.sessionRequestLimits)
         assertEquals(listOf(11), service.cachedRequestLimits)
 
-        viewModel.onEvent(ConversationEvent.QuickSwitchMenuLoadMoreTapped)
+        viewModel.onEvent(ConversationEvent.MoreSessionsRequested)
         advanceUntilIdle()
 
-        val next = viewModel.state.value.quickSwitchMenu
+        val next = viewModel.quickSwitchMenu.value
         assertTrue(next != null)
         assertEquals(12, next!!.sessions.size)
         assertFalse(next.canLoadMore)
         assertEquals(listOf(11, 22), service.sessionRequestLimits)
+        menuCollect.cancel()
         collect.cancel()
     }
 
@@ -177,6 +249,7 @@ class ConversationViewModelTest {
         val service = StubSessionService()
         val viewModel = ConversationViewModel(service, lanes(main, worker))
         val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        val menuCollect = backgroundScope.launch(worker) { viewModel.quickSwitchMenu.collect {} }
         val focused = SessionState(
             id = "s2",
             title = "Focused",
@@ -195,16 +268,17 @@ class ConversationViewModelTest {
         )
 
         advanceUntilIdle()
-        viewModel.onEvent(ConversationEvent.QuickSwitchLongPressed("/repo/main"))
+        viewModel.onEvent(ConversationEvent.SessionsRequested("/repo/main"))
         advanceUntilIdle()
 
-        viewModel.onEvent(ConversationEvent.QuickSwitchMenuArchiveTapped(focused))
+        viewModel.onEvent(ConversationEvent.SessionArchiveRequested(focused))
         advanceUntilIdle()
 
-        val menu = viewModel.state.value.quickSwitchMenu
+        val menu = viewModel.quickSwitchMenu.value
         assertTrue(menu != null)
         assertEquals(listOf("s1"), menu!!.sessions.map { it.id })
         assertEquals(listOf("s2"), service.archiveRequests)
+        menuCollect.cancel()
         collect.cancel()
     }
 
@@ -253,10 +327,10 @@ class ConversationViewModelTest {
         )
 
         advanceUntilIdle()
-        viewModel.onEvent(ConversationEvent.QuickSwitchTapped("/repo/main"))
-        advanceUntilIdle()
-
-        assertEquals(listOf("s2"), service.openRequests)
+        assertEquals(
+            listOf("s3", "s2", "s1"),
+            viewModel.state.value.quickSwitches.single().cycleSessionIds,
+        )
 
         val refreshed = listOf(
             SessionState(id = "s1", title = "Session 1", version = "1", directory = "/repo/main", updatedAt = 900),
@@ -270,10 +344,10 @@ class ConversationViewModelTest {
         )
 
         advanceUntilIdle()
-        viewModel.onEvent(ConversationEvent.QuickSwitchTapped("/repo/main"))
-        advanceUntilIdle()
-
-        assertEquals(listOf("s2", "s1"), service.openRequests)
+        assertEquals(
+            listOf("s3", "s2", "s1"),
+            viewModel.state.value.quickSwitches.single().cycleSessionIds,
+        )
         collect.cancel()
     }
 
@@ -285,6 +359,7 @@ class ConversationViewModelTest {
         val service = StubSessionService()
         val viewModel = ConversationViewModel(service, lanes(main, worker))
         val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        val menuCollect = backgroundScope.launch(worker) { viewModel.quickSwitchMenu.collect {} }
         val focused = SessionState(
             id = "s2",
             title = "Focused",
@@ -304,15 +379,16 @@ class ConversationViewModelTest {
         )
 
         advanceUntilIdle()
-        viewModel.onEvent(ConversationEvent.QuickSwitchLongPressed("/repo/main"))
+        viewModel.onEvent(ConversationEvent.SessionsRequested("/repo/main"))
         advanceUntilIdle()
 
-        val menu = viewModel.state.value.quickSwitchMenu
+        val menu = viewModel.quickSwitchMenu.value
         assertTrue(menu != null)
         assertFalse(menu!!.loading)
         assertEquals(listOf("s2", "s1"), menu.sessions.map { it.id })
         assertEquals(listOf(11), service.cachedRequestLimits)
         assertEquals(listOf(11), service.sessionRequestLimits)
+        menuCollect.cancel()
         collect.cancel()
     }
 
@@ -324,6 +400,7 @@ class ConversationViewModelTest {
         val service = StubSessionService()
         val viewModel = ConversationViewModel(service, lanes(main, worker))
         val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+        val menuCollect = backgroundScope.launch(worker) { viewModel.quickSwitchMenu.collect {} }
         val root = SessionState(
             id = "s-root",
             title = "Root",
@@ -349,10 +426,11 @@ class ConversationViewModelTest {
         advanceUntilIdle()
         assertEquals(1, viewModel.state.value.quickSwitches.size)
 
-        viewModel.onEvent(ConversationEvent.QuickSwitchLongPressed("/repo/main"))
+        viewModel.onEvent(ConversationEvent.SessionsRequested("/repo/main"))
         advanceUntilIdle()
 
-        assertEquals(listOf("s-root"), viewModel.state.value.quickSwitchMenu?.sessions?.map { it.id })
+        assertEquals(listOf("s-root"), viewModel.quickSwitchMenu.value?.sessions?.map { it.id })
+        menuCollect.cancel()
         collect.cancel()
     }
 
@@ -386,8 +464,8 @@ class ConversationViewModelTest {
         )
 
         advanceUntilIdle()
-        viewModel.onEvent(ConversationEvent.ToolCallSessionTapped("s-sub-known"))
-        viewModel.onEvent(ConversationEvent.ToolCallSessionTapped("s-sub-fallback"))
+        viewModel.onEvent(ConversationEvent.SubsessionRequested("s-sub-known"))
+        viewModel.onEvent(ConversationEvent.SubsessionRequested("s-sub-fallback"))
         advanceUntilIdle()
 
         assertEquals(listOf("s-sub-known", "s-sub-fallback"), service.openRequests)
@@ -408,7 +486,7 @@ class ConversationViewModelTest {
 
         advanceUntilIdle()
         viewModel.onEvent(ConversationEvent.DraftChanged("hello"))
-        viewModel.onEvent(ConversationEvent.SendTapped)
+        viewModel.onEvent(ConversationEvent.MessageSubmitted)
         advanceUntilIdle()
 
         assertEquals(listOf("hello"), service.sentTexts)
@@ -416,7 +494,7 @@ class ConversationViewModelTest {
         assertEquals(1L, viewModel.state.value.scroll)
 
         viewModel.onEvent(ConversationEvent.DraftChanged("   "))
-        viewModel.onEvent(ConversationEvent.SendTapped)
+        viewModel.onEvent(ConversationEvent.MessageSubmitted)
         advanceUntilIdle()
 
         assertEquals(listOf("hello", "   "), service.sentTexts)
@@ -530,6 +608,7 @@ private class StubSessionService : SessionServiceApi {
     val sessionRequestLimits = mutableListOf<Int>()
     val cachedRequestLimits = mutableListOf<Int>()
     val archiveRequests = mutableListOf<String>()
+    val createRequests = mutableListOf<String>()
     val openRequests = mutableListOf<String>()
     val openedSessions = mutableListOf<SessionState>()
     val sentTexts = mutableListOf<String>()
@@ -556,6 +635,7 @@ private class StubSessionService : SessionServiceApi {
     override fun toggleSessionQuickPin(session: SessionState, systemPinned: Boolean) = Unit
 
     override suspend fun createSessionAndFocus(worktree: String): Boolean {
+        createRequests += worktree
         return true
     }
 

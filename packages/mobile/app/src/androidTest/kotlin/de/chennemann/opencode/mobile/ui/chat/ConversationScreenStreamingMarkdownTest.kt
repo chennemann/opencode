@@ -1,4 +1,4 @@
-package de.chennemann.opencode.mobile.ui.conversation
+package de.chennemann.opencode.mobile.ui.chat
 
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertCountEquals
@@ -25,8 +25,9 @@ class ConversationScreenStreamingMarkdownTest {
         val state = mutableStateOf(ui(listOf("hello `code` world")))
 
         compose.setContent {
-            ConversationScreen(
+            AgentChatScreen(
                 state = state.value,
+                quickSwitchMenu = null,
                 onEvent = {},
             )
         }
@@ -40,8 +41,9 @@ class ConversationScreenStreamingMarkdownTest {
         val state = mutableStateOf(ui(listOf("line 1")))
 
         compose.setContent {
-            ConversationScreen(
+            AgentChatScreen(
                 state = state.value,
+                quickSwitchMenu = null,
                 onEvent = {},
             )
         }
@@ -59,8 +61,9 @@ class ConversationScreenStreamingMarkdownTest {
         val state = mutableStateOf(ui(listOf("chunk-0 `code-0`")))
 
         compose.setContent {
-            ConversationScreen(
+            AgentChatScreen(
                 state = state.value,
+                quickSwitchMenu = null,
                 onEvent = {},
             )
         }
@@ -82,8 +85,9 @@ class ConversationScreenStreamingMarkdownTest {
         val state = mutableStateOf(ui(listOf(long)))
 
         compose.setContent {
-            ConversationScreen(
+            AgentChatScreen(
                 state = state.value,
+                quickSwitchMenu = null,
                 onEvent = {},
             )
         }
@@ -91,52 +95,6 @@ class ConversationScreenStreamingMarkdownTest {
         val expected = (1..220).joinToString(" ") { "segment-$it" } + " tail-code"
         compose.onAllNodesWithText(expected).assertCountEquals(1)
         compose.onAllNodesWithText(long).assertCountEquals(0)
-    }
-
-    @Test
-    fun keeps_tool_call_expansion_state_across_ui_updates() {
-        val state = mutableStateOf(
-            ui(
-                turns = listOf(
-                    ConversationTurnUiState(
-                        id = "turn-1",
-                        userText = "Run tools",
-                        toolCalls = listOf(
-                            ToolCallState(
-                                id = "call-1",
-                                title = "Read",
-                                details = listOf("detail one"),
-                            ),
-                            ToolCallState(
-                                id = "call-2",
-                                title = "Write",
-                                details = listOf("detail two"),
-                            ),
-                        ),
-                        systemTexts = emptyList(),
-                    ),
-                ),
-                stepOpen = mapOf("turn-1" to true),
-                callOpen = mapOf("call-1" to true),
-            ),
-        )
-
-        compose.setContent {
-            ConversationScreen(
-                state = state.value,
-                onEvent = {},
-            )
-        }
-
-        compose.onAllNodesWithText("detail one").assertCountEquals(1)
-        compose.onAllNodesWithText("detail two").assertCountEquals(0)
-
-        compose.runOnIdle {
-            state.value = state.value.copy(callOpen = mapOf("call-2" to true))
-        }
-
-        compose.onAllNodesWithText("detail one").assertCountEquals(0)
-        compose.onAllNodesWithText("detail two").assertCountEquals(1)
     }
 
     @Test
@@ -150,14 +108,15 @@ class ConversationScreenStreamingMarkdownTest {
         )
 
         compose.setContent {
-            ConversationScreen(
+            AgentChatScreen(
                 state = state.value,
+                quickSwitchMenu = null,
                 onEvent = { events += it },
             )
         }
 
         compose.onNodeWithText("Load older messages").performClick()
-        assertEquals(listOf(ConversationEvent.LoadMoreMessagesTapped), events)
+        assertEquals(listOf(ConversationEvent.MoreMessagesRequested), events)
 
         compose.runOnIdle {
             state.value = state.value.copy(
@@ -183,8 +142,6 @@ class ConversationScreenStreamingMarkdownTest {
         ),
         canLoadMoreMessages: Boolean = false,
         loadingMoreMessages: Boolean = false,
-        stepOpen: Map<String, Boolean> = emptyMap(),
-        callOpen: Map<String, Boolean> = emptyMap(),
     ) = ConversationUiState(
         title = "Session",
         status = ServerState.Connected("v1"),
@@ -197,7 +154,6 @@ class ConversationScreenStreamingMarkdownTest {
         mode = ConversationMode.BUILD,
         slashSuggestions = emptyList(),
         quickSwitches = emptyList(),
-        stepOpen = stepOpen,
-        callOpen = callOpen,
+        focusedSessionId = null,
     )
 }

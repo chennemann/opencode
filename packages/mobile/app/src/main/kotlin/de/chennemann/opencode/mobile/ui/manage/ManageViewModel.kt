@@ -7,6 +7,8 @@ import de.chennemann.opencode.mobile.domain.session.ProjectState
 import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.SessionState
+import de.chennemann.opencode.mobile.navigation.AgentChatRoute
+import de.chennemann.opencode.mobile.navigation.LogsRoute
 import de.chennemann.opencode.mobile.navigation.NavEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,7 +29,6 @@ class ManageViewModel(
     private data class LocalState(
         val projectPath: String,
         val projectQuery: String,
-        val projectsExpanded: Boolean,
         val selectedWorkspace: String?,
         val sessionScroll: Long,
     )
@@ -36,7 +37,6 @@ class ManageViewModel(
         LocalState(
             projectPath = service.state.value.selectedProject.orEmpty(),
             projectQuery = "",
-            projectsExpanded = false,
             selectedWorkspace = service.state.value.selectedProject,
             sessionScroll = 0L,
         )
@@ -57,7 +57,6 @@ class ManageViewModel(
             projectPath = local.projectPath,
             projectQuery = local.projectQuery,
             loadingProjects = global.loadingProjects,
-            projectsExpanded = local.projectsExpanded,
             favoriteProjects = projects.filter { it.favorite },
             otherProjects = projects.filterNot { it.favorite },
             selectedProject = global.selectedProject,
@@ -82,7 +81,6 @@ class ManageViewModel(
             projectPath = service.state.value.selectedProject.orEmpty(),
             projectQuery = "",
             loadingProjects = false,
-            projectsExpanded = false,
             favoriteProjects = emptyList(),
             otherProjects = emptyList(),
             selectedProject = null,
@@ -115,11 +113,7 @@ class ManageViewModel(
                 local.value = local.value.copy(projectQuery = event.value)
             }
 
-            is ManageEvent.ProjectListToggleTapped -> {
-                local.value = local.value.copy(projectsExpanded = !local.value.projectsExpanded)
-            }
-
-            is ManageEvent.OpenProjectTapped -> {
+            ManageEvent.LoadProjectRequested -> {
                 val worktree = local.value.projectPath.trim()
                 if (worktree.isBlank()) return
                 service.selectProject(worktree)
@@ -151,30 +145,38 @@ class ManageViewModel(
                 local.value = local.value.copy(selectedWorkspace = event.directory)
             }
 
-            is ManageEvent.CreateSessionTapped -> {
-                viewModelScope.launch(lane) {
-                    val workspaces = workspaceOptions(service.state.value.projects, service.state.value.selectedProject)
-                    val selected = selectedWorkspace(workspaces, local.value.selectedWorkspace)
-                    val directory = selected?.directory ?: return@launch
-                    if (service.createSessionAndFocus(directory)) {
-                        navFlow.tryEmit(NavEvent.ToConversation)
+            is ManageEvent.SessionRequested -> {
+                val sessionId = event.sessionId
+                if (sessionId == null) {
+                    viewModelScope.launch(lane) {
+                        val workspaces = workspaceOptions(service.state.value.projects, service.state.value.selectedProject)
+                        val selected = selectedWorkspace(workspaces, local.value.selectedWorkspace)
+                        val directory = selected?.directory ?: return@launch
+                        if (service.createSessionAndFocus(directory)) {
+                            navFlow.tryEmit(NavEvent.NavigateTo(AgentChatRoute))
+                        }
                     }
+                    return
                 }
+
+                val session = findSessionById(sessionId) ?: return
+                service.openSession(session)
+                navFlow.tryEmit(NavEvent.NavigateTo(AgentChatRoute))
             }
 
-            is ManageEvent.OpenSessionTapped -> {
-                service.openSession(event.session)
-                navFlow.tryEmit(NavEvent.ToConversation)
+            ManageEvent.LogsRequested -> {
+                navFlow.tryEmit(NavEvent.NavigateTo(LogsRoute))
             }
 
-            is ManageEvent.OpenLogsTapped -> {
-                navFlow.tryEmit(NavEvent.ToLogs)
-            }
-
-            is ManageEvent.BackTapped -> {
-                navFlow.tryEmit(NavEvent.Back)
+            ManageEvent.BackRequested -> {
+                navFlow.tryEmit(NavEvent.NavigateBack)
             }
         }
+    }
+
+    private fun findSessionById(id: String): SessionState? {
+        return (service.state.value.sessions + service.state.value.activeSessions)
+            .firstOrNull { it.id == id }
     }
 
     private fun filterProjects(projects: List<ProjectState>, query: String): List<ProjectState> {

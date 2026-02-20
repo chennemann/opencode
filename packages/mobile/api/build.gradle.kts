@@ -1,7 +1,7 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
-    id("org.openapi.generator") version "7.19.0"
+    id("org.openapi.generator") version "7.20.0"
 }
 
 kotlin {

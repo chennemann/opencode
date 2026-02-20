@@ -6,6 +6,8 @@ import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.domain.session.SessionUiState
+import de.chennemann.opencode.mobile.navigation.AgentChatRoute
+import de.chennemann.opencode.mobile.navigation.LogsRoute
 import de.chennemann.opencode.mobile.navigation.NavEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -84,11 +86,11 @@ class ManageViewModelTest {
 
         val nav = async { viewModel.nav.first() }
         viewModel.onEvent(ManageEvent.WorkspaceSelected("/repo/main/s1"))
-        viewModel.onEvent(ManageEvent.CreateSessionTapped)
+        viewModel.onEvent(ManageEvent.SessionRequested(null))
         advanceUntilIdle()
 
         assertEquals(listOf("/repo/main/s1"), service.createRequests)
-        assertTrue(nav.await() is NavEvent.ToConversation)
+        assertEquals(NavEvent.NavigateTo(AgentChatRoute), nav.await())
         collect.cancel()
     }
 
@@ -185,12 +187,12 @@ class ManageViewModelTest {
 
         val nav = async { viewModel.nav.first() }
         viewModel.onEvent(ManageEvent.WorkspaceSelected("/repo/unknown"))
-        viewModel.onEvent(ManageEvent.CreateSessionTapped)
+        viewModel.onEvent(ManageEvent.SessionRequested(null))
         advanceUntilIdle()
 
         assertEquals("/repo/main", viewModel.state.value.selectedWorkspace)
         assertEquals(listOf("/repo/main"), service.createRequests)
-        assertTrue(nav.await() is NavEvent.ToConversation)
+        assertEquals(NavEvent.NavigateTo(AgentChatRoute), nav.await())
         collect.cancel()
     }
 
@@ -216,14 +218,15 @@ class ManageViewModelTest {
         val service = StubSessionService()
         val viewModel = ManageViewModel(service, lanes(main, worker))
         val session = SessionState(id = "s1", title = "One", version = "1", directory = "/repo/main", updatedAt = 100)
+        service.state.value = state(sessions = listOf(session))
 
         val nav = async { viewModel.nav.first() }
         advanceUntilIdle()
-        viewModel.onEvent(ManageEvent.OpenSessionTapped(session))
+        viewModel.onEvent(ManageEvent.SessionRequested(session.id))
         advanceUntilIdle()
 
         assertEquals(listOf("s1"), service.openRequests.map { it.id })
-        assertTrue(nav.await() is NavEvent.ToConversation)
+        assertEquals(NavEvent.NavigateTo(AgentChatRoute), nav.await())
     }
 
     @Test
@@ -236,10 +239,10 @@ class ManageViewModelTest {
 
         val nav = async { viewModel.nav.first() }
         advanceUntilIdle()
-        viewModel.onEvent(ManageEvent.OpenLogsTapped)
+        viewModel.onEvent(ManageEvent.LogsRequested)
         advanceUntilIdle()
 
-        assertTrue(nav.await() is NavEvent.ToLogs)
+        assertEquals(NavEvent.NavigateTo(LogsRoute), nav.await())
     }
 
     private fun state(

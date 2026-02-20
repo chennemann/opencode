@@ -10,13 +10,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -29,30 +27,20 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.SheetValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.platform.LocalFocusManager
@@ -62,28 +50,15 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import de.chennemann.opencode.mobile.domain.session.CommandState
-import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.icons.Icons
-import de.chennemann.opencode.mobile.icons.Add
-import de.chennemann.opencode.mobile.icons.Archive
 import de.chennemann.opencode.mobile.icons.CircleSlash
-import de.chennemann.opencode.mobile.icons.Pin
-import de.chennemann.opencode.mobile.icons.PinOutline
-import de.chennemann.opencode.mobile.icons.Rename
 import de.chennemann.opencode.mobile.icons.Send
-import de.chennemann.opencode.mobile.ui.conversation.QuickSwitchMenuState
-import de.chennemann.opencode.mobile.ui.conversation.QuickSwitchState
-import de.chennemann.opencode.mobile.ui.conversation.ConversationMode
+import de.chennemann.opencode.mobile.ui.chat.QuickSwitchState
+import de.chennemann.opencode.mobile.ui.chat.ConversationMode
 import de.chennemann.opencode.mobile.ui.theme.MobileTheme
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import kotlinx.coroutines.launch
 
 private val ModeSwipeThreshold = 28.dp
 
@@ -108,7 +83,6 @@ fun MessageComposer(
     connected: Boolean,
     suggestions: List<CommandState>,
     quickSwitches: List<QuickSwitchState>,
-    quickSwitchMenu: QuickSwitchMenuState?,
     onDraftChange: (String) -> Unit,
     onModeChange: (ConversationMode) -> Unit,
     onSend: () -> Unit,
@@ -116,13 +90,6 @@ fun MessageComposer(
     onCommandSelect: (CommandState) -> Unit,
     onQuickSwitch: (String) -> Unit,
     onQuickSwitchLongPress: (String) -> Unit,
-    onQuickSwitchDismiss: () -> Unit,
-    onQuickSwitchSession: (SessionState) -> Unit,
-    onQuickSwitchPin: (SessionState, Boolean) -> Unit,
-    onQuickSwitchArchive: (SessionState) -> Unit,
-    onQuickSwitchRename: (SessionState, String) -> Unit,
-    onQuickSwitchLoadMore: () -> Unit,
-    onQuickSwitchCreate: () -> Unit,
 ) {
     var commandOpen by remember { mutableStateOf(false) }
     var dismissedAt by remember { mutableLongStateOf(0L) }
@@ -371,239 +338,6 @@ fun MessageComposer(
             }
         }
     }
-    quickSwitchMenu?.let { menu ->
-        QuickSwitchPanel(
-            menu = menu,
-            onDismiss = onQuickSwitchDismiss,
-            onQuickSwitchSession = onQuickSwitchSession,
-            onQuickSwitchPin = onQuickSwitchPin,
-            onQuickSwitchArchive = onQuickSwitchArchive,
-            onQuickSwitchRename = onQuickSwitchRename,
-            onQuickSwitchLoadMore = onQuickSwitchLoadMore,
-            onQuickSwitchCreate = onQuickSwitchCreate,
-        )
-    }
-}
-
-@Composable
-@OptIn(ExperimentalMaterial3Api::class)
-private fun QuickSwitchPanel(
-    menu: QuickSwitchMenuState,
-    onDismiss: () -> Unit,
-    onQuickSwitchSession: (SessionState) -> Unit,
-    onQuickSwitchPin: (SessionState, Boolean) -> Unit,
-    onQuickSwitchArchive: (SessionState) -> Unit,
-    onQuickSwitchRename: (SessionState, String) -> Unit,
-    onQuickSwitchLoadMore: () -> Unit,
-    onQuickSwitchCreate: () -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = false)
-    var renameId by remember { mutableStateOf<String?>(null) }
-    var renameDraft by remember { mutableStateOf("") }
-    val rows = menu.sessions
-        .sortedWith(
-            compareByDescending<SessionState> { menu.pinned.contains(it.id) }
-                .thenByDescending { it.updatedAt ?: 0L }
-                .thenByDescending { it.id }
-        )
-    val flingGuard = remember {
-        object : NestedScrollConnection {
-            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                if (source == NestedScrollSource.SideEffect && available.y < 0f) return available
-                return Offset.Zero
-            }
-
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                return Velocity.Zero
-            }
-        }
-    }
-    LaunchedEffect(sheet.currentValue, sheet.targetValue) {
-        if (sheet.currentValue == SheetValue.Expanded && sheet.targetValue == SheetValue.PartiallyExpanded) {
-            scope.launch {
-                sheet.hide()
-            }
-        }
-    }
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheet,
-        sheetMaxWidth = Dp.Unspecified,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.9f)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = folderName(menu.project),
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                IconButton(
-                    onClick = onQuickSwitchCreate,
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary,
-                    ),
-                ) {
-                    Icon(
-                        imageVector = Icons.Add,
-                        contentDescription = "New session",
-                    )
-                }
-            }
-
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .nestedScroll(flingGuard),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (menu.loading && rows.isEmpty()) {
-                    item {
-                        Text(
-                            text = "Loading sessions...",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-
-                if (menu.sessions.isEmpty() && !menu.loading) {
-                    item {
-                        Text(
-                            text = "No sessions found",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-
-                items(rows, key = { it.id }) { session ->
-                    val pinned = menu.pinned.contains(session.id)
-                    val systemPinned = menu.systemPinned.contains(session.id)
-                    val renaming = renameId == session.id
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Row(
-                            modifier = if (renaming) {
-                                Modifier.fillMaxWidth()
-                            } else {
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onQuickSwitchSession(session) }
-                            },
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = session.title,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    text = quickSwitchSessionSubtitle(session, folderName(menu.project), menu.worktree),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            IconButton(
-                                onClick = {
-                                    renameId = session.id
-                                    renameDraft = session.title
-                                },
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rename,
-                                    contentDescription = "Rename session",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            IconButton(onClick = { onQuickSwitchArchive(session) }) {
-                                Icon(
-                                    imageVector = Icons.Archive,
-                                    contentDescription = "Archive session",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            IconButton(onClick = { onQuickSwitchPin(session, systemPinned) }) {
-                                Icon(
-                                    imageVector = if (pinned) Icons.Pin else Icons.PinOutline,
-                                    contentDescription = if (pinned) {
-                                        "Remove from quick switch"
-                                    } else {
-                                        "Pin in quick switch"
-                                    },
-                                    tint = if (pinned) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                            }
-                        }
-                        if (renaming) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                TextField(
-                                    value = renameDraft,
-                                    onValueChange = { renameDraft = it },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    singleLine = true,
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End,
-                                ) {
-                                    TextButton(onClick = { renameId = null }) {
-                                        Text("Cancel")
-                                    }
-                                    TextButton(
-                                        onClick = {
-                                            onQuickSwitchRename(session, renameDraft)
-                                            renameId = null
-                                        },
-                                        enabled = renameDraft.trim().isNotBlank(),
-                                    ) {
-                                        Text("Save")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (menu.canLoadMore) {
-                    item {
-                        TextButton(
-                            onClick = onQuickSwitchLoadMore,
-                            enabled = !menu.loading,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(if (menu.loading) "Loading..." else "Load more")
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -654,29 +388,6 @@ private fun QuickSwitchButton(
     }
 }
 
-private fun quickSwitchSessionSubtitle(session: SessionState, project: String, worktree: String): String {
-    val updated = session.updatedAt?.let {
-        val value = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
-        "Updated ${QuickSwitchSessionFormatter.format(value)}"
-    } ?: "Updated unknown"
-    if (workspaceId(session.directory) == workspaceId(worktree)) return updated
-    return "$updated | $project"
-}
-
-private fun folderName(path: String): String {
-    val value = path.trim().trimEnd('/', '\\')
-    if (value.isBlank()) return path
-    val index = maxOf(value.lastIndexOf('/'), value.lastIndexOf('\\'))
-    if (index < 0) return value
-    val name = value.substring(index + 1)
-    if (name.isBlank()) return value
-    return name
-}
-
-private fun workspaceId(path: String): String {
-    return path.trimEnd('/', '\\')
-}
-
 @Preview(showBackground = true)
 @Composable
 private fun MessageComposerPreview() {
@@ -699,6 +410,8 @@ private fun MessageComposerPreview() {
                     worktree = "/repo/main",
                     label = "M",
                     project = "main",
+                    primarySessionId = "s-main",
+                    cycleSessionIds = listOf("s-main", "s-main-2"),
                     active = true,
                     processing = false,
                     unread = 0,
@@ -708,12 +421,13 @@ private fun MessageComposerPreview() {
                     worktree = "/repo/docs",
                     label = "D",
                     project = "docs",
+                    primarySessionId = null,
+                    cycleSessionIds = emptyList(),
                     active = false,
                     processing = true,
                     unread = 2,
                 ),
             ),
-            quickSwitchMenu = null,
             onDraftChange = { draft = it },
             onModeChange = { mode = it },
             onSend = {},
@@ -721,16 +435,8 @@ private fun MessageComposerPreview() {
             onCommandSelect = {},
             onQuickSwitch = {},
             onQuickSwitchLongPress = {},
-            onQuickSwitchDismiss = {},
-            onQuickSwitchSession = {},
-            onQuickSwitchPin = { _, _ -> },
-            onQuickSwitchArchive = {},
-            onQuickSwitchRename = { _, _ -> },
-            onQuickSwitchLoadMore = {},
-            onQuickSwitchCreate = {},
         )
     }
 }
 
 private const val CommandReopenDelayMs = 500L
-private val QuickSwitchSessionFormatter = DateTimeFormatter.ofPattern("MMM d HH:mm")

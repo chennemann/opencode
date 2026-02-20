@@ -1,4 +1,4 @@
-package de.chennemann.opencode.mobile.ui.conversation
+package de.chennemann.opencode.mobile.ui.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -9,6 +9,8 @@ import de.chennemann.opencode.mobile.domain.session.ServerState
 import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.SessionState
 import de.chennemann.opencode.mobile.navigation.NavEvent
+import de.chennemann.opencode.mobile.navigation.SessionSelectionBottomSheetRoute
+import de.chennemann.opencode.mobile.navigation.WorkspaceHubRoute
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -49,9 +51,6 @@ class ConversationViewModel(
         val scroll: Long = 0,
         val draft: String = "",
         val mode: ConversationMode = ConversationMode.BUILD,
-        val stepOpen: Map<String, Boolean> = emptyMap(),
-        val callOpen: Map<String, Boolean> = emptyMap(),
-        val quickSwitchMenu: QuickSwitchMenuState? = null,
     )
 
     private data class QuickSwitchProject(
@@ -63,12 +62,12 @@ class ConversationViewModel(
     )
 
     private data class QuickSwitchModel(
-        val focusedKey: String?,
         val switches: List<QuickSwitchState>,
         val projects: Map<String, QuickSwitchProject>,
     )
 
     private val local = MutableStateFlow(LocalState())
+    private val quickSwitchMenuLocal = MutableStateFlow<SessionSelectionUiState?>(null)
     private val navFlow = MutableSharedFlow<NavEvent>(extraBufferCapacity = 1)
     private val quickOrder = linkedMapOf<String, List<String>>()
 
@@ -95,6 +94,21 @@ class ConversationViewModel(
         }
         .flowOn(lane)
 
+    val quickSwitchMenu: StateFlow<SessionSelectionUiState?> = combine(global, quickSwitchMenuLocal) { global, menu ->
+        quickSwitchMenu(
+            menu = menu,
+            projects = global.projects,
+            include = global.quickPinInclude,
+            exclude = global.quickPinExclude,
+        )
+    }
+        .flowOn(lane)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = null,
+        )
+
     val state: StateFlow<ConversationUiState> = combine(global, local) { global, local ->
         val quick = quickSwitchModel(
             global.projects,
@@ -117,14 +131,7 @@ class ConversationViewModel(
             mode = local.mode,
             slashSuggestions = slashSuggestions(local.draft, global.commands),
             quickSwitches = quick.switches,
-            quickSwitchMenu = quickSwitchMenu(
-                local.quickSwitchMenu,
-                global.projects,
-                global.quickPinInclude,
-                global.quickPinExclude,
-            ),
-            stepOpen = local.stepOpen,
-            callOpen = local.callOpen,
+            focusedSessionId = global.focusedSession?.id,
         )
     }
         .flowOn(lane)
@@ -143,9 +150,7 @@ class ConversationViewModel(
                 mode = ConversationMode.BUILD,
                 slashSuggestions = emptyList(),
                 quickSwitches = emptyList(),
-                quickSwitchMenu = null,
-                stepOpen = emptyMap(),
-                callOpen = emptyMap(),
+                focusedSessionId = null,
             ),
         )
 
@@ -155,32 +160,11 @@ class ConversationViewModel(
 
     fun onEvent(event: ConversationEvent) {
         when (event) {
-            is ConversationEvent.OpenManageTapped -> {
-                navFlow.tryEmit(NavEvent.ToManage)
+            ConversationEvent.WorkspaceHubRequested -> {
+                navFlow.tryEmit(NavEvent.NavigateTo(WorkspaceHubRoute))
             }
 
-            is ConversationEvent.ToggleSteps -> {
-                local.update {
-                    it.copy(
-                        stepOpen = it.stepOpen + (event.messageId to (it.stepOpen[event.messageId] != true)),
-                    )
-                }
-            }
-
-            is ConversationEvent.ToggleToolCall -> {
-                local.update {
-                    val selected = if (it.callOpen[event.callId] == true) {
-                        emptyMap()
-                    } else {
-                        mapOf(event.callId to true)
-                    }
-                    it.copy(
-                        callOpen = selected,
-                    )
-                }
-            }
-
-            is ConversationEvent.ToolCallSessionTapped -> {
+            is ConversationEvent.SubsessionRequested -> {
                 openToolCallSession(event.sessionId)
             }
 
@@ -200,52 +184,34 @@ class ConversationViewModel(
                 local.update { it.copy(draft = "/${event.name} ") }
             }
 
-            is ConversationEvent.QuickSwitchTapped -> {
+            is ConversationEvent.SessionsRequested -> {
+                navFlow.tryEmit(NavEvent.NavigateTo(SessionSelectionBottomSheetRoute(event.key)))
                 viewModelScope.launch(lane) {
-                    quickSwitchTap(event.key)
+                    requestSessions(event.key)
                 }
             }
 
-            is ConversationEvent.QuickSwitchLongPressed -> {
-                viewModelScope.launch(lane) {
-                    quickSwitchLongPress(event.key)
-                }
+            is ConversationEvent.SessionRequested -> {
+                requestSession(event.sessionId, event.worktree)
             }
 
-            is ConversationEvent.QuickSwitchMenuDismissed -> {
-                local.update { it.copy(quickSwitchMenu = null) }
-            }
-
-            is ConversationEvent.QuickSwitchMenuSessionTapped -> {
-                local.update { it.copy(quickSwitchMenu = null) }
-                service.openSession(event.session)
-            }
-
-            is ConversationEvent.QuickSwitchMenuPinTapped -> {
+            is ConversationEvent.SessionPinToggled -> {
                 service.toggleSessionQuickPin(event.session, event.systemPinned)
             }
 
-            is ConversationEvent.QuickSwitchMenuArchiveTapped -> {
+            is ConversationEvent.SessionArchiveRequested -> {
                 quickSwitchArchive(event.session)
             }
 
-            is ConversationEvent.QuickSwitchMenuRenameSubmitted -> {
+            is ConversationEvent.RenameSessionSubmitted -> {
                 quickSwitchRename(event.session, event.title)
             }
 
-            is ConversationEvent.QuickSwitchMenuLoadMoreTapped -> {
+            ConversationEvent.MoreSessionsRequested -> {
                 quickSwitchLoadMore()
             }
 
-            is ConversationEvent.QuickSwitchMenuCreateTapped -> {
-                val worktree = local.value.quickSwitchMenu?.worktree ?: return
-                local.update { it.copy(quickSwitchMenu = null) }
-                viewModelScope.launch(lane) {
-                    service.createSessionAndFocus(worktree)
-                }
-            }
-
-            is ConversationEvent.SendTapped -> {
+            ConversationEvent.MessageSubmitted -> {
                 val value = local.value.draft
                 service.send(value, modeAgent(local.value.mode))
                 if (value.isNotBlank()) {
@@ -253,11 +219,11 @@ class ConversationViewModel(
                 }
             }
 
-            is ConversationEvent.ReloadTapped -> {
+            ConversationEvent.RefreshRequested -> {
                 service.refresh()
             }
 
-            is ConversationEvent.LoadMoreMessagesTapped -> {
+            ConversationEvent.MoreMessagesRequested -> {
                 service.loadMoreMessages()
             }
         }
@@ -289,47 +255,28 @@ class ConversationViewModel(
             .distinctBy { it.name.lowercase() }
     }
 
-    private fun quickSwitchTap(key: String) {
-        local.update { it.copy(quickSwitchMenu = null) }
-        val value = service.state.value
-        val model = quickSwitchModel(
-            value.projects,
-            value.activeSessions,
-            value.focusedSession,
-            value.quickPinInclude,
-            value.quickPinExclude,
-            value.quickProcessing,
-            value.quickUnread,
-        )
-        val project = model.projects[key] ?: return
-        if (model.focusedKey != key) {
-            val primary = project.primary
-            if (primary == null) {
-                viewModelScope.launch(lane) {
-                    service.createSessionAndFocus(project.worktree)
-                }
-                return
-            }
-            service.openSession(primary)
+    private fun requestSession(sessionId: String?, worktree: String?) {
+        val id = sessionId?.trim()
+        if (!id.isNullOrBlank()) {
+            val known = (service.state.value.activeSessions + service.state.value.sessions)
+                .firstOrNull { it.id == id }
+                ?: return
+            service.openSession(known)
             return
         }
-        if (project.cycle.isEmpty()) {
-            viewModelScope.launch(lane) {
-                service.createSessionAndFocus(project.worktree)
-            }
-            return
+
+        val directory = worktree
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: quickSwitchMenuLocal.value?.worktree
+            ?: service.state.value.focusedSession?.directory
+            ?: return
+        viewModelScope.launch(lane) {
+            service.createSessionAndFocus(directory)
         }
-        val current = value.focusedSession?.id
-        val index = project.cycle.indexOfFirst { it.id == current }
-        val next = if (index < 0 || index == project.cycle.lastIndex) {
-            project.cycle.firstOrNull()
-        } else {
-            project.cycle.getOrNull(index + 1)
-        } ?: return
-        service.openSession(next)
     }
 
-    private suspend fun quickSwitchLongPress(key: String) {
+    private suspend fun requestSessions(key: String) {
         val value = service.state.value
         val model = quickSwitchModel(
             value.projects,
@@ -345,31 +292,24 @@ class ConversationViewModel(
         val cached = runCatching {
             service.cachedSessionsForProject(project.worktree, limit)
         }.getOrDefault(emptyList())
-        local.update {
-            it.copy(
-                quickSwitchMenu = QuickSwitchMenuState(
-                    key = project.key,
-                    worktree = project.worktree,
-                    project = project.project,
-                    sessions = cached.take(limit),
-                    loading = true,
-                    limit = limit,
-                    canLoadMore = cached.size >= limit,
-                )
-            )
-        }
+        quickSwitchMenuLocal.value = SessionSelectionUiState(
+            key = project.key,
+            worktree = project.worktree,
+            project = project.project,
+            sessions = cached.take(limit),
+            loading = true,
+            limit = limit,
+            canLoadMore = cached.size >= limit,
+        )
         fetchQuickSwitchMenu(project.key, project.worktree, limit)
     }
 
     private fun quickSwitchArchive(session: SessionState) {
-        val menu = local.value.quickSwitchMenu ?: return
+        val menu = quickSwitchMenuLocal.value ?: return
         val sessions = menu.sessions.filterNot { it.id == session.id }
-        local.update {
-            val current = it.quickSwitchMenu ?: return@update it
-            if (current.key != menu.key) return@update it
-            it.copy(
-                quickSwitchMenu = current.copy(sessions = sessions),
-            )
+        quickSwitchMenuLocal.update { current ->
+            if (current == null || current.key != menu.key) return@update current
+            current.copy(sessions = sessions)
         }
         service.archiveSession(session)
     }
@@ -377,37 +317,31 @@ class ConversationViewModel(
     private fun quickSwitchRename(session: SessionState, title: String) {
         val next = title.trim()
         if (next.isBlank()) return
-        val menu = local.value.quickSwitchMenu ?: return
-        local.update {
-            val current = it.quickSwitchMenu ?: return@update it
-            if (current.key != menu.key) return@update it
-            it.copy(
-                quickSwitchMenu = current.copy(
-                    sessions = current.sessions.map {
-                        if (it.id == session.id) {
-                            it.copy(title = next)
-                        } else {
-                            it
-                        }
-                    },
-                ),
+        val menu = quickSwitchMenuLocal.value ?: return
+        quickSwitchMenuLocal.update { current ->
+            if (current == null || current.key != menu.key) return@update current
+            current.copy(
+                sessions = current.sessions.map {
+                    if (it.id == session.id) {
+                        it.copy(title = next)
+                    } else {
+                        it
+                    }
+                },
             )
         }
         service.renameSession(session, next)
     }
 
     private fun quickSwitchLoadMore() {
-        val menu = local.value.quickSwitchMenu ?: return
+        val menu = quickSwitchMenuLocal.value ?: return
         if (menu.loading || !menu.canLoadMore) return
         val limit = menu.limit + QuickSwitchMenuPageSize
-        local.update {
-            val current = it.quickSwitchMenu ?: return@update it
-            if (current.key != menu.key) return@update it
-            it.copy(
-                quickSwitchMenu = current.copy(
-                    loading = true,
-                    limit = limit,
-                )
+        quickSwitchMenuLocal.update { current ->
+            if (current == null || current.key != menu.key) return@update current
+            current.copy(
+                loading = true,
+                limit = limit,
             )
         }
         fetchQuickSwitchMenu(menu.key, menu.worktree, limit)
@@ -417,34 +351,26 @@ class ConversationViewModel(
         viewModelScope.launch(lane) {
             val result = runCatching { service.sessionsForProject(worktree, limit) }
             result.onSuccess { list ->
-                local.update {
-                    val menu = it.quickSwitchMenu ?: return@update it
-                    if (menu.key != key) return@update it
+                quickSwitchMenuLocal.update { menu ->
+                    if (menu == null || menu.key != key) return@update menu
                     val sessions = list.take(limit)
                     val canLoadMore = list.size >= limit
                     if (menu.sessions == sessions && menu.canLoadMore == canLoadMore && menu.limit == limit) {
-                        if (!menu.loading) return@update it
-                        return@update it.copy(
-                            quickSwitchMenu = menu.copy(loading = false),
-                        )
+                        if (!menu.loading) return@update menu
+                        return@update menu.copy(loading = false)
                     }
-                    it.copy(
-                        quickSwitchMenu = menu.copy(
-                            sessions = sessions,
-                            loading = false,
-                            limit = limit,
-                            canLoadMore = canLoadMore,
-                        )
+                    menu.copy(
+                        sessions = sessions,
+                        loading = false,
+                        limit = limit,
+                        canLoadMore = canLoadMore,
                     )
                 }
             }
             result.onFailure {
-                local.update {
-                    val menu = it.quickSwitchMenu ?: return@update it
-                    if (menu.key != key) return@update it
-                    it.copy(
-                        quickSwitchMenu = menu.copy(loading = false),
-                    )
+                quickSwitchMenuLocal.update { menu ->
+                    if (menu == null || menu.key != key) return@update menu
+                    menu.copy(loading = false)
                 }
             }
         }
@@ -497,6 +423,8 @@ class ConversationViewModel(
                     worktree = project?.worktree ?: key,
                     label = projectInitial(label),
                     project = label,
+                    primarySessionId = primary.id,
+                    cycleSessionIds = cycle.map { it.id },
                     active = focused == key,
                     processing = cycleIds.any(processing::contains),
                     unread = cycle.count { unread.contains(it.id) && !processing.contains(it.id) },
@@ -525,6 +453,8 @@ class ConversationViewModel(
                     worktree = it.worktree,
                     label = projectInitial(label),
                     project = label,
+                    primarySessionId = null,
+                    cycleSessionIds = emptyList(),
                     active = focused == key,
                     processing = false,
                     unread = 0,
@@ -549,18 +479,17 @@ class ConversationViewModel(
             .filterNot(keys::contains)
             .forEach(quickOrder::remove)
         return QuickSwitchModel(
-            focusedKey = focused,
             switches = merged.map { it.first },
             projects = merged.associate { it.first.key to it.second },
         )
     }
 
     private fun quickSwitchMenu(
-        menu: QuickSwitchMenuState?,
+        menu: SessionSelectionUiState?,
         projects: List<ProjectState>,
         include: Set<String>,
         exclude: Set<String>,
-    ): QuickSwitchMenuState? {
+    ): SessionSelectionUiState? {
         if (menu == null) return null
         val worktree = workspaceId(menu.worktree)
         val favorite = projects.firstOrNull { workspaceId(it.worktree) == worktree }?.favorite == true

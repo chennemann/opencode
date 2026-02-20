@@ -9,6 +9,7 @@ import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
 import de.chennemann.opencode.mobile.data.ServerGateway
 import de.chennemann.opencode.mobile.data.SessionCacheRepository
+import de.chennemann.opencode.mobile.data.SqlDelightSessionRepository
 import de.chennemann.opencode.mobile.db.AppDatabase
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
@@ -29,7 +30,11 @@ import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.SessionSyncPlanner
 import de.chennemann.opencode.mobile.domain.session.SessionStreamCoordinator
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
-import de.chennemann.opencode.mobile.ui.conversation.ConversationViewModel
+import de.chennemann.opencode.mobile.domain.v2.session.SessionRepository
+import de.chennemann.opencode.mobile.domain.v2.session.DefaultSessionService
+import de.chennemann.opencode.mobile.domain.v2.session.SessionService as SessionServiceV2
+import de.chennemann.opencode.mobile.ui.chat.ConversationViewModel
+import de.chennemann.opencode.mobile.ui.chat.SessionSelectionViewModel
 import de.chennemann.opencode.mobile.ui.manage.ManageViewModel
 import de.chennemann.opencode.mobile.ui.logs.LogsViewModel
 import io.ktor.client.engine.okhttp.OkHttp
@@ -80,6 +85,8 @@ val appModule = module {
     single<ServerGateway> { ServerService(get(), get()) }
     single { ServerRepository(get(), get(), get(), get(), get(), get()) }
     single { SessionCacheRepository(get(), get()) }
+    single<SessionRepository> { SqlDelightSessionRepository(get(), get()) }
+    single<SessionServiceV2> { DefaultSessionService(get()) }
     single<ConnectionGateway> { get<ServerRepository>() }
     single<ProjectGateway> { get<ServerRepository>() }
     single<CommandGateway> { get<ServerRepository>() }
@@ -99,6 +106,7 @@ val appModule = module {
     }
     single<SessionServiceApi> { get<SessionService>() }
     viewModel { ConversationViewModel(get(), get()) }
+    viewModel { (projectKey: String) -> SessionSelectionViewModel(projectKey, get(), get(), get()) }
     viewModel { ManageViewModel(get(), get()) }
     viewModel { LogsViewModel(get(), get()) }
 }

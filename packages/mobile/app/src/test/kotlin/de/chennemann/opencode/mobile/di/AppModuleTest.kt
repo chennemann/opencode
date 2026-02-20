@@ -23,7 +23,7 @@ import de.chennemann.opencode.mobile.domain.session.SessionCacheGateway
 import de.chennemann.opencode.mobile.domain.session.SessionService
 import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
-import de.chennemann.opencode.mobile.ui.conversation.ConversationViewModel
+import de.chennemann.opencode.mobile.ui.chat.ConversationViewModel
 import de.chennemann.opencode.mobile.ui.logs.LogsViewModel
 import de.chennemann.opencode.mobile.ui.manage.ManageViewModel
 import kotlinx.coroutines.flow.Flow

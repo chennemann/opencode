@@ -33,7 +33,7 @@ class LocalLogRepository(
 
     override suspend fun append(record: LogRecord) {
         withContext(dispatchers.io) {
-            db.appDatabaseQueries.insertAppLog(
+            db.appLogQueries.insertAppLog(
                 created_at = record.createdAt,
                 level = record.level.key,
                 logical_unit = record.unit.key,
@@ -57,7 +57,7 @@ class LocalLogRepository(
 
     override fun observe(filter: LogFilter): Flow<List<LogEntry>> {
         val term = filter.query.trim().ifBlank { null }
-        return db.appDatabaseQueries
+        return db.appLogQueries
             .listAppLog(
                 logical_unit = filter.unit?.key,
                 level = filter.level?.key,
@@ -75,7 +75,7 @@ class LocalLogRepository(
     }
 
     override fun observeFacet(): Flow<LogFacet> {
-        val projects = db.appDatabaseQueries
+        val projects = db.appLogQueries
             .listAppLogProjectFacet { projectId, projectName ->
                 LogProjectOption(
                     id = projectId,
@@ -84,7 +84,7 @@ class LocalLogRepository(
             }
             .asFlow()
             .mapToList(dispatchers.io)
-        val sessions = db.appDatabaseQueries
+        val sessions = db.appLogQueries
             .listAppLogSessionFacet { sessionId, sessionTitle ->
                 LogSessionOption(
                     id = sessionId,
@@ -93,7 +93,7 @@ class LocalLogRepository(
             }
             .asFlow()
             .mapToList(dispatchers.io)
-        val events = db.appDatabaseQueries
+        val events = db.appLogQueries
             .listAppLogEventFacet()
             .asFlow()
             .mapToList(dispatchers.io)
@@ -108,18 +108,18 @@ class LocalLogRepository(
 
     override suspend fun prune(now: Long) {
         withContext(dispatchers.io) {
-            db.appDatabaseQueries.deleteAppLogBefore(now - RetainMs)
-            val count = db.appDatabaseQueries.countAppLog().executeAsOne()
+            db.appLogQueries.deleteAppLogBefore(now - RetainMs)
+            val count = db.appLogQueries.countAppLog().executeAsOne()
             val overflow = count - MaxRows
             if (overflow > 0) {
-                db.appDatabaseQueries.deleteAppLogOverflow(MaxRows)
+                db.appLogQueries.deleteAppLogOverflow(MaxRows)
             }
         }
     }
 
     override suspend fun clear() {
         withContext(dispatchers.io) {
-            db.appDatabaseQueries.deleteAppLogAll()
+            db.appLogQueries.deleteAppLogAll()
         }
     }
 

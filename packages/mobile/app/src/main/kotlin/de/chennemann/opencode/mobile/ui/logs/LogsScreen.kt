@@ -169,7 +169,7 @@ fun LogsScreen(state: LogsUiState, onEvent: (LogsEvent) -> Unit) {
                     Text(if (copied) "Copied" else "Copy Logs")
                 }
                 OutlinedButton(
-                    onClick = { onEvent(LogsEvent.BackTapped) },
+                    onClick = { onEvent(LogsEvent.BackRequested) },
                     modifier = Modifier.weight(1f),
                 ) {
                     Text("Back")
@@ -264,12 +264,12 @@ private fun ActiveFilters(state: LogsUiState, onEvent: (LogsEvent) -> Unit) {
         ) {
             chips.forEach {
                 AssistChip(
-                    onClick = { onEvent(LogsEvent.RemoveFilter(it.second)) },
+                    onClick = { onEvent(LogsEvent.FilterRemoved(it.second)) },
                     label = { Text(it.first) },
                 )
             }
             AssistChip(
-                onClick = { onEvent(LogsEvent.ClearFilter) },
+                onClick = { onEvent(LogsEvent.FiltersResetRequested) },
                 label = { Text("clear-all") },
             )
         }
@@ -395,22 +395,22 @@ private fun LogRow(
                 ) {
                     item.projectId?.let {
                         AssistChip(
-                            onClick = { onEvent(LogsEvent.AddFilterFromRow(LogsFilterKey.project, it)) },
+                            onClick = { onEvent(LogsEvent.FilterAppliedFromEntry(LogsFilterKey.project, it)) },
                             label = { Text("project") },
                         )
                     }
                     item.sessionId?.let {
                         AssistChip(
-                            onClick = { onEvent(LogsEvent.AddFilterFromRow(LogsFilterKey.session, it)) },
+                            onClick = { onEvent(LogsEvent.FilterAppliedFromEntry(LogsFilterKey.session, it)) },
                             label = { Text("session") },
                         )
                     }
                     AssistChip(
-                        onClick = { onEvent(LogsEvent.AddFilterFromRow(LogsFilterKey.event, item.event)) },
+                        onClick = { onEvent(LogsEvent.FilterAppliedFromEntry(LogsFilterKey.event, item.event)) },
                         label = { Text("event") },
                     )
                     AssistChip(
-                        onClick = { onEvent(LogsEvent.AddFilterFromRow(LogsFilterKey.unit, item.unit.key)) },
+                        onClick = { onEvent(LogsEvent.FilterAppliedFromEntry(LogsFilterKey.unit, item.unit.key)) },
                         label = { Text("unit") },
                     )
                     AssistChip(

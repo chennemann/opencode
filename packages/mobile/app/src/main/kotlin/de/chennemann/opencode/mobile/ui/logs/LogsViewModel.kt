@@ -138,7 +138,7 @@ class LogsViewModel(
                 local.value = local.value.copy(until = event.value)
             }
 
-            is LogsEvent.AddFilterFromRow -> {
+            is LogsEvent.FilterAppliedFromEntry -> {
                 local.value = when (event.key) {
                     LogsFilterKey.from -> local.value
                     LogsFilterKey.until -> local.value
@@ -150,7 +150,7 @@ class LogsViewModel(
                 }
             }
 
-            is LogsEvent.RemoveFilter -> {
+            is LogsEvent.FilterRemoved -> {
                 local.value = when (event.key) {
                     LogsFilterKey.from -> local.value.copy(from = null)
                     LogsFilterKey.until -> local.value.copy(until = null)
@@ -162,7 +162,7 @@ class LogsViewModel(
                 }
             }
 
-            is LogsEvent.ClearFilter -> {
+            LogsEvent.FiltersResetRequested -> {
                 local.value = LocalState(query = local.value.query)
             }
 
@@ -170,8 +170,8 @@ class LogsViewModel(
                 local.value = local.value.copy(query = event.value)
             }
 
-            is LogsEvent.BackTapped -> {
-                navFlow.tryEmit(NavEvent.Back)
+            LogsEvent.BackRequested -> {
+                navFlow.tryEmit(NavEvent.NavigateBack)
             }
         }
     }
