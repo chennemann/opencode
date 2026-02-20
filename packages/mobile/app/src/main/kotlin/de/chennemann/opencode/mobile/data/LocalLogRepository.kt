@@ -2,8 +2,8 @@ package de.chennemann.opencode.mobile.data
 
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
-import de.chennemann.opencode.mobile.db.AppDatabase
-import de.chennemann.opencode.mobile.db.App_log
+import de.chennemann.opencode.mobile.db.AgenticDb
+import de.chennemann.opencode.mobile.db.ListAppLog
 import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.session.LogEntry
 import de.chennemann.opencode.mobile.domain.session.LogFacet
@@ -25,7 +25,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 class LocalLogRepository(
-    private val db: AppDatabase,
+    private val db: AgenticDb,
     private val dispatchers: DispatcherProvider,
     private val json: Json,
 ) : LogStoreGateway {
@@ -135,7 +135,7 @@ class LocalLogRepository(
         }.getOrDefault(emptyMap())
     }
 
-    private fun entry(value: App_log): LogEntry {
+    private fun entry(value: ListAppLog): LogEntry {
         return LogEntry(
             id = value.id,
             createdAt = value.created_at,

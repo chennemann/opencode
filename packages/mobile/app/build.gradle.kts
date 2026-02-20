@@ -93,9 +93,11 @@ ktlint {
 
 sqldelight {
     databases {
-        create("AppDatabase") {
+        create("AgenticDb") {
             packageName.set("de.chennemann.opencode.mobile.db")
             verifyMigrations = false
+            generateAsync.set(true)
+            deriveSchemaFromMigrations.set(true)
         }
     }
 }

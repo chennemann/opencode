@@ -1,18 +1,3 @@
-CREATE TABLE session_cache (
-  server_url TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  project_id TEXT,
-  directory TEXT NOT NULL,
-  title TEXT NOT NULL,
-  version TEXT NOT NULL,
-  last_opened_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  pinned INTEGER NOT NULL DEFAULT 0,
-  parent_id TEXT,
-  last_read_at INTEGER,
-  archived_at INTEGER,
-  PRIMARY KEY (server_url, session_id)
-);
 
 upsertSessionCache:
 INSERT INTO session_cache(
