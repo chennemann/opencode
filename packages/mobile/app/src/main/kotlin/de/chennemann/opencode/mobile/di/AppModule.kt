@@ -9,6 +9,8 @@ import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
 import de.chennemann.opencode.mobile.data.ServerGateway
 import de.chennemann.opencode.mobile.data.SessionCacheRepository
+import de.chennemann.opencode.mobile.data.v2.SqlDelightProjectRepository
+import de.chennemann.opencode.mobile.data.v2.SqlDelightServerRepository
 import de.chennemann.opencode.mobile.data.v2.SqlDelightSessionRepository
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
@@ -29,9 +31,11 @@ import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.SessionSyncPlanner
 import de.chennemann.opencode.mobile.domain.session.SessionStreamCoordinator
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
+import de.chennemann.opencode.mobile.domain.v2.projects.ProjectRepository
 import de.chennemann.opencode.mobile.domain.v2.session.SessionRepository
 import de.chennemann.opencode.mobile.domain.v2.session.DefaultSessionService
 import de.chennemann.opencode.mobile.domain.v2.session.SessionService as SessionServiceV2
+import de.chennemann.opencode.mobile.domain.v2.servers.ServerRepository as ServerRepositoryV2
 import de.chennemann.opencode.mobile.ui.chat.ConversationViewModel
 import de.chennemann.opencode.mobile.ui.chat.SessionSelectionViewModel
 import de.chennemann.opencode.mobile.ui.manage.ManageViewModel
@@ -87,6 +91,8 @@ val appModule = module {
     single { ServerRepository(get(), get(), get(), get(), get(), get()) }
     single { SessionCacheRepository(get(), get()) }
     single<SessionRepository> { SqlDelightSessionRepository(get(), get()) }
+    single<ProjectRepository> { SqlDelightProjectRepository(get(), get()) }
+    single<ServerRepositoryV2> { SqlDelightServerRepository(get(), get()) }
     single<SessionServiceV2> { DefaultSessionService(get()) }
     single<ConnectionGateway> { get<ServerRepository>() }
     single<ProjectGateway> { get<ServerRepository>() }
