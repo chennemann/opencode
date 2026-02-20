@@ -1,4 +1,4 @@
-package de.chennemann.opencode.mobile.ui.conversation
+package de.chennemann.opencode.mobile.ui.chat
 
 import android.content.Context
 import android.content.Intent
@@ -9,7 +9,6 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -51,7 +50,6 @@ import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import de.chennemann.opencode.mobile.domain.session.ServerState
@@ -71,12 +69,17 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
-fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) -> Unit) {
+fun AgentChatScreen(
+    state: ConversationUiState,
+    onEvent: (ConversationEvent) -> Unit,
+) {
     val context = LocalContext.current
     val list = rememberLazyListState()
     val dragging by list.interactionSource.collectIsDraggedAsState()
     val scope = rememberCoroutineScope()
     var follow by remember(state.title) { mutableStateOf(true) }
+    val stepOpen = remember(state.focusedSessionId) { mutableStateMapOf<String, Boolean>() }
+    val callOpen = remember(state.focusedSessionId) { mutableStateMapOf<String, Boolean>() }
     var viewportTop by remember { mutableIntStateOf(0) }
     var viewportBottom by remember { mutableIntStateOf(0) }
     val tools = remember { mutableStateMapOf<String, ToolPosition>() }
@@ -98,6 +101,30 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
         turns.indices
             .drop(start)
             .firstOrNull { turns[it].userText != null }
+    }
+
+    val requestSessionFromQuickSwitch = { item: QuickSwitchState ->
+        val cycle = item.cycleSessionIds
+        val nextSessionId = if (item.active) {
+            if (cycle.isEmpty()) {
+                null
+            } else {
+                val index = cycle.indexOf(state.focusedSessionId)
+                if (index < 0 || index == cycle.lastIndex) {
+                    cycle.firstOrNull()
+                } else {
+                    cycle.getOrNull(index + 1)
+                }
+            }
+        } else {
+            item.primarySessionId
+        }
+        onEvent(
+            ConversationEvent.SessionRequested(
+                sessionId = nextSessionId,
+                worktree = if (nextSessionId == null) item.worktree else null,
+            )
+        )
     }
 
     LaunchedEffect(list, turns.size, offset) {
@@ -138,8 +165,8 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
         turns.lastOrNull()?.toolCalls?.lastOrNull()?.id,
         turns.lastOrNull()?.toolCalls?.lastOrNull()?.details?.size,
         turns.lastOrNull()?.userText?.length,
-        state.stepOpen[turns.lastOrNull()?.id],
-        state.callOpen,
+        stepOpen[turns.lastOrNull()?.id],
+        callOpen.entries.firstOrNull { it.value }?.key,
         follow,
         offset,
     ) {
@@ -157,7 +184,7 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
             ConversationHeader(
                 title = state.title,
                 onOpenWirelessDebug = { openWirelessDebugSettings(context) },
-                onOpenManage = { onEvent(ConversationEvent.OpenManageTapped) },
+                onOpenManage = { onEvent(ConversationEvent.WorkspaceHubRequested) },
             )
 
             Column(
@@ -181,7 +208,7 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                         if (state.canLoadMoreMessages || state.loadingMoreMessages) {
                             item("load-more") {
                                 Button(
-                                    onClick = { onEvent(ConversationEvent.LoadMoreMessagesTapped) },
+                                    onClick = { onEvent(ConversationEvent.MoreMessagesRequested) },
                                     enabled = !state.loadingMoreMessages,
                                 ) {
                                     val label = if (state.loadingMoreMessages) {
@@ -197,11 +224,20 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                             ConversationTurnItem(
                                 turn = turn,
                                 active = index == turns.lastIndex,
-                                stepOpen = state.stepOpen[turn.id] == true,
-                                callOpen = state.callOpen,
-                                onToggleSteps = { onEvent(ConversationEvent.ToggleSteps(turn.id)) },
-                                onToggleToolCall = { onEvent(ConversationEvent.ToggleToolCall(it)) },
-                                onToolCallSession = { onEvent(ConversationEvent.ToolCallSessionTapped(it)) },
+                                stepOpen = stepOpen[turn.id] == true,
+                                callOpen = callOpen,
+                                onToggleSteps = {
+                                    stepOpen[turn.id] = stepOpen[turn.id] != true
+                                },
+                                onToggleToolCall = { callId ->
+                                    if (callOpen[callId] == true) {
+                                        callOpen.clear()
+                                    } else {
+                                        callOpen.clear()
+                                        callOpen[callId] = true
+                                    }
+                                },
+                                onToolCallSession = { onEvent(ConversationEvent.SubsessionRequested(it)) },
                                 onEnsureToolVisible = { toolId, alignTop, topCompensation ->
                                     follow = false
                                     scope.launch {
@@ -265,25 +301,18 @@ fun ConversationScreen(state: ConversationUiState, onEvent: (ConversationEvent) 
                     connected = state.status is ServerState.Connected,
                     suggestions = state.slashSuggestions,
                     quickSwitches = state.quickSwitches,
-                    quickSwitchMenu = state.quickSwitchMenu,
                     onDraftChange = { onEvent(ConversationEvent.DraftChanged(it)) },
                     onModeChange = { onEvent(ConversationEvent.ModeChanged(it)) },
-                    onSend = { onEvent(ConversationEvent.SendTapped) },
-                    onReload = { onEvent(ConversationEvent.ReloadTapped) },
+                    onSend = { onEvent(ConversationEvent.MessageSubmitted) },
+                    onReload = { onEvent(ConversationEvent.RefreshRequested) },
                     onCommandSelect = { onEvent(ConversationEvent.SlashCommandSelected(it.name)) },
-                    onQuickSwitch = { onEvent(ConversationEvent.QuickSwitchTapped(it)) },
-                    onQuickSwitchLongPress = { onEvent(ConversationEvent.QuickSwitchLongPressed(it)) },
-                    onQuickSwitchDismiss = { onEvent(ConversationEvent.QuickSwitchMenuDismissed) },
-                    onQuickSwitchSession = { onEvent(ConversationEvent.QuickSwitchMenuSessionTapped(it)) },
-                    onQuickSwitchPin = { session, system ->
-                        onEvent(ConversationEvent.QuickSwitchMenuPinTapped(session, system))
+                    onQuickSwitch = { key ->
+                        val selected = state.quickSwitches.firstOrNull { it.key == key }
+                        if (selected != null) {
+                            requestSessionFromQuickSwitch(selected)
+                        }
                     },
-                    onQuickSwitchArchive = { onEvent(ConversationEvent.QuickSwitchMenuArchiveTapped(it)) },
-                    onQuickSwitchRename = { session, title ->
-                        onEvent(ConversationEvent.QuickSwitchMenuRenameSubmitted(session, title))
-                    },
-                    onQuickSwitchLoadMore = { onEvent(ConversationEvent.QuickSwitchMenuLoadMoreTapped) },
-                    onQuickSwitchCreate = { onEvent(ConversationEvent.QuickSwitchMenuCreateTapped) },
+                    onQuickSwitchLongPress = { key -> onEvent(ConversationEvent.SessionsRequested(key)) },
                 )
             }
         }

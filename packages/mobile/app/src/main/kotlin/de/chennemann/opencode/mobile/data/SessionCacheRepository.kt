@@ -19,7 +19,7 @@ class SessionCacheRepository(
     override suspend fun upsertSession(server: String, project: String?, session: SessionState) {
         withContext(dispatchers.io) {
             val now = System.currentTimeMillis()
-            db.appDatabaseQueries.upsertSessionCache(
+            db.sessionCacheQueries.upsertSessionCache(
                 server,
                 session.id,
                 project,
@@ -34,7 +34,7 @@ class SessionCacheRepository(
 
     override suspend fun upsertSessionSnapshot(server: String, project: String?, session: SessionState) {
         withContext(dispatchers.io) {
-            db.appDatabaseQueries.upsertSessionCacheSnapshot(
+            db.sessionCacheQueries.upsertSessionCacheSnapshot(
                 server,
                 session.id,
                 project,
@@ -56,7 +56,7 @@ class SessionCacheRepository(
                     )
                 }
             val nextIds = next.map { it.id }.toSet()
-            val currentIds = db.appDatabaseQueries
+            val currentIds = db.sessionCacheQueries
                 .listProjectSessionCache(server, project, mapper = ::mapSessionCache)
                 .executeAsList()
                 .map { it.id }
@@ -64,12 +64,12 @@ class SessionCacheRepository(
             currentIds
                 .filterNot(nextIds::contains)
                 .forEach {
-                    db.appDatabaseQueries.deleteSessionCache(server, it)
-                    db.appDatabaseQueries.deleteMessageCacheSession(server, it)
+                    db.sessionCacheQueries.deleteSessionCache(server, it)
+                    db.messageCacheQueries.deleteMessageCacheSession(server, it)
                 }
 
             next.forEach {
-                db.appDatabaseQueries.upsertSessionCacheSnapshot(
+                db.sessionCacheQueries.upsertSessionCacheSnapshot(
                     server,
                     it.id,
                     project,
@@ -85,10 +85,10 @@ class SessionCacheRepository(
     override suspend fun listProjectSessions(server: String, project: String, limit: Int?): List<SessionState> {
         return withContext(dispatchers.io) {
             if (limit == null) {
-                db.appDatabaseQueries.listProjectSessionCache(server, project, mapper = ::mapSessionCache)
+                db.sessionCacheQueries.listProjectSessionCache(server, project, mapper = ::mapSessionCache)
                     .executeAsList()
             } else {
-                db.appDatabaseQueries.listProjectSessionCacheLimited(server, project, limit.toLong(), mapper = ::mapSessionCache)
+                db.sessionCacheQueries.listProjectSessionCacheLimited(server, project, limit.toLong(), mapper = ::mapSessionCache)
                     .executeAsList()
             }
         }
@@ -96,12 +96,12 @@ class SessionCacheRepository(
 
     override suspend fun deleteSession(server: String, sessionId: String) {
         withContext(dispatchers.io) {
-            db.appDatabaseQueries.deleteSessionCache(server, sessionId)
+            db.sessionCacheQueries.deleteSessionCache(server, sessionId)
         }
     }
 
     override fun recentSession(): RecentSessionCache? {
-        return db.appDatabaseQueries.selectRecentSessionCache(
+        return db.sessionCacheQueries.selectRecentSessionCache(
             mapper = { serverUrl, sessionId, projectId, directory, title, version, _, _ ->
                 RecentSessionCache(
                     server = serverUrl,
@@ -133,11 +133,11 @@ class SessionCacheRepository(
                 .sorted()
 
             if (next.isEmpty()) {
-                db.appDatabaseQueries.deleteSetting(key)
+                db.settingsQueries.deleteSetting(key)
                 return@withContext
             }
 
-            db.appDatabaseQueries.upsertSetting(key, next.joinToString(ProjectFavoriteSeparator))
+            db.settingsQueries.upsertSetting(key, next.joinToString(ProjectFavoriteSeparator))
         }
     }
 
@@ -157,11 +157,11 @@ class SessionCacheRepository(
                 .sorted()
 
             if (next.isEmpty()) {
-                db.appDatabaseQueries.deleteSetting(key)
+                db.settingsQueries.deleteSetting(key)
                 return@withContext
             }
 
-            db.appDatabaseQueries.upsertSetting(key, next.joinToString(ProjectFavoriteSeparator))
+            db.settingsQueries.upsertSetting(key, next.joinToString(ProjectFavoriteSeparator))
         }
     }
 
@@ -181,7 +181,7 @@ class SessionCacheRepository(
 
     override suspend fun listMessages(server: String, sessionId: String): List<MessageState> {
         return withContext(dispatchers.io) {
-            db.appDatabaseQueries
+            db.messageCacheQueries
                 .listMessageCache(server, sessionId) { _, _, messageId, role, text, sortKey, createdAt, completedAt, _ ->
                     MessageState(
                         id = messageId,
@@ -197,7 +197,7 @@ class SessionCacheRepository(
     }
 
     override fun observeMessages(server: String, sessionId: String): Flow<List<MessageState>> {
-        return db.appDatabaseQueries
+        return db.messageCacheQueries
             .listMessageCache(server, sessionId) { _, _, messageId, role, text, sortKey, createdAt, completedAt, _ ->
                 MessageState(
                     id = messageId,
@@ -214,7 +214,7 @@ class SessionCacheRepository(
 
     override suspend fun upsertMessage(server: String, sessionId: String, message: MessageState, updatedAt: Long) {
         withContext(dispatchers.io) {
-            db.appDatabaseQueries.upsertMessageCache(
+            db.messageCacheQueries.upsertMessageCache(
                 server,
                 sessionId,
                 message.id,
@@ -230,13 +230,13 @@ class SessionCacheRepository(
 
     override suspend fun deleteMessage(server: String, sessionId: String, messageId: String) {
         withContext(dispatchers.io) {
-            db.appDatabaseQueries.deleteMessageCache(server, sessionId, messageId)
+            db.messageCacheQueries.deleteMessageCache(server, sessionId, messageId)
         }
     }
 
     override suspend fun deleteSessionMessages(server: String, sessionId: String) {
         withContext(dispatchers.io) {
-            db.appDatabaseQueries.deleteMessageCacheSession(server, sessionId)
+            db.messageCacheQueries.deleteMessageCacheSession(server, sessionId)
         }
     }
 }
@@ -263,7 +263,7 @@ private fun mapSessionCache(
 private const val ProjectFavoriteSeparator = "\n"
 
 private fun settingSet(db: AppDatabase, key: String): Set<String> {
-    return db.appDatabaseQueries
+    return db.settingsQueries
         .selectSetting(key)
         .executeAsOneOrNull()
         ?.split(ProjectFavoriteSeparator)
@@ -280,10 +280,10 @@ private fun setSettingSet(db: AppDatabase, key: String, value: Set<String>) {
         .distinct()
         .sorted()
     if (next.isEmpty()) {
-        db.appDatabaseQueries.deleteSetting(key)
+        db.settingsQueries.deleteSetting(key)
         return
     }
-    db.appDatabaseQueries.upsertSetting(key, next.joinToString(ProjectFavoriteSeparator))
+    db.settingsQueries.upsertSetting(key, next.joinToString(ProjectFavoriteSeparator))
 }
 
 private fun projectFavoriteKey(server: String): String {

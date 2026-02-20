@@ -62,7 +62,7 @@ class ServerRepository(
         val value = normalizeUrl(next) ?: return
         url.value = value
         withContext(dispatchers.io) {
-            db.appDatabaseQueries.upsertSetting(UrlKey, value)
+            db.settingsQueries.upsertSetting(UrlKey, value)
         }
     }
 
@@ -231,7 +231,7 @@ class ServerRepository(
 
     override suspend fun streamCursor(): String? {
         return withContext(dispatchers.io) {
-            db.appDatabaseQueries.selectSetting(eventCursorKey(url.value)).executeAsOneOrNull()
+            db.settingsQueries.selectSetting(eventCursorKey(url.value)).executeAsOneOrNull()
         }
     }
 
@@ -239,23 +239,23 @@ class ServerRepository(
         val key = eventCursorKey(url.value)
         withContext(dispatchers.io) {
             if (value.isNullOrBlank()) {
-                db.appDatabaseQueries.deleteSetting(key)
+                db.settingsQueries.deleteSetting(key)
                 return@withContext
             }
-            db.appDatabaseQueries.upsertSetting(key, value)
+            db.settingsQueries.upsertSetting(key, value)
         }
     }
 
     private suspend fun load() {
         val value = withContext(dispatchers.io) {
-            db.appDatabaseQueries.selectSetting(UrlKey).executeAsOneOrNull()
+            db.settingsQueries.selectSetting(UrlKey).executeAsOneOrNull()
         }
         if (value == null) return
         val normalized = normalizeUrl(value) ?: return
         url.value = normalized
         if (normalized == value) return
         withContext(dispatchers.io) {
-            db.appDatabaseQueries.upsertSetting(UrlKey, normalized)
+            db.settingsQueries.upsertSetting(UrlKey, normalized)
         }
     }
 }

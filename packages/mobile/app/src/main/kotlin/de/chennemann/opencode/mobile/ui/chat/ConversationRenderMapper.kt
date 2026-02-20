@@ -1,4 +1,4 @@
-package de.chennemann.opencode.mobile.ui.conversation
+package de.chennemann.opencode.mobile.ui.chat
 
 import de.chennemann.opencode.mobile.domain.session.MessageState
 import de.chennemann.opencode.mobile.domain.session.ToolCallState

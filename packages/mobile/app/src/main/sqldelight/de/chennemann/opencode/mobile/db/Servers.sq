@@ -1,0 +1,7 @@
+CREATE TABLE servers (
+  id TEXT NOT NULL PRIMARY KEY,
+  url TEXT NOT NULL UNIQUE,
+  last_connected_at INTEGER
+);
+
+CREATE INDEX servers_last_connected_at_idx ON servers(last_connected_at DESC);

@@ -1,0 +1,15 @@
+CREATE TABLE settings (
+  key TEXT NOT NULL PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+selectSetting:
+SELECT value FROM settings WHERE key = ?;
+
+upsertSetting:
+INSERT INTO settings(key, value)
+VALUES (?, ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+
+deleteSetting:
+DELETE FROM settings WHERE key = ?;

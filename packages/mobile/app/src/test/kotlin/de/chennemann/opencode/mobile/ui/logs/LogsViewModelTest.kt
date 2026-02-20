@@ -2,11 +2,10 @@ package de.chennemann.opencode.mobile.ui.logs
 
 import de.chennemann.opencode.mobile.di.DispatcherProvider
 import de.chennemann.opencode.mobile.domain.session.LogEntry
-import de.chennemann.opencode.mobile.domain.session.LogFilter
 import de.chennemann.opencode.mobile.domain.session.LogFacet
+import de.chennemann.opencode.mobile.domain.session.LogFilter
 import de.chennemann.opencode.mobile.domain.session.LogLevel
 import de.chennemann.opencode.mobile.domain.session.LogProjectOption
-import de.chennemann.opencode.mobile.domain.session.LogRecord
 import de.chennemann.opencode.mobile.domain.session.LogSessionOption
 import de.chennemann.opencode.mobile.domain.session.LogStoreGateway
 import de.chennemann.opencode.mobile.domain.session.LogUnit
@@ -14,12 +13,10 @@ import de.chennemann.opencode.mobile.navigation.NavEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestDispatcher
@@ -29,7 +26,9 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -40,65 +39,101 @@ class LogsViewModelTest {
     }
 
     @Test
-    fun appliesUnitAndLevelFilters() = runTest(TestCoroutineScheduler()) {
+    fun backRequestedEmitsNavigateBackAction() = runTest(TestCoroutineScheduler()) {
         val main = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(main)
-        val lane = StandardTestDispatcher(testScheduler)
-        val store = StubStore(
-            listOf(
-                row(1, LogLevel.info, LogUnit.sync, "sync_ok", "Sync done"),
-                row(2, LogLevel.error, LogUnit.network, "health_failed", "Network failed"),
-            )
-        )
-        val model = LogsViewModel(store, lanes(main, lane))
-        val collect = backgroundScope.launch(lane) { model.state.collect {} }
+        val worker = StandardTestDispatcher(testScheduler)
+        val store = StubLogStore()
+        val viewModel = LogsViewModel(store, lanes(main, worker))
 
-        model.onEvent(LogsEvent.UnitChanged(LogUnit.sync))
+        val nav = async { viewModel.nav.first() }
         advanceUntilIdle()
-        assertEquals(listOf("sync_ok"), model.state.value.rows.map { it.event })
+        viewModel.onEvent(LogsEvent.BackRequested)
+        advanceUntilIdle()
 
-        model.onEvent(LogsEvent.UnitChanged(null))
-        model.onEvent(LogsEvent.LevelChanged(LogLevel.error))
+        assertEquals(NavEvent.NavigateBack, nav.await())
+    }
+
+    @Test
+    fun appliesFilterFromEntryAndRemovesSelectedFilter() = runTest(TestCoroutineScheduler()) {
+        val main = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(main)
+        val worker = StandardTestDispatcher(testScheduler)
+        val store = StubLogStore()
+        val viewModel = LogsViewModel(store, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
+
         advanceUntilIdle()
-        assertEquals(listOf("health_failed"), model.state.value.rows.map { it.event })
+        viewModel.onEvent(LogsEvent.FilterAppliedFromEntry(LogsFilterKey.unit, LogUnit.ui.key))
+        viewModel.onEvent(LogsEvent.FilterAppliedFromEntry(LogsFilterKey.level, LogLevel.error.key))
+        viewModel.onEvent(LogsEvent.FilterAppliedFromEntry(LogsFilterKey.event, "session.failed"))
+        viewModel.onEvent(LogsEvent.FilterAppliedFromEntry(LogsFilterKey.project, "project-1"))
+        viewModel.onEvent(LogsEvent.FilterAppliedFromEntry(LogsFilterKey.session, "session-1"))
+        advanceUntilIdle()
+
+        var value = viewModel.state.value
+        assertEquals(LogUnit.ui, value.selectedUnit)
+        assertEquals(LogLevel.error, value.selectedLevel)
+        assertEquals("session.failed", value.selectedEvent)
+        assertEquals("project-1", value.selectedProjectId)
+        assertEquals("session-1", value.selectedSessionId)
+
+        viewModel.onEvent(LogsEvent.FilterRemoved(LogsFilterKey.session))
+        advanceUntilIdle()
+
+        value = viewModel.state.value
+        assertNull(value.selectedSessionId)
         collect.cancel()
     }
 
     @Test
-    fun rowFilterSetsSessionFilter() = runTest(TestCoroutineScheduler()) {
+    fun resetsFiltersWhilePreservingQuery() = runTest(TestCoroutineScheduler()) {
         val main = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(main)
-        val lane = StandardTestDispatcher(testScheduler)
-        val store = StubStore(
-            listOf(
-                row(1, LogLevel.info, LogUnit.sync, "sync_ok", "Sync done"),
-                row(2, LogLevel.info, LogUnit.sync, "sync_ok", "Sync two").copy(sessionId = "s2", sessionTitle = "Session Two"),
-            )
-        )
-        val model = LogsViewModel(store, lanes(main, lane))
-        val collect = backgroundScope.launch(lane) { model.state.collect {} }
+        val worker = StandardTestDispatcher(testScheduler)
+        val store = StubLogStore()
+        val viewModel = LogsViewModel(store, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
 
-        model.onEvent(LogsEvent.AddFilterFromRow(LogsFilterKey.session, "s2"))
+        advanceUntilIdle()
+        viewModel.onEvent(LogsEvent.FromChanged(1234L))
+        viewModel.onEvent(LogsEvent.UntilChanged(5678L))
+        viewModel.onEvent(LogsEvent.UnitChanged(LogUnit.network))
+        viewModel.onEvent(LogsEvent.QueryChanged("socket"))
         advanceUntilIdle()
 
-        assertEquals("s2", model.state.value.selectedSessionId)
-        assertEquals(listOf(2L), model.state.value.rows.map { it.id })
+        viewModel.onEvent(LogsEvent.FiltersResetRequested)
+        advanceUntilIdle()
+
+        val value = viewModel.state.value
+        assertEquals("socket", value.query)
+        assertNotNull(value.selectedFrom)
+        assertNotEquals(1234L, value.selectedFrom)
+        assertNull(value.selectedUntil)
+        assertNull(value.selectedUnit)
         collect.cancel()
     }
 
     @Test
-    fun backEventEmitsNavigationBack() = runTest(TestCoroutineScheduler()) {
+    fun queryAndDateChangesPropagateToStoreFilter() = runTest(TestCoroutineScheduler()) {
         val main = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(main)
-        val lane = StandardTestDispatcher(testScheduler)
-        val model = LogsViewModel(StubStore(emptyList()), lanes(main, lane))
+        val worker = StandardTestDispatcher(testScheduler)
+        val store = StubLogStore()
+        val viewModel = LogsViewModel(store, lanes(main, worker))
+        val collect = backgroundScope.launch(worker) { viewModel.state.collect {} }
 
-        val nav = async { model.nav.first() }
         advanceUntilIdle()
-        model.onEvent(LogsEvent.BackTapped)
+        viewModel.onEvent(LogsEvent.QueryChanged("timeout"))
+        viewModel.onEvent(LogsEvent.FromChanged(111L))
+        viewModel.onEvent(LogsEvent.UntilChanged(999L))
         advanceUntilIdle()
 
-        assertTrue(nav.await() is NavEvent.Back)
+        val filter = store.filters.last()
+        assertEquals("timeout", filter.query)
+        assertEquals(111L, filter.from)
+        assertEquals(999L, filter.until)
+        collect.cancel()
     }
 
     private fun lanes(main: TestDispatcher, worker: TestDispatcher): DispatcherProvider {
@@ -110,67 +145,49 @@ class LogsViewModelTest {
     }
 }
 
-private class StubStore(seed: List<LogEntry>) : LogStoreGateway {
-    private val rows = MutableStateFlow(seed)
-    private val facet = MutableStateFlow(
-        LogFacet(
-            projects = listOf(LogProjectOption("p1", "Project One")),
-            sessions = listOf(LogSessionOption("s1", "Session One")),
-            events = listOf("sync_ok", "health_failed", "render"),
+private class StubLogStore : LogStoreGateway {
+    private val rows = MutableStateFlow(
+        listOf(
+            LogEntry(
+                id = 1L,
+                createdAt = 10L,
+                level = LogLevel.info,
+                unit = LogUnit.ui,
+                tag = "tag",
+                event = "event",
+                projectId = "project-1",
+                projectName = "Project",
+                sessionId = "session-1",
+                sessionTitle = "Session",
+                message = "hello",
+                context = emptyMap(),
+                throwable = null,
+            )
         )
     )
 
-    override suspend fun append(record: LogRecord) {
-    }
+    private val facet = MutableStateFlow(
+        LogFacet(
+            projects = listOf(LogProjectOption(id = "project-1", name = "Project")),
+            sessions = listOf(LogSessionOption(id = "session-1", title = "Session")),
+            events = listOf("event"),
+        )
+    )
+
+    val filters = mutableListOf<LogFilter>()
+
+    override suspend fun append(record: de.chennemann.opencode.mobile.domain.session.LogRecord) = Unit
 
     override fun observe(filter: LogFilter): Flow<List<LogEntry>> {
-        return rows.map { list ->
-            list
-                .filter { filter.unit == null || it.unit == filter.unit }
-                .filter { filter.level == null || it.level == filter.level }
-                .filter { filter.event == null || it.event == filter.event }
-                .filter { filter.projectId == null || it.projectId == filter.projectId }
-                .filter { filter.sessionId == null || it.sessionId == filter.sessionId }
-                .filter { filter.from == null || it.createdAt >= filter.from }
-                .filter { filter.until == null || it.createdAt <= filter.until }
-                .filter {
-                    val q = filter.query.trim()
-                    q.isBlank() ||
-                        it.message.contains(q, ignoreCase = true) ||
-                        it.event.contains(q, ignoreCase = true) ||
-                        (it.projectName?.contains(q, ignoreCase = true) == true) ||
-                        (it.sessionTitle?.contains(q, ignoreCase = true) == true)
-                }
-                .take(filter.limit.toInt())
-        }
+        filters += filter
+        return rows
     }
 
     override fun observeFacet(): Flow<LogFacet> {
         return facet
     }
 
-    override suspend fun prune(now: Long) {
-    }
+    override suspend fun prune(now: Long) = Unit
 
-    override suspend fun clear() {
-        rows.value = emptyList()
-    }
-}
-
-private fun row(id: Long, level: LogLevel, unit: LogUnit, event: String, message: String): LogEntry {
-    return LogEntry(
-        id = id,
-        createdAt = System.currentTimeMillis() + id,
-        level = level,
-        unit = unit,
-        tag = "Test",
-        event = event,
-        projectId = "p1",
-        projectName = "Project One",
-        sessionId = "s1",
-        sessionTitle = "Session One",
-        message = message,
-        context = emptyMap(),
-        throwable = null,
-    )
+    override suspend fun clear() = Unit
 }

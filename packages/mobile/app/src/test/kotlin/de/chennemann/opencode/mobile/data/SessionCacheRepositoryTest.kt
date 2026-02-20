@@ -107,19 +107,19 @@ class SessionCacheRepositoryTest {
         )
         val server = "http://localhost:4096"
 
-        database.appDatabaseQueries.upsertSetting(
+        database.settingsQueries.upsertSetting(
             "project_favorite:$server",
             " /repo/main \n/repo/main\n\n /repo/aux ",
         )
-        database.appDatabaseQueries.upsertSetting(
+        database.settingsQueries.upsertSetting(
             "project_hidden:$server",
             " /repo/hide\n/repo/hide \n\n/repo/other",
         )
-        database.appDatabaseQueries.upsertSetting(
+        database.settingsQueries.upsertSetting(
             "session_quick_include:$server",
             " s2 \n\n s1 \ns1",
         )
-        database.appDatabaseQueries.upsertSetting(
+        database.settingsQueries.upsertSetting(
             "session_quick_exclude:$server",
             " s4\n\n s3\ns3 ",
         )
@@ -140,8 +140,8 @@ class SessionCacheRepositoryTest {
         assertTrue(write.isCompleted)
         write.await()
 
-        assertEquals("s1\ns2", database.appDatabaseQueries.selectSetting("session_quick_include:$server").executeAsOneOrNull())
-        assertEquals("s3", database.appDatabaseQueries.selectSetting("session_quick_exclude:$server").executeAsOneOrNull())
+        assertEquals("s1\ns2", database.settingsQueries.selectSetting("session_quick_include:$server").executeAsOneOrNull())
+        assertEquals("s3", database.settingsQueries.selectSetting("session_quick_exclude:$server").executeAsOneOrNull())
     }
 
     @Test
@@ -156,7 +156,7 @@ class SessionCacheRepositoryTest {
         )
         val server = "http://localhost:4096"
 
-        database.appDatabaseQueries.upsertSessionCache(
+        database.sessionCacheQueries.upsertSessionCache(
             server,
             "s-old",
             "/repo/old",
@@ -166,7 +166,7 @@ class SessionCacheRepositoryTest {
             10,
             100,
         )
-        database.appDatabaseQueries.upsertSessionCache(
+        database.sessionCacheQueries.upsertSessionCache(
             server,
             "s-recent",
             "/repo/main",

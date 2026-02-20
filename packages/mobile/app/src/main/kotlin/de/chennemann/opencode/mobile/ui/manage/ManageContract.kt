@@ -22,7 +22,6 @@ data class ManageUiState(
     val projectPath: String,
     val projectQuery: String,
     val loadingProjects: Boolean,
-    val projectsExpanded: Boolean,
     val favoriteProjects: List<ProjectState>,
     val otherProjects: List<ProjectState>,
     val selectedProject: String?,
@@ -44,9 +43,7 @@ sealed interface ManageEvent {
 
     data class ProjectQueryChanged(val value: String) : ManageEvent
 
-    data object ProjectListToggleTapped : ManageEvent
-
-    data object OpenProjectTapped : ManageEvent
+    data object LoadProjectRequested : ManageEvent
 
     data class ProjectSelected(val worktree: String) : ManageEvent
 
@@ -56,11 +53,9 @@ sealed interface ManageEvent {
 
     data class WorkspaceSelected(val directory: String) : ManageEvent
 
-    data object CreateSessionTapped : ManageEvent
+    data class SessionRequested(val sessionId: String?) : ManageEvent
 
-    data class OpenSessionTapped(val session: SessionState) : ManageEvent
+    data object LogsRequested : ManageEvent
 
-    data object OpenLogsTapped : ManageEvent
-
-    data object BackTapped : ManageEvent
+    data object BackRequested : ManageEvent
 }

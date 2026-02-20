@@ -4,10 +4,16 @@ import androidx.navigation3.runtime.NavKey
 import kotlinx.serialization.Serializable
 
 @Serializable
-data object ConversationRoute : NavKey
+sealed interface AppRoute : NavKey
 
 @Serializable
-data object ManageProjectsRoute : NavKey
+data object AgentChatRoute : AppRoute
 
 @Serializable
-data object LogsRoute : NavKey
+data object WorkspaceHubRoute : AppRoute
+
+@Serializable
+data object LogsRoute : AppRoute
+
+@Serializable
+data class SessionSelectionBottomSheetRoute(val projectKey: String) : AppRoute

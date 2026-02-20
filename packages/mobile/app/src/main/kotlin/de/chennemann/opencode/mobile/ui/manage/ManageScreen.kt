@@ -114,13 +114,13 @@ fun ManageScreen(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 OutlinedButton(
-                    onClick = { onEvent(ManageEvent.OpenLogsTapped) },
+                    onClick = { onEvent(ManageEvent.LogsRequested) },
                     modifier = Modifier.weight(1f),
                 ) {
                     Text("Logs")
                 }
                 OutlinedButton(
-                    onClick = { onEvent(ManageEvent.BackTapped) },
+                    onClick = { onEvent(ManageEvent.BackRequested) },
                     modifier = Modifier.weight(1f),
                 ) {
                     Text("Back")
@@ -134,6 +134,7 @@ fun ManageScreen(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
 private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit) {
     var filterOpen by remember { mutableStateOf(state.projectQuery.isNotBlank()) }
     var pathOpen by remember { mutableStateOf(false) }
+    var projectsExpanded by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf(TextFieldValue(state.projectQuery)) }
     var path by remember { mutableStateOf(TextFieldValue(state.projectPath)) }
 
@@ -228,7 +229,7 @@ private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit
                             if (state.projectPath != path.text) {
                                 onEvent(ManageEvent.ProjectPathChanged(path.text))
                             }
-                            onEvent(ManageEvent.OpenProjectTapped)
+                            onEvent(ManageEvent.LoadProjectRequested)
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -290,14 +291,14 @@ private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onEvent(ManageEvent.ProjectListToggleTapped) }
+                    .clickable { projectsExpanded = !projectsExpanded }
                     .heightIn(min = 48.dp)
                     .padding(horizontal = 4.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = if (state.projectsExpanded) {
+                    text = if (projectsExpanded) {
                         "Hide $count $suffix"
                     } else {
                         "$count $suffix hidden"
@@ -306,8 +307,8 @@ private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Icon(
-                    imageVector = if (state.projectsExpanded) Icons.ChevronUp else Icons.ChevronDown,
-                    contentDescription = if (state.projectsExpanded) {
+                    imageVector = if (projectsExpanded) Icons.ChevronUp else Icons.ChevronDown,
+                    contentDescription = if (projectsExpanded) {
                         "Collapse other projects"
                     } else {
                         "Expand other projects"
@@ -315,7 +316,7 @@ private fun ProjectListCard(state: ManageUiState, onEvent: (ManageEvent) -> Unit
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (!state.projectsExpanded) {
+            if (!projectsExpanded) {
                 if (removable != null) {
                     OutlinedButton(
                         onClick = { onEvent(ManageEvent.ProjectRemoved(removable)) },
@@ -480,7 +481,7 @@ private fun SessionCard(
                     Text(section.workspace.title, style = MaterialTheme.typography.labelLarge)
                     section.sessions.forEach { session ->
                         OutlinedButton(
-                            onClick = { onEvent(ManageEvent.OpenSessionTapped(session)) },
+                            onClick = { onEvent(ManageEvent.SessionRequested(session.id)) },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Column(modifier = Modifier.fillMaxWidth()) {
@@ -505,7 +506,7 @@ private fun SessionCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Button(
-                    onClick = { onEvent(ManageEvent.CreateSessionTapped) },
+                    onClick = { onEvent(ManageEvent.SessionRequested(null)) },
                     enabled = !state.loadingSessions,
                     modifier = Modifier.weight(1f),
                 ) {

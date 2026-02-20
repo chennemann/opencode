@@ -37,13 +37,13 @@ sealed interface LogsEvent {
 
     data class QueryChanged(val value: String) : LogsEvent
 
-    data class AddFilterFromRow(val key: LogsFilterKey, val value: String) : LogsEvent
+    data class FilterAppliedFromEntry(val key: LogsFilterKey, val value: String) : LogsEvent
 
-    data class RemoveFilter(val key: LogsFilterKey) : LogsEvent
+    data class FilterRemoved(val key: LogsFilterKey) : LogsEvent
 
-    data object ClearFilter : LogsEvent
+    data object FiltersResetRequested : LogsEvent
 
-    data object BackTapped : LogsEvent
+    data object BackRequested : LogsEvent
 }
 
 enum class LogsFilterKey {
