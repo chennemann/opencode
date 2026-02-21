@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test
 
 class SynchronizationServiceTest {
     @Test
-    fun syncServerLoadsProjectsByUrlAndPersistsValidRows() = runTest {
+    fun syncServerLoadsProjectsAndSessionsAndPersistsValidRows() = runTest {
         val serverRepository = FakeServerRepository()
         val projectRepository = FakeProjectRepository()
         val sessionRepository = FakeSessionRepository()
@@ -56,10 +56,51 @@ class SynchronizationServiceTest {
                 sandboxes = emptyList(),
             ),
         )
+        adapter.sessionsByPath = mapOf(
+            "/repo/a" to listOf(
+                OpenCodeSession(
+                    id = "s1",
+                    projectId = "p1",
+                    directory = "/repo/a",
+                    title = "Session A",
+                    version = "1",
+                ),
+                OpenCodeSession(
+                    id = "   ",
+                    projectId = "p1",
+                    directory = "/repo/a",
+                    title = "Invalid",
+                    version = "1",
+                ),
+            ),
+            "/repo/b" to listOf(
+                OpenCodeSession(
+                    id = "s2",
+                    projectId = "p2",
+                    directory = "/repo/b",
+                    title = "   ",
+                    version = "1",
+                ),
+                OpenCodeSession(
+                    id = "s3",
+                    projectId = "p2",
+                    directory = "   ",
+                    title = "Invalid",
+                    version = "1",
+                ),
+            ),
+        )
 
         service.syncServer("  server-1  ")
 
         assertEquals("https://example.test", adapter.lastProjectsBaseUrl)
+        assertEquals(
+            listOf(
+                "https://example.test|/repo/a",
+                "https://example.test|/repo/b",
+            ),
+            adapter.sessionRequests,
+        )
         assertEquals(2, projectRepository.projects.size)
         assertEquals(2, projectRepository.insertCalls)
         assertEquals(0, projectRepository.updateCalls)
@@ -83,10 +124,33 @@ class SynchronizationServiceTest {
             ),
             projectRepository.projects["p2"],
         )
+        assertEquals(2, sessionRepository.sessions.size)
+        assertEquals(2, sessionRepository.insertCalls)
+        assertEquals(0, sessionRepository.updateCalls)
+        assertEquals(
+            LocalSessionRecord(
+                id = "s1",
+                projectId = "p1",
+                title = "Session A",
+                path = "/repo/a",
+                pinned = false,
+            ),
+            sessionRepository.sessions["s1"],
+        )
+        assertEquals(
+            LocalSessionRecord(
+                id = "s2",
+                projectId = "p2",
+                title = "/repo/b",
+                path = "/repo/b",
+                pinned = false,
+            ),
+            sessionRepository.sessions["s2"],
+        )
     }
 
     @Test
-    fun syncServerUpdatesExistingProjectAndKeepsPinnedState() = runTest {
+    fun syncServerUpdatesExistingSessionAndKeepsPinnedState() = runTest {
         val serverRepository = FakeServerRepository()
         val projectRepository = FakeProjectRepository()
         val sessionRepository = FakeSessionRepository()
@@ -101,28 +165,48 @@ class SynchronizationServiceTest {
             path = "/repo/old",
             pinned = true,
         )
+        sessionRepository.sessions["s1"] = LocalSessionRecord(
+            id = "s1",
+            projectId = "p1",
+            title = "Old Session",
+            path = "/repo/old",
+            pinned = true,
+        )
         adapter.projects = listOf(
             OpenCodeProject(
                 id = "p1",
                 worktree = "/repo/new",
                 name = "New Name",
                 sandboxes = emptyList(),
-            )
+            ),
+        )
+        adapter.sessionsByPath = mapOf(
+            "/repo/new" to listOf(
+                OpenCodeSession(
+                    id = "s1",
+                    projectId = "p1",
+                    directory = "/repo/new",
+                    title = "New Session",
+                    version = "2",
+                ),
+            ),
         )
 
         service.syncServer("server-1")
 
         assertEquals(0, projectRepository.insertCalls)
         assertEquals(1, projectRepository.updateCalls)
+        assertEquals(0, sessionRepository.insertCalls)
+        assertEquals(1, sessionRepository.updateCalls)
         assertEquals(
-            LocalProjectInfo(
-                id = "p1",
-                serverId = "server-1",
-                name = "New Name",
+            LocalSessionRecord(
+                id = "s1",
+                projectId = "p1",
+                title = "New Session",
                 path = "/repo/new",
                 pinned = true,
             ),
-            projectRepository.projects["p1"],
+            sessionRepository.sessions["s1"],
         )
     }
 
@@ -137,7 +221,9 @@ class SynchronizationServiceTest {
         service.syncServer("missing")
 
         assertNull(adapter.lastProjectsBaseUrl)
+        assertTrue(adapter.sessionRequests.isEmpty())
         assertTrue(projectRepository.projects.isEmpty())
+        assertTrue(sessionRepository.sessions.isEmpty())
     }
 }
 
@@ -204,28 +290,48 @@ private class FakeProjectRepository : ProjectRepository {
 }
 
 private class FakeSessionRepository : SessionRepository {
+    val sessions = linkedMapOf<String, LocalSessionRecord>()
+    var insertCalls: Int = 0
+    var updateCalls: Int = 0
+
     override fun sessionsOfProject(projectKey: String): Flow<List<LocalSessionInfo>> {
         return flowOf(emptyList())
     }
 
     override fun observeStoredSessions(projectId: String?): Flow<List<LocalSessionRecord>> {
-        return flowOf(emptyList())
+        val id = projectId?.trim()?.ifBlank { null }
+        val values = if (id == null) {
+            sessions.values.toList()
+        } else {
+            sessions.values.filter { it.projectId == id }
+        }
+        return flowOf(values)
     }
 
     override suspend fun selectStoredSession(id: String): LocalSessionRecord? {
-        return null
+        return sessions[id]
     }
 
-    override suspend fun insertStoredSession(session: LocalSessionRecord) = Unit
+    override suspend fun insertStoredSession(session: LocalSessionRecord) {
+        insertCalls += 1
+        sessions[session.id] = session
+    }
 
-    override suspend fun updateStoredSession(session: LocalSessionRecord) = Unit
+    override suspend fun updateStoredSession(session: LocalSessionRecord) {
+        updateCalls += 1
+        sessions[session.id] = session
+    }
 
-    override suspend fun deleteStoredSession(id: String) = Unit
+    override suspend fun deleteStoredSession(id: String) {
+        sessions.remove(id)
+    }
 }
 
 private class FakeOpenCodeServerAdapter : OpenCodeServerAdapter {
     var lastProjectsBaseUrl: String? = null
     var projects: List<OpenCodeProject> = emptyList()
+    var sessionsByPath: Map<String, List<OpenCodeSession>> = emptyMap()
+    val sessionRequests = mutableListOf<String>()
 
     override suspend fun healthCheckWithUrl(baseUrl: String): OpenCodeHealthCheck {
         return OpenCodeHealthCheck(healthy = true, version = "1.0.0")
@@ -237,6 +343,7 @@ private class FakeOpenCodeServerAdapter : OpenCodeServerAdapter {
     }
 
     override suspend fun allSessionsOfAGivenProject(baseUrl: String, path: String): List<OpenCodeSession> {
-        return emptyList()
+        sessionRequests += "$baseUrl|$path"
+        return sessionsByPath[path].orEmpty()
     }
 }
