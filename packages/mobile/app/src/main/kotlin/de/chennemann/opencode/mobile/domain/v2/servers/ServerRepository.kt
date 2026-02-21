@@ -7,6 +7,8 @@ interface ServerRepository {
 
     suspend fun selectServer(id: String): LocalServerInfo?
 
+    suspend fun selectServerByUrl(url: String): LocalServerInfo?
+
     suspend fun insertServer(server: LocalServerInfo)
 
     suspend fun updateServer(server: LocalServerInfo)

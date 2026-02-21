@@ -33,6 +33,7 @@ import de.chennemann.opencode.mobile.domain.session.SessionServiceApi
 import de.chennemann.opencode.mobile.domain.session.SessionSyncPlanner
 import de.chennemann.opencode.mobile.domain.session.SessionStreamCoordinator
 import de.chennemann.opencode.mobile.domain.session.StreamGateway
+import de.chennemann.opencode.mobile.domain.v2.DefaultSynchronizationService
 import de.chennemann.opencode.mobile.domain.v2.projects.ProjectRepository
 import de.chennemann.opencode.mobile.domain.v2.session.SessionRepository
 import de.chennemann.opencode.mobile.domain.v2.session.DefaultSessionService
@@ -40,6 +41,7 @@ import de.chennemann.opencode.mobile.domain.v2.servers.DefaultServerService
 import de.chennemann.opencode.mobile.domain.v2.session.SessionService as SessionServiceV2
 import de.chennemann.opencode.mobile.domain.v2.servers.ServerRepository as ServerRepositoryV2
 import de.chennemann.opencode.mobile.domain.v2.servers.ServerService as ServerServiceV2
+import de.chennemann.opencode.mobile.domain.v2.SynchronizationService as SynchronizationServiceV2
 import de.chennemann.opencode.mobile.ui.chat.ConversationViewModel
 import de.chennemann.opencode.mobile.ui.chat.SessionSelectionViewModel
 import de.chennemann.opencode.mobile.ui.manage.ManageViewModel
@@ -98,7 +100,8 @@ val appModule = module {
     single<SessionRepository> { SqlDelightSessionRepository(get(), get()) }
     single<ProjectRepository> { SqlDelightProjectRepository(get(), get()) }
     single<ServerRepositoryV2> { SqlDelightServerRepository(get(), get()) }
-    single<ServerServiceV2> { DefaultServerService(get()) }
+    single<SynchronizationServiceV2> { DefaultSynchronizationService(get(), get(), get()) }
+    single<ServerServiceV2> { DefaultServerService(get(), get(), get()) }
     single<SessionServiceV2> { DefaultSessionService(get()) }
     single<ConnectionGateway> { get<ServerRepository>() }
     single<ProjectGateway> { get<ServerRepository>() }

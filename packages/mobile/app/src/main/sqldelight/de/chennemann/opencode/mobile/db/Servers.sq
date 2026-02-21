@@ -8,6 +8,11 @@ SELECT id, url, last_connected_at
 FROM servers
 WHERE id = ?;
 
+selectServerByUrl:
+SELECT id, url, last_connected_at
+FROM servers
+WHERE url = ?;
+
 insertServer:
 INSERT INTO servers(
   id,
