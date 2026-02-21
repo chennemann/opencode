@@ -30,6 +30,16 @@ class SqlDelightServerRepository(
         }
     }
 
+    override suspend fun selectServerByUrl(url: String): LocalServerInfo? {
+        val serverUrl = url.trim()
+        require(serverUrl.isNotBlank()) { "url must not be blank" }
+        return withContext(dispatchers.io) {
+            db.serversQueries
+                .selectServerByUrl(serverUrl, mapper = ::mapServer)
+                .executeAsOneOrNull()
+        }
+    }
+
     override suspend fun insertServer(server: LocalServerInfo) {
         withContext(dispatchers.io) {
             db.serversQueries.insertServer(
