@@ -100,7 +100,7 @@ val appModule = module {
     single<SessionRepository> { SqlDelightSessionRepository(get(), get()) }
     single<ProjectRepository> { SqlDelightProjectRepository(get(), get()) }
     single<ServerRepositoryV2> { SqlDelightServerRepository(get(), get()) }
-    single<SynchronizationServiceV2> { DefaultSynchronizationService(get(), get(), get()) }
+    single<SynchronizationServiceV2> { DefaultSynchronizationService(get(), get(), get(), get()) }
     single<ServerServiceV2> { DefaultServerService(get(), get(), get()) }
     single<SessionServiceV2> { DefaultSessionService(get()) }
     single<ConnectionGateway> { get<ServerRepository>() }
