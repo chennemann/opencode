@@ -10,10 +10,12 @@ import de.chennemann.opencode.mobile.data.ServerRepository
 import de.chennemann.opencode.mobile.data.ServerService
 import de.chennemann.opencode.mobile.data.ServerGateway
 import de.chennemann.opencode.mobile.data.SessionCacheRepository
+import de.chennemann.opencode.mobile.data.v2.SqlDelightMessageRepository
 import de.chennemann.opencode.mobile.data.v2.SqlDelightProjectRepository
 import de.chennemann.opencode.mobile.data.v2.SqlDelightServerRepository
 import de.chennemann.opencode.mobile.data.v2.SqlDelightSessionRepository
 import de.chennemann.opencode.mobile.domain.v2.OpenCodeServerAdapter
+import de.chennemann.opencode.mobile.domain.v2.message.DefaultMessageService
 import de.chennemann.opencode.mobile.domain.message.MessageDecorator
 import de.chennemann.opencode.mobile.domain.message.MessagePartParser
 import de.chennemann.opencode.mobile.domain.session.CommandGateway
@@ -38,6 +40,8 @@ import de.chennemann.opencode.mobile.domain.v2.projects.ProjectRepository
 import de.chennemann.opencode.mobile.domain.v2.session.SessionRepository
 import de.chennemann.opencode.mobile.domain.v2.session.DefaultSessionService
 import de.chennemann.opencode.mobile.domain.v2.servers.DefaultServerService
+import de.chennemann.opencode.mobile.domain.v2.message.MessageRepository as MessageRepositoryV2
+import de.chennemann.opencode.mobile.domain.v2.message.MessageService as MessageServiceV2
 import de.chennemann.opencode.mobile.domain.v2.session.SessionService as SessionServiceV2
 import de.chennemann.opencode.mobile.domain.v2.servers.ServerRepository as ServerRepositoryV2
 import de.chennemann.opencode.mobile.domain.v2.servers.ServerService as ServerServiceV2
@@ -100,9 +104,11 @@ val appModule = module {
     single<SessionRepository> { SqlDelightSessionRepository(get(), get()) }
     single<ProjectRepository> { SqlDelightProjectRepository(get(), get()) }
     single<ServerRepositoryV2> { SqlDelightServerRepository(get(), get()) }
+    single<MessageRepositoryV2> { SqlDelightMessageRepository(get(), get()) }
     single<SynchronizationServiceV2> { DefaultSynchronizationService(get(), get(), get(), get()) }
     single<ServerServiceV2> { DefaultServerService(get(), get(), get()) }
     single<SessionServiceV2> { DefaultSessionService(get()) }
+    single<MessageServiceV2> { DefaultMessageService(get()) }
     single<ConnectionGateway> { get<ServerRepository>() }
     single<ProjectGateway> { get<ServerRepository>() }
     single<CommandGateway> { get<ServerRepository>() }
